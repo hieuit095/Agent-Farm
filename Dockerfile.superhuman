@@ -1,0 +1,66 @@
+# ╔══════════════════════════════════════════════════════════════╗
+# ║  ContribAI — Super Human Mode (Edge-Optimized)             ║
+# ║  Multi-stage build for ARM64/AMD64 edge devices            ║
+# ║  Target: Orange Pi / Raspberry Pi / Low-power SBCs         ║
+# ╚══════════════════════════════════════════════════════════════╝
+
+# ── Stage 1: Builder ──────────────────────────────────────────
+# Install build toolchain + compile all Python wheels.
+# This stage is discarded — only compiled artifacts carry over.
+FROM python:3.11-slim AS builder
+
+WORKDIR /build
+
+# Install build-time dependencies only (gcc for C extensions)
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        gcc \
+        python3-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy only dependency metadata first (layer cache optimization)
+COPY pyproject.toml README.md LICENSE ./
+
+# Build wheel for contribai
+COPY contribai/ contribai/
+RUN pip install --no-cache-dir build && \
+    python -m build --wheel --outdir /build/dist
+
+# Install the wheel + all deps into an isolated prefix
+RUN pip install --no-cache-dir --prefix=/install /build/dist/*.whl
+
+
+# ── Stage 2: Runtime (Minimal) ────────────────────────────────
+# ONLY runtime essentials. Zero dev tools, zero test frameworks.
+FROM python:3.11-slim
+
+LABEL maintainer="ContribAI Team"
+LABEL description="Super Human Mode — 24/7 autonomous edge agent"
+LABEL org.opencontainers.image.source="https://github.com/contribai/contribai"
+
+# git is MANDATORY — PRManager uses gitpython to commit & push
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends git && \
+    rm -rf /var/lib/apt/lists/* && \
+    # Create non-root user for security
+    useradd --create-home --shell /bin/bash contribai
+
+WORKDIR /app
+
+# Copy compiled Python packages from builder (no build tools)
+COPY --from=builder /install /usr/local
+
+# Create persistent data directories
+RUN mkdir -p /app/logs /app/.contribai && \
+    chown -R contribai:contribai /app
+
+# Configure git for the non-root user (required by gitpython)
+RUN git config --system user.name "ContribAI Bot" && \
+    git config --system user.email "bot@contribai.dev"
+
+USER contribai
+
+# No port exposed — this is a headless background agent
+# No healthcheck — restart policy handles recovery
+
+ENTRYPOINT ["python", "-m", "contribai.cli.main", "superhuman"]

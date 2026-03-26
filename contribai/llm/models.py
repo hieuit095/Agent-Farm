@@ -1,0 +1,175 @@
+"""Model registry with capabilities, costs, and context windows.
+
+Catalogs available Gemini models and their strengths for
+intelligent task-to-model routing.
+"""
+
+from __future__ import annotations
+
+import logging
+from dataclasses import dataclass, field
+from enum import StrEnum
+
+logger = logging.getLogger(__name__)
+
+
+class TaskType(StrEnum):
+    """Types of tasks that models can be assigned to."""
+
+    ANALYSIS = "analysis"  # Security, code quality analysis
+    CODE_GEN = "code_gen"  # Code generation / fixes
+    REVIEW = "review"  # Self-review, PR review
+    DOCS = "docs"  # Documentation improvements
+    QUICK_FIX = "quick_fix"  # Simple, targeted fixes
+    BULK = "bulk"  # High-volume, low-complexity
+    PLANNING = "planning"  # Architecture, strategy
+    MULTIMODAL = "multimodal"  # Image/UI analysis
+
+
+class ModelTier(StrEnum):
+    """Model performance tiers."""
+
+    PRO = "pro"  # Highest capability, highest cost
+    FLASH = "flash"  # Good capability, balanced cost
+    LITE = "lite"  # Basic capability, lowest cost
+
+
+@dataclass
+class ModelSpec:
+    """Specification of a model's capabilities and costs."""
+
+    name: str  # e.g. "gemini-3.1-pro-preview"
+    display_name: str  # e.g. "Gemini 3.1 Pro"
+    tier: ModelTier = ModelTier.FLASH
+    context_window: int = 1_000_000  # tokens
+    max_output: int = 65_536
+
+    # Cost per 1M tokens (approximate, USD)
+    input_cost: float = 0.0
+    output_cost: float = 0.0
+
+    # Capability scores (0-100)
+    coding: int = 70
+    analysis: int = 70
+    reasoning: int = 70
+    speed: int = 70
+    multimodal: int = 50
+
+    # Best-fit task types
+    best_for: list[TaskType] = field(default_factory=list)
+
+    # Description
+    description: str = ""
+
+    @property
+    def overall_score(self) -> float:
+        return (self.coding + self.analysis + self.reasoning + self.speed) / 4.0
+
+    @property
+    def cost_efficiency(self) -> float:
+        """Higher = more cost-efficient."""
+        total_cost = self.input_cost + self.output_cost
+        if total_cost == 0:
+            return 100.0
+        return self.overall_score / total_cost
+
+
+# ── Minimax Models ────────────────────────────────────
+
+
+MINIMAX_M27 = ModelSpec(
+    name="MiniMax-M2.7",
+    display_name="MiniMax M2.7",
+    tier=ModelTier.FLASH,
+    context_window=245_760,
+    max_output=16_384,
+    input_cost=0.28,
+    output_cost=1.12,
+    coding=80,
+    analysis=78,
+    reasoning=77,
+    speed=82,
+    multimodal=0,
+    best_for=[
+        TaskType.CODE_GEN,
+        TaskType.ANALYSIS,
+        TaskType.REVIEW,
+    ],
+    description="Minimax flagship chat model — strong coding and reasoning.",
+)
+
+MINIMAX_ABAB65S_CHAT = ModelSpec(
+    name="abab6.5s-chat",
+    display_name="Minimax ABAB 6.5s",
+    tier=ModelTier.LITE,
+    context_window=245_760,
+    max_output=8_192,
+    input_cost=0.07,
+    output_cost=0.28,
+    coding=68,
+    analysis=65,
+    reasoning=62,
+    speed=92,
+    multimodal=0,
+    best_for=[
+        TaskType.BULK,
+        TaskType.DOCS,
+        TaskType.QUICK_FIX,
+    ],
+    description="Fast, cost-efficient Minimax model for high-volume tasks.",
+)
+
+
+# ── Registry ──────────────────────────────────────────
+
+
+ALL_MODELS: list[ModelSpec] = [
+    MINIMAX_M27,
+    MINIMAX_ABAB65S_CHAT,
+]
+
+MODELS_BY_NAME: dict[str, ModelSpec] = {m.name: m for m in ALL_MODELS}
+
+MODELS_BY_TIER: dict[ModelTier, list[ModelSpec]] = {}
+for _m in ALL_MODELS:
+    MODELS_BY_TIER.setdefault(_m.tier, []).append(_m)
+
+
+def get_model(name: str) -> ModelSpec | None:
+    """Get model spec by name."""
+    return MODELS_BY_NAME.get(name)
+
+
+def get_models_for_task(
+    task_type: TaskType,
+) -> list[ModelSpec]:
+    """Get models best suited for a task type, sorted by fit."""
+    matching = [m for m in ALL_MODELS if task_type in m.best_for]
+    # Sort by relevant capability score
+    score_key = {
+        TaskType.CODE_GEN: lambda m: m.coding,
+        TaskType.ANALYSIS: lambda m: m.analysis,
+        TaskType.REVIEW: lambda m: m.reasoning,
+        TaskType.PLANNING: lambda m: m.reasoning,
+        TaskType.DOCS: lambda m: m.speed,
+        TaskType.QUICK_FIX: lambda m: m.speed,
+        TaskType.BULK: lambda m: m.cost_efficiency,
+        TaskType.MULTIMODAL: lambda m: m.multimodal,
+    }
+    key_fn = score_key.get(task_type, lambda m: m.overall_score)
+    return sorted(matching, key=key_fn, reverse=True)
+
+
+def get_cheapest_capable(
+    task_type: TaskType,
+    min_score: int = 70,
+) -> ModelSpec | None:
+    """Get the cheapest model that meets minimum capability."""
+    candidates = get_models_for_task(task_type)
+    capable = [m for m in candidates if m.overall_score >= min_score]
+    if not capable:
+        return None
+    return min(
+        capable,
+        key=lambda m: m.input_cost + m.output_cost,
+    )

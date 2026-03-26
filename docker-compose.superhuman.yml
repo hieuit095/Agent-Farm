@@ -1,0 +1,50 @@
+# ╔══════════════════════════════════════════════════════════════╗
+# ║  ContribAI — Super Human Mode (Edge Deployment)            ║
+# ║  Single-service compose for Orange Pi / Raspberry Pi       ║
+# ║                                                            ║
+# ║  Usage:                                                    ║
+# ║    docker compose -f docker-compose.superhuman.yml up -d   ║
+# ║    docker compose -f docker-compose.superhuman.yml logs -f  ║
+# ╚══════════════════════════════════════════════════════════════╝
+
+services:
+  superhuman_agent:
+    build:
+      context: .
+      dockerfile: Dockerfile.superhuman
+    container_name: contribai-superhuman
+    restart: unless-stopped
+
+    # ── Persistent State Volumes ──────────────────────────────
+    # CRITICAL: memory.db MUST survive reboots to preserve
+    # contribution history and prevent GitHub spam violations.
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro # Config (read-only)
+      - ./memory.db:/app/memory.db # SQLite brain (RW)
+      - ./logs:/app/logs # Daily rolling logs
+
+    # ── Environment ───────────────────────────────────────────
+    # Secrets injected at runtime — never baked into the image.
+    environment:
+      - GITHUB_TOKEN=${GITHUB_TOKEN}
+      - MINIMAX_API_KEY=${MINIMAX_API_KEY}
+
+    # ── Resource Constraints ──────────────────────────────────
+    # Hard limits to prevent the agent from starving the device.
+    # 512MB RAM cap + 0.5 CPU is safe for Orange Pi 3B (2GB).
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: "0.50"
+        reservations:
+          memory: 128M
+          cpus: "0.25"
+
+    # ── Logging Driver ────────────────────────────────────────
+    # Prevent Docker log files from filling the SD card.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
