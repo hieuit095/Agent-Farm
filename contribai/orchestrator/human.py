@@ -431,7 +431,7 @@ class SuperHumanLoop:
                 await asyncio.sleep(delay)
 
             else:
-                # ── UNDER TARGET — Hunt infinitely until target met ────
+                # ── UNDER TARGET — Stochastic action selection ─────────
                 logger.info(_thought(
                     "ITERATION",
                     iter=self._iteration,
@@ -440,66 +440,118 @@ class SuperHumanLoop:
                     remaining=remaining,
                 ))
 
+                # ── Smart Fallback: check config-level hard PR limit ──
+                # If the absolute config ceiling (github.max_prs_per_day) is
+                # already reached, skip hunting entirely and patrol instead.
+                # This prevents the bot from idling when middleware would
+                # abort the hunt anyway.
+                max_prs_config = self._pipeline.config.github.max_prs_per_day
+                if self._prs_created_today >= max_prs_config:
+                    logger.info(
+                        "🛑 Đã đạt giới hạn PR cứng trong ngày (%d/%d). "
+                        "Ép buộc chuyển sang chế độ đi dạo PATROL trả lời comment!",
+                        self._prs_created_today,
+                        max_prs_config,
+                    )
+                    try:
+                        await self._do_patrol()
+                    except (GitHubAPIError, ContribAIError, Exception) as exc:
+                        logger.error("Patrol error in smart-fallback mode: %s", exc)
+                        self._daily_log.log_error("Patrol (smart-fallback)", str(exc))
+                        stress_delay = self._pick_stress_delay(time_warp)
+                        mins = max(1, stress_delay // 60)
+                        logger.warning(_thought("API_ERROR", mins=mins))
+                        await asyncio.sleep(stress_delay)
+                        continue
+
+                    delay = self._pick_delay("patrol_only", time_warp)
+                    mins = max(1, delay // 60)
+                    logger.info(_thought("REST_PATROL_ONLY", mins=mins))
+                    await asyncio.sleep(delay)
+                    continue
+
+                # ── Normal stochastic dice roll ───────────────────────
+                random_val = random.random()
+                chosen_action = "HUNT 🦅" if random_val < HUNT_WEIGHT else "PATROL 🛡️"
                 logger.info(_thought(
                     "ACTION_ROLL",
-                    roll=0.0,
-                    action="HUNT 🦅",
+                    roll=random_val,
+                    action=chosen_action,
                 ))
 
-                try:
-                    prs_opened, repos_scanned = await self._do_hunt()
-                    # CRITICAL: Only count ACTUAL successful PR creations
-                    if prs_opened > 0:
-                        self._prs_created_today += prs_opened
-                        logger.info(
-                            "🎯 PR COUNTER: +%d → %d/%d today",
-                            prs_opened,
-                            self._prs_created_today,
-                            self._daily_pr_target,
-                        )
-                    else:
-                        logger.info(
-                            "🔄 No PR created this hunt. Counter stays %d/%d.",
-                            self._prs_created_today,
-                            self._daily_pr_target,
-                        )
-                except LLMRateLimitError as exc:
-                    # Quota exhausted — take a LONG cooldown (1 hour)
-                    # so the sliding window has time to clear up
-                    quota_cooldown = 3 if time_warp else 3600
-                    logger.warning(
-                        "Ngân sách Minimax đã chạm đỉnh (Quota exhausted). "
-                        "Tắt máy đi ngủ 1 tiếng để hồi mana... "
-                        "(sleeping %ds, error: %s)",
-                        quota_cooldown, exc,
-                    )
-                    self._daily_log.log_error(
-                        "HUNT (LLM Quota)", str(exc),
-                    )
-                    await asyncio.sleep(quota_cooldown)
-                    continue
-                except (GitHubAPIError, ContribAIError, Exception) as exc:
-                    # Errors do NOT increment the counter
-                    logger.error("Hunt error: %s", exc)
-                    self._daily_log.log_error("HUNT", str(exc))
-                    stress_delay = self._pick_stress_delay(time_warp)
-                    mins = max(1, stress_delay // 60)
-                    logger.warning(_thought("API_ERROR", mins=mins))
-                    await asyncio.sleep(stress_delay)
-                    continue
+                if random_val >= HUNT_WEIGHT:
+                    # ── PATROL selected by dice ───────────────────────
+                    try:
+                        await self._do_patrol()
+                    except (GitHubAPIError, ContribAIError, Exception) as exc:
+                        logger.error("Patrol error (dice-selected): %s", exc)
+                        self._daily_log.log_error("Patrol (dice)", str(exc))
+                        stress_delay = self._pick_stress_delay(time_warp)
+                        mins = max(1, stress_delay // 60)
+                        logger.warning(_thought("API_ERROR", mins=mins))
+                        await asyncio.sleep(stress_delay)
+                        continue
 
-                # ── Dynamic Sleep ──────────────────────────────────────
-                # Dry run (0 repos scanned, 0 PRs) → short retry (2-5 min)
-                # Productive hunt (repos scanned or PRs created) → normal rest (30-90 min)
-                if prs_opened == 0 and repos_scanned == 0:
-                    delay = self._pick_delay("hunt_dry", time_warp)
+                    delay = self._pick_delay("patrol", time_warp)
                     mins = max(1, delay // 60)
-                    logger.info(_thought("REST_HUNT_DRY", mins=mins))
+                    logger.info(_thought("REST_PATROL", mins=mins))
+                    await asyncio.sleep(delay)
                 else:
-                    delay = self._pick_delay("hunt", time_warp)
-                    mins = max(1, delay // 60)
-                    logger.info(_thought("REST_HUNT", mins=mins))
-                await asyncio.sleep(delay)
+                    # ── HUNT selected by dice ─────────────────────────
+                    try:
+                        prs_opened, repos_scanned = await self._do_hunt()
+                        # CRITICAL: Only count ACTUAL successful PR creations
+                        if prs_opened > 0:
+                            self._prs_created_today += prs_opened
+                            logger.info(
+                                "🎯 PR COUNTER: +%d → %d/%d today",
+                                prs_opened,
+                                self._prs_created_today,
+                                self._daily_pr_target,
+                            )
+                        else:
+                            logger.info(
+                                "🔄 No PR created this hunt. Counter stays %d/%d.",
+                                self._prs_created_today,
+                                self._daily_pr_target,
+                            )
+                    except LLMRateLimitError as exc:
+                        # Quota exhausted — take a LONG cooldown (1 hour)
+                        # so the sliding window has time to clear up
+                        quota_cooldown = 3 if time_warp else 3600
+                        logger.warning(
+                            "Ngân sách Minimax đã chạm đỉnh (Quota exhausted). "
+                            "Tắt máy đi ngủ 1 tiếng để hồi mana... "
+                            "(sleeping %ds, error: %s)",
+                            quota_cooldown, exc,
+                        )
+                        self._daily_log.log_error(
+                            "HUNT (LLM Quota)", str(exc),
+                        )
+                        await asyncio.sleep(quota_cooldown)
+                        continue
+                    except (GitHubAPIError, ContribAIError, Exception) as exc:
+                        # Errors do NOT increment the counter
+                        logger.error("Hunt error: %s", exc)
+                        self._daily_log.log_error("HUNT", str(exc))
+                        stress_delay = self._pick_stress_delay(time_warp)
+                        mins = max(1, stress_delay // 60)
+                        logger.warning(_thought("API_ERROR", mins=mins))
+                        await asyncio.sleep(stress_delay)
+                        continue
+
+                    # ── Dynamic Sleep ──────────────────────────────────
+                    # Dry run (0 repos scanned, 0 PRs) → short retry
+                    # Productive hunt → normal rest (30-90 min)
+                    if prs_opened == 0 and repos_scanned == 0:
+                        delay = self._pick_delay("hunt_dry", time_warp)
+                        mins = max(1, delay // 60)
+                        logger.info(_thought("REST_HUNT_DRY", mins=mins))
+                    else:
+                        delay = self._pick_delay("hunt", time_warp)
+                        mins = max(1, delay // 60)
+                        logger.info(_thought("REST_HUNT", mins=mins))
+                    await asyncio.sleep(delay)
 
         self._daily_log.log_shutdown(self._iteration - 1)
         logger.info(_thought("GOODBYE"))
