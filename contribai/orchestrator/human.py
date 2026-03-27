@@ -366,6 +366,10 @@ class SuperHumanLoop:
         logger.info("🧠 Super Human Mode initialized — starting daily loop...")
         self._iteration = 0
 
+        # Start telegram listener in the background
+        if getattr(self, "_notifier", None):
+            asyncio.create_task(self._notifier.start_polling(self._memory))
+
         while True:
             self._iteration += 1
 
