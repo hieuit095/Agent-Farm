@@ -11,7 +11,7 @@ import difflib
 import json
 import logging
 import re
-from datetime import datetime
+from datetime import UTC, datetime
 
 from contribai.analysis.mapper import RepoMapper
 from contribai.core.config import ContributionConfig
@@ -35,10 +35,12 @@ MAX_TOOL_CALLS = 3
 class ContributionGenerator:
     """Generate code contributions from analysis findings."""
 
-    def __init__(self, llm: LLMProvider, config: ContributionConfig, *, memory=None):
+    def __init__(self, llm: LLMProvider, config: ContributionConfig, *, memory=None, pipeline_config=None):
         self._llm = llm
         self._config = config
         self._memory = memory  # Optional Memory for repo_preferences
+        # Configurable patch retry limit (from PipelineConfig or default)
+        self._max_patch_retries = getattr(pipeline_config, "max_patch_retries", 2) if pipeline_config else 2
 
     async def generate(
         self,
@@ -116,7 +118,7 @@ class ContributionGenerator:
             # Patch-Correction Retry Loop: if the patcher fails to apply
             # any edits (LLM hallucinated the SEARCH block), re-prompt the
             # LLM with the file content and ask for a corrected patch.
-            MAX_PATCH_RETRIES = 2
+            MAX_PATCH_RETRIES = self._max_patch_retries
             changes = self._parse_changes(response, context)
             patch_attempt = 0
             while not changes and patch_attempt < MAX_PATCH_RETRIES:
@@ -167,7 +169,7 @@ class ContributionGenerator:
                 changes=changes,
                 commit_message=commit_msg,
                 branch_name=branch_name,
-                generated_at=datetime.utcnow(),
+                generated_at=datetime.now(UTC),
             )
 
             # 6: Self-review

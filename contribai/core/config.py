@@ -146,6 +146,10 @@ class PipelineConfig(BaseModel):
 
     max_concurrent_repos: int = 3
     timeout_per_repo_sec: int = 300
+    # Fail-safe killswitch limits (externalized from patrol.py / engine.py)
+    max_ci_retries: int = 3
+    max_discussion_replies: int = 3
+    max_patch_retries: int = 2
 
 
 class QuotaConfig(BaseModel):

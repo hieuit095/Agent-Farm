@@ -67,6 +67,10 @@ storage:
 pipeline:
   max_concurrent_repos: 3         # parallel repo processing
   timeout_per_repo_sec: 300
+  # Fail-safe killswitch limits
+  max_ci_retries: 3               # CI auto-heal attempts before surrendering
+  max_discussion_replies: 3       # PR discussion replies before surrendering
+  max_patch_retries: 2            # LLM patch correction re-prompts
 
 scheduler:
   enabled: false

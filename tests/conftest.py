@@ -128,5 +128,6 @@ def mock_github():
     client.get_issue_comments = AsyncMock(return_value=[])
     client.get_issue_timeline = AsyncMock(return_value=[])
     client.list_pull_requests = AsyncMock(return_value=[])
+    client.check_interaction_limits = AsyncMock(return_value=False)
     client.close = AsyncMock()
     return client

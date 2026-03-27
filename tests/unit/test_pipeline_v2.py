@@ -285,6 +285,7 @@ class TestGenerationContext:
         sample_pipeline._github.get_file_tree = AsyncMock(return_value=[])
         sample_pipeline._github.get_file_content = AsyncMock(return_value="const token = localStorage.getItem('gh');")
         sample_pipeline._github.list_pull_requests = AsyncMock(return_value=[])
+        sample_pipeline._github.check_interaction_limits = AsyncMock(return_value=False)
         sample_pipeline._validate_findings = AsyncMock(return_value=[sample_finding])
         sample_pipeline._analyzer.analyze = AsyncMock(
             return_value=AnalysisResult(
@@ -361,6 +362,7 @@ class TestGenerationContext:
         sample_pipeline._github.get_file_tree = AsyncMock(return_value=[])
         sample_pipeline._github.get_file_content = AsyncMock(return_value="<div />")
         sample_pipeline._github.list_pull_requests = AsyncMock(return_value=[])
+        sample_pipeline._github.check_interaction_limits = AsyncMock(return_value=False)
         sample_pipeline._validate_findings = AsyncMock(return_value=[ui_finding])
         sample_pipeline._analyzer.analyze = AsyncMock(
             return_value=AnalysisResult(

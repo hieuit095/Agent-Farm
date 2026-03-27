@@ -120,6 +120,12 @@ def setup_daily_logger(config: LogConfig) -> logging.Logger:
     if root.level == logging.NOTSET or root.level > log_level:
         root.setLevel(log_level)
 
+    # Silence noisy third-party HTTP loggers
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
+    logging.getLogger("urllib3").setLevel(logging.WARNING)
+    logging.getLogger("github").setLevel(logging.WARNING)
+
     logging.getLogger(__name__).info(
         "Daily rolling logger initialized → %s (level=%s, keep=%d days)",
         log_file,

@@ -166,6 +166,10 @@ class PRPatrol:
         )
         self._sandbox_factory = kwargs.get("sandbox_factory", DockerSandbox)
         self._user: dict | None = None
+        # Configurable safety limits (from config or defaults)
+        config = kwargs.get("config", None)
+        self.MAX_CI_RETRIES = getattr(config, "max_ci_retries", 3) if config else 3
+        self.MAX_DISCUSSION_REPLIES = getattr(config, "max_discussion_replies", 3) if config else 3
 
     def _create_sandbox(self) -> DockerSandbox:
         """Create a sandbox instance for local validation."""
@@ -175,6 +179,22 @@ class PRPatrol:
         if not self._user:
             self._user = await self._github.get_authenticated_user()
         return self._user
+
+    def _calculate_typing_delay(self, text_payload: str) -> int:
+        """WPM Simulator: Calculate realistic typing delay based on payload size."""
+        base_delay = random.randint(30, 90)
+        typing_time = len(text_payload) / 3.75
+        return int(min(base_delay + typing_time, 1800))
+
+    def _get_contextual_greeting(self) -> str:
+        """Contextual Small Talk: Day-of-the-week greetings."""
+        from datetime import datetime
+        now = datetime.now()
+        if now.hour >= 12 and now.weekday() == 4:
+            return random.choice(["Happy Friday! ", "Hope you have a great weekend ahead. "])
+        elif now.hour < 12 and now.weekday() == 0:
+            return random.choice(["Hope you had a good weekend! ", "Happy Monday! "])
+        return ""
 
     @staticmethod
     def _is_controlled_test_feedback(body: str) -> bool:
@@ -389,7 +409,7 @@ class PRPatrol:
                         FeedbackAction.CODE_CHANGE,
                         FeedbackAction.STYLE_FIX,
                     ):
-                        fixed = await self._handle_code_fix(owner, repo_name, pr, pr_data, item)
+                        fixed = await self._handle_code_fix(owner, repo_name, pr, pr_data, item, dry_run=dry_run)
                         if fixed:
                             result.fixes_pushed += 1
                             result.replies_sent += 1
@@ -402,7 +422,7 @@ class PRPatrol:
                                     f"🛡️ <b>[PATROL]</b> Action Taken!\nRepo: <code>{pr['repo']}</code>\nAction: Pushed Code Fix\nURL: {pr_data.get('html_url', pr.get('pr_url', ''))}"
                                 )
                     elif item.action == FeedbackAction.QUESTION:
-                        answered = await self._handle_question(owner, repo_name, pr, pr_data, item)
+                        answered = await self._handle_question(owner, repo_name, pr, pr_data, item, dry_run=dry_run)
                         if answered:
                             result.replies_sent += 1
                             if self._memory:
@@ -746,6 +766,7 @@ class PRPatrol:
         pr_record: dict,
         pr_data: dict,
         feedback: FeedbackItem,
+        dry_run: bool = False,
     ) -> bool:
         """Generate and push a code fix based on review feedback."""
         try:
@@ -814,6 +835,11 @@ class PRPatrol:
                 sha = resp.get("sha")
             except Exception:
                 sha = None
+
+            if not dry_run:
+                delay = self._calculate_typing_delay(fixed_content)
+                logger.info("  ⏳ WPM Simulator: 'Typing' code fix for %ds...", delay)
+                await asyncio.sleep(delay)
 
             # Push fix
             user = await self._get_user()
@@ -916,6 +942,7 @@ class PRPatrol:
         pr_record: dict,
         pr_data: dict,
         feedback: FeedbackItem,
+        dry_run: bool = False,
     ) -> bool:
         """Answer a maintainer's question on the PR."""
         try:
@@ -946,9 +973,15 @@ class PRPatrol:
                 return False
 
             # Wrap LLM answer with a natural human opener/closer
+            greeting = self._get_contextual_greeting()
             opener = random.choice(GITHUB_REPLIES["QUESTION_OPENER"])
             closer = random.choice(GITHUB_REPLIES["QUESTION_CLOSER"])
-            reply_body = f"{opener}\n\n{raw_answer}\n\n{closer}\n\n<!-- contribai-patrol -->"
+            reply_body = f"{greeting}{opener}\n\n{raw_answer}\n\n{closer}\n\n<!-- contribai-patrol -->"
+
+            if not dry_run:
+                delay = self._calculate_typing_delay(reply_body)
+                logger.info("  ⏳ WPM Simulator: 'Typing' reply for %ds...", delay)
+                await asyncio.sleep(delay)
 
             # Post reply
             if feedback.is_inline:
@@ -1009,10 +1042,9 @@ class PRPatrol:
 
         return False
 
-    # ── Fail-Safe Limits ───────────────────────────────────────────────────
-
-    MAX_CI_RETRIES = 3
-    MAX_DISCUSSION_REPLIES = 3
+    # ── Fail-Safe Limits (set in __init__ from config) ─────────────────────
+    # MAX_CI_RETRIES and MAX_DISCUSSION_REPLIES are now instance attributes
+    # initialized from PipelineConfig (defaults: 3 and 3).
 
     # ── CI Auto-Healing ────────────────────────────────────────────────────
 
@@ -1247,114 +1279,6 @@ class PRPatrol:
             logger.debug("Could not fetch previous bot diff: %s", exc)
         return ""
 
-    async def _handle_ci_failure(
-        self,
-        owner: str,
-        repo: str,
-        pr_record: dict,
-        pr_data: dict,
-        traceback: str,
-        check_name: str,
-    ) -> bool:
-        """Use LLM to fix a CI failure and push the fix."""
-        try:
-            head = pr_data.get("head", {})
-            fork_owner = head.get("repo", {}).get("owner", {}).get("login", owner)
-            fork_repo = head.get("repo", {}).get("name", repo)
-            branch = head.get("ref", "main")
-
-            # Get PR diff for context
-            try:
-                diff = await self._github.get_pr_diff(owner, repo, pr_data["number"])
-                if len(diff) > 8000:
-                    diff = diff[:8000] + "\n... (truncated)"
-            except Exception:
-                diff = ""
-
-            # Layer 1: Contextual Memory — fetch previous failed diff
-            user = await self._get_user()
-            previous_diff = await self._fetch_previous_bot_diff(
-                owner, repo, pr_data["number"], user["login"],
-            )
-
-            prompt = (
-                f"The CI pipeline (`{check_name}`) failed with this error:\n"
-                f"```\n{traceback}\n```\n\n"
-            )
-            if diff:
-                prompt += f"Here is the PR diff for context:\n```diff\n{diff}\n```\n\n"
-            if previous_diff:
-                prompt += (
-                    "Here is the fix you just tried:\n"
-                    f"```diff\n{previous_diff}\n```\n"
-                    "It FAILED. Do NOT generate this exact code again. "
-                    "Try a completely different approach.\n\n"
-                )
-            prompt += (
-                "Please fix the code to resolve this CI failure. "
-                "Return ONLY the complete fixed file content. "
-                "No explanations. Make the MINIMUM change to fix the error."
-            )
-
-            response = await self._llm.complete(
-                prompt,
-                system=(
-                    "You are a developer fixing CI failures. "
-                    "Analyze the traceback, identify the broken file, "
-                    "and return the complete corrected file content."
-                ),
-                temperature=0.2,
-            )
-
-            fixed_content = self._extract_fixed_content(response)
-            if not fixed_content:
-                logger.warning("  ⚠️ LLM returned empty fix for CI failure")
-                return False
-
-            # Try to determine file path from traceback
-            file_path = self._guess_file_from_traceback(traceback, diff)
-            if not file_path:
-                logger.warning("  ⚠️ Could not determine file path from traceback")
-                return False
-
-            # Get file SHA
-            try:
-                resp = await self._github._get(
-                    f"/repos/{fork_owner}/{fork_repo}/contents/{file_path}",
-                    params={"ref": branch},
-                )
-                sha = resp.get("sha")
-            except Exception:
-                sha = None
-
-            # Push fix
-            user = await self._get_user()
-            signoff = self._build_signoff(user)
-            commit_msg = random.choice(GITHUB_REPLIES["COMMIT_CI_FIX"]).format(
-                check_name=check_name,
-            )
-            await self._github.create_or_update_file(
-                fork_owner, fork_repo, file_path, fixed_content,
-                commit_msg, branch, sha=sha, signoff=signoff,
-            )
-            logger.info("  Pushed CI fix for '%s' on %s", check_name, file_path)
-
-            # Post comment on PR — sound human
-            ci_reply = (
-                random.choice(GITHUB_REPLIES["CI_FIX_APPLIED"]).format(
-                    check_name=check_name,
-                    file_path=file_path,
-                )
-                + "\n\n<!-- contribai-patrol -->"
-            )
-            await self._github.create_pr_comment(
-                owner, repo, pr_data["number"], ci_reply,
-            )
-            return True
-
-        except Exception as e:
-            logger.error("  ❌ CI auto-fix failed: %s", e)
-            return False
 
     async def _handle_ci_failure(
         self,

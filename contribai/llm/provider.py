@@ -240,12 +240,10 @@ class MinimaxProvider(LLMProvider):
         max_tokens: int | None = None,
         **kwargs,
     ) -> str:
+        # ── Circuit Breaker: enforce local quota before HTTP call ──────
         if getattr(self, "memory", None):
-            import asyncio
-            while not await self.memory.check_minimax_quota():
-                logger.warning("Minimax quota exhausted. Pausing execution for 60s...")
-                await asyncio.sleep(60)
-            await self.memory.log_api_request("minimax")
+            # Raises LLMRateLimitError if quota is exhausted
+            await self.memory.check_and_record_llm_quota("minimax")
 
         import httpx
 

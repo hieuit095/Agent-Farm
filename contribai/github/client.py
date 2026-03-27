@@ -42,8 +42,16 @@ class GitHubClient:
     # ── Core HTTP ──────────────────────────────────────────────────────────
 
     async def _request(self, method: str, url: str, *, _retries: int = 3, **kwargs) -> Any:
-        """Make an authenticated GitHub API request with error handling and retry."""
+        """Make an authenticated GitHub API request with error handling and retry.
+
+        Handles GitHub Secondary Rate Limits (abuse detection) by retrying
+        403 responses with exponential backoff.  Primary rate limit exhaustion
+        (x-ratelimit-remaining == 0) still raises immediately.
+        """
         import asyncio
+
+        # Default backoff schedule for 403 retries (seconds)
+        _403_backoff = [60, 120]
 
         last_error = None
         for attempt in range(1, _retries + 1):
@@ -52,12 +60,40 @@ class GitHubClient:
             except httpx.HTTPError as e:
                 raise GitHubAPIError(f"HTTP error: {e}") from e
 
+            # ── 403 Forbidden — distinguish primary vs secondary rate limit ──
             if response.status_code == 403:
                 remaining = response.headers.get("x-ratelimit-remaining", "?")
                 reset = response.headers.get("x-ratelimit-reset")
+
+                # Primary rate limit exhausted — no point retrying
                 if remaining == "0":
                     raise RateLimitError(reset_at=int(reset) if reset else None)
-                raise GitHubAPIError(f"Forbidden: {response.text}", status_code=403)
+
+                # Secondary rate limit (abuse detection) — retry with backoff
+                if attempt < _retries:
+                    retry_after = response.headers.get("retry-after")
+                    if retry_after:
+                        wait = int(retry_after)
+                    else:
+                        wait = _403_backoff[min(attempt - 1, len(_403_backoff) - 1)]
+
+                    logger.warning(
+                        "GitHub Secondary Rate Limit hit (403). "
+                        "Sleeping for %d seconds... (attempt %d/%d, %s %s)",
+                        wait,
+                        attempt,
+                        _retries,
+                        method,
+                        url,
+                    )
+                    await asyncio.sleep(wait)
+                    continue
+
+                # Exhausted retries on 403
+                raise GitHubAPIError(
+                    f"Forbidden after {_retries} retries: {response.text}",
+                    status_code=403,
+                )
 
             if response.status_code == 404:
                 raise GitHubAPIError(f"Not found: {url}", status_code=404)
@@ -104,6 +140,40 @@ class GitHubClient:
 
     async def _delete(self, url: str, **kwargs) -> Any:
         return await self._request("DELETE", url, **kwargs)
+
+    # ── Interaction Limits ──────────────────────────────────────────────────
+
+    async def check_interaction_limits(self, owner: str, repo: str) -> bool:
+        """Check if a repository has active interaction limits.
+
+        GitHub repos can restrict interactions to prior contributors,
+        collaborators, or users with minimum account age.  When active,
+        new contributors will get 422 errors on PR/issue creation.
+
+        Returns True if limits are active (skip this repo), False otherwise.
+        """
+        try:
+            response = await self._client.request(
+                "GET", f"/repos/{owner}/{repo}/interaction-limits"
+            )
+            # 200 with JSON payload → limits are active
+            if response.status_code == 200 and response.content:
+                data = response.json()
+                # Empty dict or no "limit" key means no active limits
+                if data and data.get("limit"):
+                    logger.info(
+                        "Interaction limits active on %s/%s: %s",
+                        owner, repo, data.get("limit"),
+                    )
+                    return True
+            # 204 No Content → no limits
+            return False
+        except Exception as exc:
+            logger.debug(
+                "Could not check interaction limits for %s/%s: %s",
+                owner, repo, exc,
+            )
+            return False
 
     # ── Rate Limit ─────────────────────────────────────────────────────────
 

@@ -3,6 +3,7 @@ import time
 from pathlib import Path
 import pytest
 from contribai.orchestrator.memory import Memory
+from contribai.core.exceptions import LLMRateLimitError
 
 @pytest.mark.asyncio
 async def test_minimax_quota_tracking(tmp_path: Path):
@@ -20,14 +21,12 @@ async def test_minimax_quota_tracking(tmp_path: Path):
         )
     await memory._db.commit()
 
-    # Quota should still be OK
-    assert await memory.check_minimax_quota() is True
+    # Quota should still be OK. This successful call logs the 950th.
+    await memory.check_and_record_llm_quota("minimax")
 
-    # Insert 1 more request to hit 950
-    await memory.log_api_request("minimax")
-    
-    # Quota should now be exhausted (False means exhausted)
-    assert await memory.check_minimax_quota() is False
+    # Quota should now be exhausted
+    with pytest.raises(LLMRateLimitError):
+        await memory.check_and_record_llm_quota("minimax")
 
     # Clean up
     await memory.close()
@@ -41,7 +40,6 @@ async def test_minimax_quota_7_day(tmp_path: Path):
     now = time.time()
     
     # Insert 9499 requests within the 7 day window
-    # We can use executemany forスピード
     timestamps = [(now - 86400 * 2, "minimax") for _ in range(9499)]
     await memory._db.executemany(
         "INSERT INTO api_usage_log (timestamp, provider) VALUES (?, ?)",
@@ -49,13 +47,11 @@ async def test_minimax_quota_7_day(tmp_path: Path):
     )
     await memory._db.commit()
 
-    # Quota should still be OK
-    assert await memory.check_minimax_quota() is True
+    # Quota should still be OK. This successful call logs the 9500th.
+    await memory.check_and_record_llm_quota("minimax")
 
-    # Add 1 more
-    await memory.log_api_request("minimax")
-    
     # Quota should now be exhausted
-    assert await memory.check_minimax_quota() is False
+    with pytest.raises(LLMRateLimitError):
+        await memory.check_and_record_llm_quota("minimax")
 
     await memory.close()

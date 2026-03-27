@@ -15,9 +15,9 @@ from __future__ import annotations
 import asyncio
 import logging
 import random
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 
-from contribai.core.exceptions import ContribAIError, GitHubAPIError
+from contribai.core.exceptions import ContribAIError, GitHubAPIError, LLMRateLimitError
 
 logger = logging.getLogger(__name__)
 
@@ -191,7 +191,7 @@ class SuperHumanLoop:
 
     def _new_day_check(self) -> bool:
         """Check if a new calendar day has started. Returns True if day changed."""
-        today = datetime.utcnow().date()
+        today = datetime.now(UTC).date()
         if self._current_day != today:
             self._current_day = today
             self._daily_pr_target = min(
@@ -284,13 +284,6 @@ class SuperHumanLoop:
                     repo = f"{parts[-4]}/{parts[-3]}" if len(parts) >= 4 else "unknown"
                     pr_num = int(parts[-1]) if parts[-1].isdigit() else 0
                     self._daily_log.log_hunt_success(repo, pr_num, url)
-                    if not self._dry_run:
-                        import asyncio
-                        asyncio.create_task(
-                            self._notifier.send_message(
-                                f"🚀 <b>[HUNT]</b> New PR Created!\nRepo: <code>{repo}</code>\nURL: {url}"
-                            )
-                        )
             elif result.prs_created > 0:
                 self._daily_log.log_hunt_success(
                     "repo", result.prs_created, "(no URL available)",
@@ -389,6 +382,15 @@ class SuperHumanLoop:
 
             remaining = max(0, self._daily_pr_target - self._prs_created_today)
 
+            # ── Mandatory Lunch Break ───────────────────────────────────
+            now = datetime.now()
+            if not time_warp and now.hour == 12:
+                target_lunch_end = now.replace(hour=13, minute=0, second=0, microsecond=0)
+                seconds_until_1pm = (target_lunch_end - now).total_seconds()
+                if seconds_until_1pm > 0:
+                    logger.info("Đến giờ nghỉ trưa rồi! Gấp máy đi ăn cơm, chiều 1h cày tiếp. 🍱")
+                    await asyncio.sleep(seconds_until_1pm)
+
             # ── Decide action based on LOCAL PR counter ─────────────────
             if self._prs_created_today >= self._daily_pr_target:
                 # ── TARGET MET — Patrol-only mode ──────────────────────
@@ -451,6 +453,21 @@ class SuperHumanLoop:
                             self._prs_created_today,
                             self._daily_pr_target,
                         )
+                except LLMRateLimitError as exc:
+                    # Quota exhausted — take a LONG cooldown (1 hour)
+                    # so the sliding window has time to clear up
+                    quota_cooldown = 3 if time_warp else 3600
+                    logger.warning(
+                        "Ngân sách Minimax đã chạm đỉnh (Quota exhausted). "
+                        "Tắt máy đi ngủ 1 tiếng để hồi mana... "
+                        "(sleeping %ds, error: %s)",
+                        quota_cooldown, exc,
+                    )
+                    self._daily_log.log_error(
+                        "HUNT (LLM Quota)", str(exc),
+                    )
+                    await asyncio.sleep(quota_cooldown)
+                    continue
                 except (GitHubAPIError, ContribAIError, Exception) as exc:
                     # Errors do NOT increment the counter
                     logger.error("Hunt error: %s", exc)
@@ -476,3 +493,7 @@ class SuperHumanLoop:
 
         self._daily_log.log_shutdown(self._iteration - 1)
         logger.info(_thought("GOODBYE"))
+
+        # Clean up persistent HTTP connections
+        if self._notifier:
+            await self._notifier.close()

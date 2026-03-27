@@ -109,6 +109,12 @@ class ContribPipeline:
         self._middleware_chain: list = []
         self._agent_registry = None
         self._tool_registry = None
+        
+        from contribai.core.notifier import TelegramNotifier
+        self._notifier = TelegramNotifier(
+            token=self.config.notifications.telegram_token,
+            chat_id=self.config.notifications.telegram_chat_id,
+        )
 
     async def _init_components(self):
         """Initialize all pipeline components."""
@@ -145,6 +151,7 @@ class ContribPipeline:
             llm=self._llm,
             config=self.config.contribution,
             memory=self._memory,
+            pipeline_config=self.config.pipeline,
         )
 
         # PR Manager
@@ -193,6 +200,9 @@ class ContribPipeline:
             await self._llm.close()
         if self._memory:
             await self._memory.close()
+        # Close any notifier attached to sub-components
+        if hasattr(self, "_notifier") and self._notifier:
+            await self._notifier.close()
 
     # ── Public API ─────────────────────────────────────────────────────────
 
@@ -566,6 +576,16 @@ class ContribPipeline:
             result.repos_analyzed = 1
             return result
 
+        # Check interaction limits — skip repos that restrict to prior contributors
+        if await self._github.check_interaction_limits(repo.owner, repo.name):
+            logger.warning(
+                "🚫 Repo %s has active interaction limits "
+                "(e.g., prior contributors only). Skipping to save resources.",
+                repo.full_name,
+            )
+            result.repos_analyzed = 1
+            return result
+
         # Fetch repo guidelines (CONTRIBUTING.md, PR template)
         guidelines = await fetch_repo_guidelines(self._github, repo.owner, repo.name)
         if guidelines.has_guidelines:
@@ -646,9 +666,14 @@ class ContribPipeline:
             if finding.file_path and finding.file_path not in relevant_files:
                 file_paths_to_fetch.append(finding.file_path)
 
-        sem = asyncio.Semaphore(50)
+        # Strict GitHub API semaphore — keep LOW to avoid Secondary Rate Limits.
+        # This is intentionally separate from the Minimax Overdrive concurrency.
+        github_fetch_sem = asyncio.Semaphore(5)
+
         async def fetch_needed(fpath: str) -> tuple[str, str | None]:
-            async with sem:
+            async with github_fetch_sem:
+                # Micro-sleep to keep RPS below GitHub abuse-detection threshold
+                await asyncio.sleep(0.2)
                 try:
                     return fpath, await self._github.get_file_content(repo.owner, repo.name, fpath)
                 except Exception:
@@ -822,6 +847,13 @@ class ContribPipeline:
                     fork=pr_result.fork_full_name,
                 )
 
+                if not dry_run and getattr(self, "_notifier", None):
+                    asyncio.create_task(
+                        self._notifier.send_message(
+                            f"🚀 <b>[HUNT]</b> New PR Created!\nRepo: <code>{repo.full_name}</code>\nURL: {pr_result.pr_url}"
+                        )
+                    )
+
                 # 5. Post-PR compliance check & auto-fix
                 try:
                     logger.info("🔍 Checking PR compliance...")
@@ -866,6 +898,15 @@ class ContribPipeline:
             )
             return result
 
+        # Check interaction limits — skip repos that restrict to prior contributors
+        if await self._github.check_interaction_limits(repo.owner, repo.name):
+            logger.warning(
+                "🚫 Repo %s has active interaction limits "
+                "(e.g., prior contributors only). Skipping to save resources.",
+                repo.full_name,
+            )
+            return result
+
         # Initialize issue solver
         solver = IssueSolver(llm=self._llm, github=self._github)
 
@@ -887,6 +928,8 @@ class ContribPipeline:
         key_files = self._identify_key_files(file_tree, repo)
         for fpath in key_files[:10]:
             try:
+                # Micro-sleep to keep RPS below GitHub abuse-detection threshold
+                await asyncio.sleep(0.2)
                 content = await self._github.get_file_content(repo.owner, repo.name, fpath)
                 relevant_files[fpath] = content
             except Exception:
@@ -1002,6 +1045,13 @@ class ContribPipeline:
                     branch=pr_result.branch_name,
                     fork=pr_result.fork_full_name,
                 )
+
+                if not dry_run and getattr(self, "_notifier", None):
+                    asyncio.create_task(
+                        self._notifier.send_message(
+                            f"🚀 <b>[HUNT]</b> New PR Created!\nRepo: <code>{repo.full_name}</code>\nURL: {pr_result.pr_url}"
+                        )
+                    )
 
                 # Post-PR compliance
                 try:

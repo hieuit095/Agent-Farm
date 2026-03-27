@@ -7,7 +7,7 @@ to avoid duplicate work and improve over time.
 from __future__ import annotations
 
 import logging
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 
 import aiosqlite
@@ -112,6 +112,8 @@ class Memory:
         """Initialize database connection and schema."""
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
         self._db = await aiosqlite.connect(str(self._db_path))
+        # Enable Write-Ahead Logging for concurrent read/write safety
+        await self._db.execute("PRAGMA journal_mode=WAL;")
         await self._db.executescript(SCHEMA)
         await self._db.commit()
 
@@ -150,7 +152,7 @@ class Memory:
             """INSERT OR REPLACE INTO analyzed_repos
                (full_name, language, stars, analyzed_at, findings)
                VALUES (?, ?, ?, ?, ?)""",
-            (full_name, language, stars, datetime.utcnow().isoformat(), findings_count),
+            (full_name, language, stars, datetime.now(UTC).isoformat(), findings_count),
         )
         await self._db.commit()
 
@@ -176,7 +178,7 @@ class Memory:
         fork: str = "",
     ):
         """Record a submitted PR."""
-        now = datetime.utcnow().isoformat()
+        now = datetime.now(UTC).isoformat()
         await self._db.execute(
             """INSERT OR REPLACE INTO submitted_prs
                (repo, pr_number, pr_url, title, type, branch, fork, created_at, updated_at)
@@ -189,7 +191,7 @@ class Memory:
         """Update PR status."""
         await self._db.execute(
             "UPDATE submitted_prs SET status = ?, updated_at = ? WHERE repo = ? AND pr_number = ?",
-            (status, datetime.utcnow().isoformat(), repo, pr_number),
+            (status, datetime.now(UTC).isoformat(), repo, pr_number),
         )
         await self._db.commit()
 
@@ -210,7 +212,7 @@ class Memory:
 
     async def get_today_pr_count(self) -> int:
         """Get number of PRs created today."""
-        today = datetime.utcnow().date().isoformat()
+        today = datetime.now(UTC).date().isoformat()
         cursor = await self._db.execute(
             "SELECT COUNT(*) FROM submitted_prs WHERE created_at LIKE ?",
             (f"{today}%",),
@@ -244,7 +246,7 @@ class Memory:
         await self._db.execute(
             "UPDATE submitted_prs SET ci_fix_attempts = ci_fix_attempts + 1, updated_at = ? "
             "WHERE repo = ? AND pr_number = ?",
-            (datetime.utcnow().isoformat(), repo, pr_number),
+            (datetime.now(UTC).isoformat(), repo, pr_number),
         )
         await self._db.commit()
         return await self.get_ci_fix_attempts(repo, pr_number)
@@ -265,7 +267,7 @@ class Memory:
         await self._db.execute(
             "UPDATE submitted_prs SET discussion_replies = discussion_replies + 1, updated_at = ? "
             "WHERE repo = ? AND pr_number = ?",
-            (datetime.utcnow().isoformat(), repo, pr_number),
+            (datetime.now(UTC).isoformat(), repo, pr_number),
         )
         await self._db.commit()
         return await self.get_discussion_replies(repo, pr_number)
@@ -276,7 +278,7 @@ class Memory:
         """Record the start of a pipeline run. Returns run ID."""
         cursor = await self._db.execute(
             "INSERT INTO run_log (started_at) VALUES (?)",
-            (datetime.utcnow().isoformat(),),
+            (datetime.now(UTC).isoformat(),),
         )
         await self._db.commit()
         return cursor.lastrowid
@@ -295,7 +297,7 @@ class Memory:
                SET finished_at = ?, repos_analyzed = ?, prs_created = ?,
                    findings = ?, errors = ?
                WHERE id = ?""",
-            (datetime.utcnow().isoformat(), repos_analyzed, prs_created, findings, errors, run_id),
+            (datetime.now(UTC).isoformat(), repos_analyzed, prs_created, findings, errors, run_id),
         )
         await self._db.commit()
 
@@ -355,7 +357,7 @@ class Memory:
                 outcome,
                 feedback,
                 time_to_close_hours,
-                datetime.utcnow().isoformat(),
+                datetime.now(UTC).isoformat(),
             ),
         )
         await self._db.commit()
@@ -402,7 +404,7 @@ class Memory:
                 json.dumps(list(set(rejected_types))),
                 round(merge_rate, 3),
                 round(avg_hours, 1),
-                datetime.utcnow().isoformat(),
+                datetime.now(UTC).isoformat(),
             ),
         )
         await self._db.commit()
@@ -461,7 +463,7 @@ class Memory:
             """INSERT OR REPLACE INTO blacklisted_repos
                (repo, reason, pr_number, blacklisted_at)
                VALUES (?, ?, ?, ?)""",
-            (full_name, reason[:1000], pr_number, datetime.utcnow().isoformat()),
+            (full_name, reason[:1000], pr_number, datetime.now(UTC).isoformat()),
         )
         await self._db.commit()
         logger.warning("🚫 Blacklisted repo %s: %s", full_name, reason[:120])
@@ -489,72 +491,76 @@ class Memory:
 
     # ── Safe Quota Tracking (Minimax Overdrive) ──────────────────────────
 
-    async def log_api_request(self, provider: str = "minimax") -> None:
-        """Log a provider API request timestamp."""
+    async def check_and_record_llm_quota(self, provider: str = "minimax") -> None:
+        """Sliding-window quota checker and recorder for LLM providers.
+
+        Minimax plan limits: 1000 requests per 5 hours, 10000 per 7 days.
+        Uses a 5% safety buffer (950 / 9500) to prevent overshoot.
+
+        On success, atomically records the request in the usage log.
+        On threshold breach, raises LLMRateLimitError so callers can
+        react (e.g. take a long cooldown sleep).
+        """
         import time
-        
+
+        from contribai.core.exceptions import LLMRateLimitError
+
         now = time.time()
+
+        # Sliding window boundaries
+        five_hours_ago = now - 18_000.0       # 5 * 3600
+        seven_days_ago = now - 604_800.0      # 7 * 24 * 3600
+
+        # ── Count requests in each window ──────────────────────────────
+        cursor = await self._db.execute(
+            "SELECT COUNT(1) FROM api_usage_log WHERE provider = ? AND timestamp >= ?",
+            (provider, five_hours_ago),
+        )
+        row = await cursor.fetchone()
+        count_5h = row[0] if row else 0
+
+        cursor = await self._db.execute(
+            "SELECT COUNT(1) FROM api_usage_log WHERE provider = ? AND timestamp >= ?",
+            (provider, seven_days_ago),
+        )
+        row = await cursor.fetchone()
+        count_7d = row[0] if row else 0
+
+        # ── Safety thresholds (95% of hard limits) ─────────────────────
+        if count_5h >= 950:
+            logger.warning(
+                "LLM quota BREACHED: %s 5-hour window has %d requests (limit 950).",
+                provider, count_5h,
+            )
+            raise LLMRateLimitError(
+                f"{provider} 5-hour quota exhausted: {count_5h}/950 requests"
+            )
+
+        if count_7d >= 9500:
+            logger.warning(
+                "LLM quota BREACHED: %s 7-day window has %d requests (limit 9500).",
+                provider, count_7d,
+            )
+            raise LLMRateLimitError(
+                f"{provider} 7-day quota exhausted: {count_7d}/9500 requests"
+            )
+
+        # ── Record this request atomically ─────────────────────────────
         await self._db.execute(
             "INSERT INTO api_usage_log (timestamp, provider) VALUES (?, ?)",
             (now, provider),
         )
+
+        # ── Periodic cleanup: purge entries older than 7 days ──────────
+        if not hasattr(self, "_quota_cleanup_counter"):
+            self._quota_cleanup_counter = 0
+        self._quota_cleanup_counter += 1
+
+        if self._quota_cleanup_counter >= 100:
+            await self._db.execute(
+                "DELETE FROM api_usage_log WHERE timestamp < ?",
+                (seven_days_ago,),
+            )
+            self._quota_cleanup_counter = 0
+
         await self._db.commit()
-
-    async def check_minimax_quota(self) -> bool:
-        """Strict sliding window quota checker for Minimax.
-        
-        Minimax limits: 1000 per 5 hours, 10000 per 7 days.
-        Returns False if we exceed 95% of either capacity threshold to leave a safe buffer.
-        """
-        import time
-        now = time.time()
-        
-        # 5 hours = 5 * 3600 = 18000 seconds
-        five_hours_ago = now - 18000.0
-        
-        # 7 days = 7 * 24 * 3600 = 604800 seconds
-        seven_days_ago = now - 604800.0
-
-        async with self._db.execute(
-            "SELECT COUNT(1) FROM api_usage_log WHERE provider = 'minimax' AND timestamp >= ?",
-            (five_hours_ago,)
-        ) as cursor:
-            row = await cursor.fetchone()
-            count_5h = row[0] if row else 0
-
-        async with self._db.execute(
-            "SELECT COUNT(1) FROM api_usage_log WHERE provider = 'minimax' AND timestamp >= ?",
-            (seven_days_ago,)
-        ) as cursor:
-            row = await cursor.fetchone()
-            count_7d = row[0] if row else 0
-
-        # Safety thresholds (95% of 1000, 95% of 10000)
-        if count_5h >= 950:
-            logger.warning(
-                "Minimax 5-hour quota exhausted: %d requests (limit 950 buffer).", count_5h
-            )
-            return False
-            
-        if count_7d >= 9500:
-            logger.warning(
-                "Minimax 7-day quota exhausted: %d requests (limit 9500 buffer).", count_7d
-            )
-            return False
-
-        # Perform cleanup of old records periodically to prevent DB bloat
-        # Clean logs older than 7 days + 1 hour padding
-        # This occurs automatically without blocking if quota is fine.
-        if hasattr(self, '_quota_check_count'):
-            self._quota_check_count += 1
-            if self._quota_check_count > 100:
-                await self._db.execute(
-                    "DELETE FROM api_usage_log WHERE provider = 'minimax' AND timestamp < ?",
-                    (seven_days_ago - 3600.0,)
-                )
-                await self._db.commit()
-                self._quota_check_count = 0
-        else:
-            self._quota_check_count = 1
-
-        return True
