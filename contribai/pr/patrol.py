@@ -6,10 +6,14 @@ classify feedback, generates code fixes, and pushes updates.
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import logging
 import random
 import re
+from pathlib import Path
+from tempfile import TemporaryDirectory
+from typing import Any
 
 import yaml
 
@@ -19,6 +23,7 @@ from contribai.core.models import (
     FeedbackItem,
     PatrolResult,
 )
+from contribai.core.sandbox import DockerSandbox
 from contribai.github.client import GitHubClient
 from contribai.llm.provider import LLMProvider
 
@@ -86,6 +91,11 @@ GITHUB_REPLIES: dict[str, list[str]] = {
         "I've tried to fix CI {attempts} times but it's still failing. Going to close this PR to keep things clean. Apologies!",  # noqa: E501
         "After {attempts} attempts I haven't been able to get CI green. Closing this out — sorry for the churn.",  # noqa: E501
     ],
+    # Surrender: max discussion retries reached
+    "SURRENDER": [
+        "I've tried a few different approaches but I seem to be missing the mark, and I don't want to waste your time with more automated commits. I'll close this PR for now so you can keep your queue clean. Thanks for the reviews!",  # noqa: E501
+        "Looks like I'm having trouble getting this exactly right after a few attempts. I'll go ahead and close this PR so I don't create unnecessary noise. Thanks for your patience! 🙏",
+    ],
     # Commit messages for CI fixes
     "COMMIT_CI_FIX": [
         "fix: resolve {check_name} CI failure",
@@ -126,7 +136,16 @@ class PRPatrol:
         self._llm = llm
         self._memory = memory
         self._notifier = kwargs.get("notifier", None)
+        self._enable_sandbox_validation = kwargs.get(
+            "enable_sandbox_validation",
+            isinstance(github, GitHubClient),
+        )
+        self._sandbox_factory = kwargs.get("sandbox_factory", DockerSandbox)
         self._user: dict | None = None
+
+    def _create_sandbox(self) -> DockerSandbox:
+        """Create a sandbox instance for local validation."""
+        return self._sandbox_factory()
 
     async def _get_user(self) -> dict:
         if not self._user:
@@ -289,6 +308,39 @@ class PRPatrol:
                     pr["pr_number"],
                 )
 
+                # ── Layer 2: Killswitch ─ discussion reply limit ──────
+                reply_count = 0
+                if self._memory:
+                    reply_count = await self._memory.get_discussion_replies(
+                        pr["repo"], pr["pr_number"],
+                    )
+                if reply_count >= self.MAX_DISCUSSION_REPLIES:
+                    logger.warning(
+                        "  🏳️ Discussion reply limit (%d) reached for PR #%d — surrendering",
+                        self.MAX_DISCUSSION_REPLIES, pr["pr_number"],
+                    )
+                    if not dry_run:
+                        try:
+                            await self._github.close_pull_request(
+                                owner, repo_name, pr["pr_number"],
+                                comment=random.choice(GITHUB_REPLIES["SURRENDER"]),
+                            )
+                        except GitHubAPIError as exc:
+                            logger.warning(
+                                "  ⚠️ Could not close PR #%d: %s", pr["pr_number"], exc,
+                            )
+                        if self._notifier:
+                            repo_url = pr_data.get(
+                                "html_url", f"https://github.com/{pr['repo']}",
+                            )
+                            await self._notifier.send_message(
+                                f"🏳️ [SURRENDER] PR closed due to max retries "
+                                f"({self.MAX_DISCUSSION_REPLIES}/{self.MAX_DISCUSSION_REPLIES}) "
+                                f"hit on {repo_url}"
+                            )
+                    result.prs_closed_hostile += 1
+                    continue
+
                 for item in actionable:
                     if dry_run:
                         logger.info(
@@ -317,6 +369,10 @@ class PRPatrol:
                         if fixed:
                             result.fixes_pushed += 1
                             result.replies_sent += 1
+                            if self._memory:
+                                await self._memory.increment_discussion_replies(
+                                    pr["repo"], pr["pr_number"],
+                                )
                             if self._notifier and not dry_run:
                                 await self._notifier.send_message(
                                     f"🛡️ <b>[PATROL]</b> Action Taken!\nRepo: <code>{pr['repo']}</code>\nAction: Pushed Code Fix\nURL: {pr_data.get('html_url', pr.get('pr_url', ''))}"
@@ -325,6 +381,10 @@ class PRPatrol:
                         answered = await self._handle_question(owner, repo_name, pr, pr_data, item)
                         if answered:
                             result.replies_sent += 1
+                            if self._memory:
+                                await self._memory.increment_discussion_replies(
+                                    pr["repo"], pr["pr_number"],
+                                )
                             if self._notifier and not dry_run:
                                 await self._notifier.send_message(
                                     f"🛡️ <b>[PATROL]</b> Action Taken!\nRepo: <code>{pr['repo']}</code>\nAction: Replied to comment\nURL: {pr_data.get('html_url', pr.get('pr_url', ''))}"
@@ -691,8 +751,16 @@ class PRPatrol:
             except Exception:
                 diff = ""
 
+            # Layer 1: Contextual Memory — fetch previous failed diff
+            user = await self._get_user()
+            previous_diff = await self._fetch_previous_bot_diff(
+                owner, repo, pr_data["number"], user["login"],
+            )
+
             # Generate fix via LLM
-            prompt = self._build_fix_prompt(feedback, file_content, file_path, diff)
+            prompt = self._build_fix_prompt(
+                feedback, file_content, file_path, diff, previous_diff
+            )
             response = await self._llm.complete(
                 prompt,
                 system=(
@@ -765,6 +833,7 @@ class PRPatrol:
         file_content: str,
         file_path: str | None,
         diff: str,
+        previous_diff: str = "",
     ) -> str:
         """Build the LLM prompt to generate a code fix."""
         parts = [f"A reviewer left this feedback on a pull request:\n\n> {feedback.body}"]
@@ -784,6 +853,14 @@ class PRPatrol:
 
         if diff:
             parts.append(f"\nFull PR diff (for context):\n```diff\n{diff}\n```")
+
+        if previous_diff:
+            parts.append(
+                f"\nHere is the fix you just tried:\n"
+                f"```diff\n{previous_diff}\n```\n"
+                "It FAILED (was rejected). Do NOT generate this exact code again. "
+                "Try a completely different approach based on the feedback."
+            )
 
         parts.append(
             "\nApply the MINIMUM change to address the reviewer's feedback. "
@@ -908,9 +985,12 @@ class PRPatrol:
 
         return False
 
-    # ── CI Auto-Healing ────────────────────────────────────────────────────
+    # ── Fail-Safe Limits ───────────────────────────────────────────────────
 
-    MAX_CI_FIX_ATTEMPTS = 2
+    MAX_CI_RETRIES = 3
+    MAX_DISCUSSION_REPLIES = 3
+
+    # ── CI Auto-Healing ────────────────────────────────────────────────────
 
     async def _check_ci_failures(
         self,
@@ -943,21 +1023,26 @@ class PRPatrol:
         if self._memory:
             attempts = await self._memory.get_ci_fix_attempts(repo_full, pr_number)
 
-        if attempts >= self.MAX_CI_FIX_ATTEMPTS:
+        if attempts >= self.MAX_CI_RETRIES:
             logger.warning(
                 "  🚫 CI fix limit (%d) reached for PR #%d — closing PR",
-                self.MAX_CI_FIX_ATTEMPTS, pr_number,
+                self.MAX_CI_RETRIES, pr_number,
             )
             if not dry_run:
                 try:
                     await self._github.close_pull_request(
                         owner, repo, pr_number,
                         comment=random.choice(GITHUB_REPLIES["CI_LIMIT_CLOSE"]).format(
-                            attempts=self.MAX_CI_FIX_ATTEMPTS,
+                            attempts=self.MAX_CI_RETRIES,
                         ),
                     )
                 except GitHubAPIError as exc:
                     logger.warning("  ⚠️ Could not close PR #%d: %s", pr_number, exc)
+                if self._notifier:
+                    repo_url = pr_data.get("html_url", f"https://github.com/{repo_full}")
+                    await self._notifier.send_message(
+                        f"🏳️ [SURRENDER] PR closed due to max CI retries ({self.MAX_CI_RETRIES}/{self.MAX_CI_RETRIES}) hit on {repo_url}"
+                    )
             return True
 
         # Pick the first failed run to fix
@@ -967,7 +1052,7 @@ class PRPatrol:
 
         logger.info(
             "  🔴 CI check '%s' failed on PR #%d (attempt %d/%d)",
-            check_name, pr_number, attempts + 1, self.MAX_CI_FIX_ATTEMPTS,
+            check_name, pr_number, attempts + 1, self.MAX_CI_RETRIES,
         )
 
         if dry_run:
@@ -982,16 +1067,15 @@ class PRPatrol:
             logger.warning("  ⚠️ Could not extract traceback from CI log")
             return False
 
-        fixed = await self._handle_ci_failure(
-            owner, repo, pr_record, pr_data, traceback, check_name,
+        ci_status = await self._handle_ci_failure(
+            owner, repo, pr_record, pr_data, traceback, check_name, attempts,
         )
 
-        if fixed:
+        if ci_status == "pushed":
             result.ci_fixes_pushed += 1
-            if self._memory:
-                await self._memory.increment_ci_fix_attempts(repo_full, pr_number)
+            return True
 
-        return fixed
+        return ci_status == "closed"
 
     @staticmethod
     def _extract_ci_traceback(raw_log: str) -> str:
@@ -1070,6 +1154,34 @@ class PRPatrol:
         fallback = lines[-100:] if len(lines) > 100 else lines
         return "\n".join(fallback)[:3000]
 
+    async def _fetch_previous_bot_diff(
+        self,
+        owner: str,
+        repo: str,
+        pr_number: int,
+        username: str,
+    ) -> str:
+        """Fetch the diff of the bot's most recent commit on this PR.
+
+        Returns the diff string (capped at 4000 chars) or empty string
+        on any failure.
+        """
+        try:
+            commits = await self._github.get_pr_commits(owner, repo, pr_number)
+            # Walk backwards to find the latest bot commit
+            for commit in reversed(commits):
+                author_login = (
+                    commit.get("author") or {}
+                ).get("login", "")
+                if author_login == username:
+                    sha = commit.get("sha", "")
+                    if sha:
+                        diff = await self._github.get_commit_diff(owner, repo, sha)
+                        return diff[:4000] if diff else ""
+        except Exception as exc:
+            logger.debug("Could not fetch previous bot diff: %s", exc)
+        return ""
+
     async def _handle_ci_failure(
         self,
         owner: str,
@@ -1094,12 +1206,25 @@ class PRPatrol:
             except Exception:
                 diff = ""
 
+            # Layer 1: Contextual Memory — fetch previous failed diff
+            user = await self._get_user()
+            previous_diff = await self._fetch_previous_bot_diff(
+                owner, repo, pr_data["number"], user["login"],
+            )
+
             prompt = (
                 f"The CI pipeline (`{check_name}`) failed with this error:\n"
                 f"```\n{traceback}\n```\n\n"
             )
             if diff:
                 prompt += f"Here is the PR diff for context:\n```diff\n{diff}\n```\n\n"
+            if previous_diff:
+                prompt += (
+                    "Here is the fix you just tried:\n"
+                    f"```diff\n{previous_diff}\n```\n"
+                    "It FAILED. Do NOT generate this exact code again. "
+                    "Try a completely different approach.\n\n"
+                )
             prompt += (
                 "Please fix the code to resolve this CI failure. "
                 "Return ONLY the complete fixed file content. "
@@ -1165,6 +1290,484 @@ class PRPatrol:
         except Exception as e:
             logger.error("  ❌ CI auto-fix failed: %s", e)
             return False
+
+    async def _handle_ci_failure(
+        self,
+        owner: str,
+        repo: str,
+        pr_record: dict,
+        pr_data: dict,
+        traceback: str,
+        check_name: str,
+        starting_attempts: int,
+    ) -> str:
+        """Use the LLM to fix a CI failure and push only sandbox-validated code."""
+        try:
+            head = pr_data.get("head", {})
+            fork_owner = head.get("repo", {}).get("owner", {}).get("login", owner)
+            fork_repo = head.get("repo", {}).get("name", repo)
+            branch = head.get("ref", "main")
+            pr_number = pr_data["number"]
+            repo_full = pr_record["repo"]
+
+            try:
+                diff = await self._github.get_pr_diff(owner, repo, pr_number)
+                if len(diff) > 8000:
+                    diff = diff[:8000] + "\n... (truncated)"
+            except Exception:
+                diff = ""
+
+            user = await self._get_user()
+            previous_diff = await self._fetch_previous_bot_diff(
+                owner, repo, pr_number, user["login"],
+            )
+
+            file_path = self._guess_file_from_traceback(traceback, diff)
+            if not file_path:
+                logger.warning("  Could not determine file path from traceback")
+                return "failed"
+
+            prompt = (
+                f"The CI pipeline (`{check_name}`) failed with this error:\n"
+                f"```\n{traceback}\n```\n\n"
+            )
+            if diff:
+                prompt += f"Here is the PR diff for context:\n```diff\n{diff}\n```\n\n"
+            if previous_diff:
+                prompt += (
+                    "Here is the fix you just tried:\n"
+                    f"```diff\n{previous_diff}\n```\n"
+                    "It FAILED. Do NOT generate this exact code again. "
+                    "Try a completely different approach.\n\n"
+                )
+            prompt += (
+                "Please fix the code to resolve this CI failure. "
+                "Return ONLY the complete fixed file content. "
+                "No explanations. Make the MINIMUM change to fix the error."
+            )
+
+            current_content = ""
+            with contextlib.suppress(Exception):
+                current_content = await self._github.get_file_content(
+                    fork_owner, fork_repo, file_path, ref=branch,
+                )
+
+            fixed_content, _, validation_failures = await self._generate_validated_ci_fix(
+                owner=fork_owner,
+                repo=fork_repo,
+                branch=branch,
+                repo_full=repo_full,
+                pr_number=pr_number,
+                file_path=file_path,
+                current_content=current_content,
+                prompt=prompt,
+                system_prompt=(
+                    "You are a developer fixing CI failures. "
+                    "Analyze the traceback, identify the broken file, "
+                    "and return the complete corrected file content."
+                ),
+                starting_attempts=starting_attempts,
+            )
+            if not fixed_content:
+                if starting_attempts + validation_failures >= self.MAX_CI_RETRIES:
+                    await self._close_ci_retry_limited_pr(
+                        owner=owner,
+                        repo=repo,
+                        repo_full=repo_full,
+                        pr_number=pr_number,
+                        pr_data=pr_data,
+                    )
+                    return "closed"
+
+                logger.warning(
+                    "  Local validation failed for `%s`; no CI fix was pushed",
+                    file_path,
+                )
+                return "failed"
+
+            try:
+                resp = await self._github._get(
+                    f"/repos/{fork_owner}/{fork_repo}/contents/{file_path}",
+                    params={"ref": branch},
+                )
+                sha = resp.get("sha")
+            except Exception:
+                sha = None
+
+            signoff = self._build_signoff(user)
+            commit_msg = random.choice(GITHUB_REPLIES["COMMIT_CI_FIX"]).format(
+                check_name=check_name,
+            )
+            await self._github.create_or_update_file(
+                fork_owner,
+                fork_repo,
+                file_path,
+                fixed_content,
+                commit_msg,
+                branch,
+                sha=sha,
+                signoff=signoff,
+            )
+            logger.info("  Pushed CI fix for '%s' on %s", check_name, file_path)
+
+            if self._memory and validation_failures == 0:
+                await self._memory.increment_ci_fix_attempts(repo_full, pr_number)
+
+            ci_reply = (
+                random.choice(GITHUB_REPLIES["CI_FIX_APPLIED"]).format(
+                    check_name=check_name,
+                    file_path=file_path,
+                )
+                + "\n\n<!-- contribai-patrol -->"
+            )
+            await self._github.create_pr_comment(owner, repo, pr_number, ci_reply)
+            return "pushed"
+
+        except Exception as e:
+            logger.error("  CI auto-fix failed: %s", e)
+            return "failed"
+
+    async def _generate_validated_ci_fix(
+        self,
+        *,
+        owner: str,
+        repo: str,
+        branch: str,
+        repo_full: str,
+        pr_number: int,
+        file_path: str,
+        current_content: str,
+        prompt: str,
+        system_prompt: str,
+        starting_attempts: int,
+    ) -> tuple[str | None, dict[str, Any] | None, int]:
+        """Generate a CI fix and validate it locally before pushing."""
+        if not self._enable_sandbox_validation:
+            response = await self._llm.complete(
+                prompt,
+                system=system_prompt,
+                temperature=0.2,
+            )
+            fixed_content = self._extract_fixed_content(response)
+            return fixed_content or None, None, 0
+
+        remaining_attempts = max(1, self.MAX_CI_RETRIES - starting_attempts)
+        validation_failures = 0
+        current_prompt = prompt
+        last_result: dict[str, Any] | None = None
+
+        with TemporaryDirectory(prefix="contribai-ci-validation-") as tmpdir:
+            workspace = Path(tmpdir).resolve()
+            await self._prepare_validation_workspace(
+                workspace=workspace,
+                owner=owner,
+                repo=repo,
+                branch=branch,
+                file_path=file_path,
+                current_content=current_content,
+            )
+            command, image = self._detect_validation_command(workspace)
+            logger.info(
+                "  Running local sandbox validation with `%s` using image `%s`",
+                command,
+                image,
+            )
+
+            sandbox = self._create_sandbox()
+            try:
+                for _ in range(remaining_attempts):
+                    response = await self._llm.complete(
+                        current_prompt,
+                        system=system_prompt,
+                        temperature=0.2,
+                    )
+                    fixed_content = self._extract_fixed_content(response)
+                    if not fixed_content:
+                        logger.warning("  LLM returned empty fix for CI failure")
+                        return None, last_result, validation_failures
+
+                    await self._write_validation_file(workspace, file_path, fixed_content)
+                    last_result = await sandbox.run_in_sandbox(
+                        str(workspace),
+                        command,
+                        image=image,
+                    )
+                    if last_result.get("exit_code") == 0:
+                        return fixed_content, last_result, validation_failures
+
+                    validation_failures += 1
+                    total_attempts = starting_attempts + validation_failures
+                    logger.warning(
+                        "  Local validation failed for `%s` (attempt %d/%d, exit=%s)",
+                        file_path,
+                        total_attempts,
+                        self.MAX_CI_RETRIES,
+                        last_result.get("exit_code"),
+                    )
+
+                    if self._memory:
+                        await self._memory.increment_ci_fix_attempts(repo_full, pr_number)
+
+                    if total_attempts >= self.MAX_CI_RETRIES:
+                        break
+
+                    current_prompt = self._append_local_validation_failure_prompt(
+                        current_prompt,
+                        last_result,
+                    )
+            finally:
+                with contextlib.suppress(Exception):
+                    sandbox.client.close()
+
+        return None, last_result, validation_failures
+
+    async def _prepare_validation_workspace(
+        self,
+        *,
+        workspace: Path,
+        owner: str,
+        repo: str,
+        branch: str,
+        file_path: str,
+        current_content: str,
+    ) -> None:
+        """Populate a local workspace snapshot for sandbox validation."""
+        hydrated = await self._hydrate_full_validation_workspace(
+            workspace,
+            owner=owner,
+            repo=repo,
+            branch=branch,
+        )
+        if hydrated:
+            return
+
+        logger.info("  Falling back to a minimal validation workspace for `%s`", file_path)
+        await self._write_validation_file(workspace, file_path, current_content)
+
+    async def _hydrate_full_validation_workspace(
+        self,
+        workspace: Path,
+        *,
+        owner: str,
+        repo: str,
+        branch: str,
+    ) -> bool:
+        """Attempt to materialize a text-only repository snapshot for validation."""
+        get_file_tree = getattr(self._github, "get_file_tree", None)
+        get_file_content = getattr(self._github, "get_file_content", None)
+        if not callable(get_file_tree) or not callable(get_file_content):
+            return False
+
+        try:
+            file_tree = await get_file_tree(owner, repo, branch=branch)
+        except TypeError:
+            file_tree = await get_file_tree(owner, repo, branch)
+        except Exception as exc:
+            logger.warning("  Could not fetch validation file tree: %s", exc)
+            return False
+
+        wrote_any = False
+        for node in file_tree:
+            node_path = self._tree_node_value(node, "path")
+            node_type = self._tree_node_value(node, "type")
+            node_size = self._tree_node_value(node, "size", 0)
+            if node_type != "blob" or not node_path or not self._should_copy_validation_file(
+                node_path,
+                node_size,
+            ):
+                continue
+
+            content = None
+            try:
+                content = await get_file_content(owner, repo, node_path, ref=branch)
+            except TypeError:
+                with contextlib.suppress(Exception):
+                    content = await get_file_content(owner, repo, node_path, branch)
+            except Exception:
+                continue
+
+            if not isinstance(content, str):
+                continue
+
+            with contextlib.suppress(ValueError):
+                await self._write_validation_file(workspace, node_path, content)
+                wrote_any = True
+
+        return wrote_any
+
+    @staticmethod
+    def _tree_node_value(node: Any, key: str, default: Any = None) -> Any:
+        """Read a file-tree property from either a dict or model instance."""
+        if isinstance(node, dict):
+            return node.get(key, default)
+        return getattr(node, key, default)
+
+    @staticmethod
+    def _should_copy_validation_file(path: str, size: int) -> bool:
+        """Filter out obviously large or binary files from validation snapshots."""
+        if size and size > 1_000_000:
+            return False
+
+        suffix = Path(path).suffix.lower()
+        if suffix in {
+            ".png",
+            ".jpg",
+            ".jpeg",
+            ".gif",
+            ".bmp",
+            ".ico",
+            ".pdf",
+            ".zip",
+            ".gz",
+            ".tar",
+            ".tgz",
+            ".7z",
+            ".jar",
+            ".exe",
+            ".dll",
+            ".so",
+            ".dylib",
+            ".pyc",
+            ".pyo",
+            ".class",
+            ".woff",
+            ".woff2",
+            ".ttf",
+            ".eot",
+            ".mp3",
+            ".mp4",
+            ".mov",
+            ".avi",
+            ".webm",
+            ".bin",
+            ".sqlite",
+            ".db",
+        }:
+            return False
+
+        return True
+
+    async def _write_validation_file(self, workspace: Path, file_path: str, content: str) -> None:
+        """Write a file into the local validation workspace."""
+        destination = self._resolve_workspace_file(workspace, file_path)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        await asyncio.to_thread(destination.write_text, content, encoding="utf-8")
+
+    @staticmethod
+    def _resolve_workspace_file(workspace: Path, file_path: str) -> Path:
+        """Resolve a repo-relative path inside the validation workspace."""
+        resolved_workspace = workspace.resolve()
+        candidate = (resolved_workspace / Path(file_path)).resolve()
+        if not candidate.is_relative_to(resolved_workspace):
+            raise ValueError(f"Refusing to write outside the validation workspace: {file_path}")
+        return candidate
+
+    def _detect_validation_command(self, workspace: Path) -> tuple[str, str]:
+        """Pick a sandbox validation command based on the repo snapshot."""
+        if (workspace / "package.json").exists():
+            if (workspace / "yarn.lock").exists():
+                return (
+                    "if [ -f yarn.lock ] && command -v yarn >/dev/null 2>&1; "
+                    "then yarn test; else npm test; fi",
+                    "node:20-alpine",
+                )
+            return "npm test", "node:20-alpine"
+
+        if (workspace / "tests").is_dir() or self._workspace_uses_pytest(workspace):
+            return "python -m pytest", "python:3.10-alpine"
+
+        return "python -m compileall .", "python:3.10-alpine"
+
+    @staticmethod
+    def _workspace_uses_pytest(workspace: Path) -> bool:
+        """Detect whether the repo snapshot appears to use pytest."""
+        for manifest in (
+            "pyproject.toml",
+            "requirements.txt",
+            "requirements-dev.txt",
+            "setup.cfg",
+            "setup.py",
+            "tox.ini",
+        ):
+            manifest_path = workspace / manifest
+            if not manifest_path.exists():
+                continue
+
+            with contextlib.suppress(OSError, UnicodeDecodeError):
+                if "pytest" in manifest_path.read_text(encoding="utf-8").lower():
+                    return True
+
+        return False
+
+    def _append_local_validation_failure_prompt(
+        self,
+        prompt: str,
+        sandbox_result: dict[str, Any],
+    ) -> str:
+        """Append sandbox validation logs to the LLM prompt for self-correction."""
+        sandbox_output = self._format_sandbox_output(sandbox_result)
+        return (
+            f"{prompt}\n\n"
+            "Local Validation Failure:\n"
+            "I ran the test suite locally with your fix, but it failed. Here is the output:\n"
+            f"```text\n{sandbox_output}\n```\n"
+            "Please analyze this local failure and provide a corrected fix."
+        )
+
+    @staticmethod
+    def _format_sandbox_output(sandbox_result: dict[str, Any]) -> str:
+        """Format sandbox stdout and stderr into a compact prompt payload."""
+        stdout = (sandbox_result.get("stdout") or "").strip()
+        stderr = (sandbox_result.get("stderr") or "").strip()
+        exit_code = sandbox_result.get("exit_code")
+
+        parts = []
+        if stdout:
+            parts.append(f"STDOUT:\n{stdout}")
+        if stderr:
+            parts.append(f"STDERR:\n{stderr}")
+        if not parts:
+            parts.append("No sandbox output was captured.")
+        parts.append(f"Exit code: {exit_code}")
+
+        combined = "\n\n".join(parts)
+        if len(combined) > 4000:
+            return combined[:4000] + "\n... (truncated)"
+        return combined
+
+    async def _close_ci_retry_limited_pr(
+        self,
+        *,
+        owner: str,
+        repo: str,
+        repo_full: str,
+        pr_number: int,
+        pr_data: dict,
+    ) -> None:
+        """Close a PR after exhausting the CI auto-heal retry budget."""
+        logger.warning(
+            "  CI fix limit (%d) reached for PR #%d; closing PR",
+            self.MAX_CI_RETRIES,
+            pr_number,
+        )
+        try:
+            await self._github.close_pull_request(
+                owner,
+                repo,
+                pr_number,
+                comment=random.choice(GITHUB_REPLIES["CI_LIMIT_CLOSE"]).format(
+                    attempts=self.MAX_CI_RETRIES,
+                ),
+            )
+        except GitHubAPIError as exc:
+            logger.warning("  Could not close PR #%d: %s", pr_number, exc)
+
+        if self._notifier:
+            repo_url = pr_data.get("html_url", f"https://github.com/{repo_full}")
+            await self._notifier.send_message(
+                f"[SURRENDER] PR closed due to max CI retries "
+                f"({self.MAX_CI_RETRIES}/{self.MAX_CI_RETRIES}) hit on {repo_url}"
+            )
 
     @staticmethod
     def _guess_file_from_traceback(traceback: str, diff: str) -> str | None:

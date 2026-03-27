@@ -10,7 +10,10 @@ import pytest
 from contribai.core.exceptions import GitHubAPIError
 from contribai.orchestrator.human import (
     ABSOLUTE_MAX_PRS_PER_DAY,
-    HUNT_WEIGHT,
+    DRY_HUNT_DELAY_MAX,
+    DRY_HUNT_DELAY_MIN,
+    HUNT_DELAY_MAX,
+    HUNT_DELAY_MIN,
     WARP_MAX_ITERATIONS,
     SuperHumanLoop,
 )
@@ -35,10 +38,10 @@ def mock_pipeline():
     pipeline.config.github.token = "fake-token"
     pipeline.config.llm = MagicMock()
     pipeline.hunt = AsyncMock(
-        return_value=MagicMock(repos_analyzed=1, prs_created=0)
+        return_value=MagicMock(repos_analyzed=1, prs_created=0, pr_urls=[])
     )
     pipeline.run_single = AsyncMock(
-        return_value=MagicMock(repos_analyzed=1, prs_created=1)
+        return_value=MagicMock(repos_analyzed=1, prs_created=1, pr_urls=[])
     )
     return pipeline
 
@@ -49,38 +52,47 @@ def loop(mock_pipeline, mock_memory):
     return SuperHumanLoop(mock_pipeline, mock_memory, dry_run=True)
 
 
-class TestDailyLimit:
-    """Tests for daily PR quota generation."""
+class TestDailyTarget:
+    """Tests for daily PR target generation."""
 
-    def test_daily_limit_within_bounds(self, loop):
-        """Daily limit must always be between 2 and 5 (inclusive)."""
+    def test_daily_target_within_bounds(self, loop):
+        """Daily target must always be between 1 and 5 (inclusive)."""
         seen = set()
         for _ in range(200):
             loop._current_day = None  # force new-day check
             loop._new_day_check()
-            seen.add(loop._daily_limit)
-            assert 2 <= loop._daily_limit <= 5
-            assert loop._daily_limit <= ABSOLUTE_MAX_PRS_PER_DAY
+            seen.add(loop._daily_pr_target)
+            assert 1 <= loop._daily_pr_target <= 5
+            assert loop._daily_pr_target <= ABSOLUTE_MAX_PRS_PER_DAY
 
         # With 200 rounds, we should see at least 2 distinct values
-        assert len(seen) >= 2, f"Only saw limits: {seen}"
+        assert len(seen) >= 2, f"Only saw targets: {seen}"
 
     def test_safety_cap_respected(self, loop):
-        """Daily limit must never exceed ABSOLUTE_MAX_PRS_PER_DAY (6)."""
+        """Daily target must never exceed ABSOLUTE_MAX_PRS_PER_DAY (6)."""
         for _ in range(500):
             loop._current_day = None
             loop._new_day_check()
-            assert loop._daily_limit <= ABSOLUTE_MAX_PRS_PER_DAY
+            assert loop._daily_pr_target <= ABSOLUTE_MAX_PRS_PER_DAY
+
+    def test_prs_created_today_resets_on_new_day(self, loop):
+        """The local PR counter should reset to 0 when a new day starts."""
+        loop._prs_created_today = 3
+        loop._current_day = None  # force new-day check
+        loop._new_day_check()
+        assert loop._prs_created_today == 0
 
 
 class TestActionSelection:
     """Tests for hunt/patrol interleaving logic."""
 
     @pytest.mark.asyncio
-    async def test_patrol_only_when_quota_reached(self, loop, mock_memory):
-        """When today_prs >= daily_limit, only Patrol should run."""
-        mock_memory.get_today_pr_count.return_value = 5
-        loop._daily_limit = 3  # quota is 3, today_prs=5 → exceeded
+    async def test_patrol_only_when_target_reached(self, loop, mock_memory):
+        """When _prs_created_today >= _daily_pr_target, only Patrol should run."""
+        # Initialize the day first so _new_day_check() won't reset counter
+        loop._new_day_check()
+        loop._daily_pr_target = 3
+        loop._prs_created_today = 5  # already exceeded target
 
         hunt_called = False
         patrol_called = False
@@ -88,6 +100,7 @@ class TestActionSelection:
         async def fake_hunt(*a, **kw):
             nonlocal hunt_called
             hunt_called = True
+            return 0, 0
 
         async def fake_patrol(*a, **kw):
             nonlocal patrol_called
@@ -98,13 +111,12 @@ class TestActionSelection:
             await loop.run_daily_routine(time_warp=True)
 
         assert patrol_called, "Patrol should have been called"
-        assert not hunt_called, "Hunt should NOT be called when quota is reached"
+        assert not hunt_called, "Hunt should NOT be called when target is reached"
 
     @pytest.mark.asyncio
-    async def test_hunt_patrol_interleave(self, loop, mock_memory):
-        """When under quota, both Hunt and Patrol should be chosen."""
-        mock_memory.get_today_pr_count.return_value = 0
-        loop._daily_limit = 5
+    async def test_only_hunts_when_under_target(self, loop, mock_memory):
+        """When under target, ONLY Hunt should run (no stochastic patrol)."""
+        loop._daily_pr_target = 99  # will never be reached in 10 iterations
 
         hunt_count = 0
         patrol_count = 0
@@ -112,6 +124,7 @@ class TestActionSelection:
         async def fake_hunt(*a, **kw):
             nonlocal hunt_count
             hunt_count += 1
+            return 0, 1  # 0 PRs, 1 repo scanned
 
         async def fake_patrol(*a, **kw):
             nonlocal patrol_count
@@ -121,46 +134,13 @@ class TestActionSelection:
              patch.object(loop, "_do_patrol", side_effect=fake_patrol):
             await loop.run_daily_routine(time_warp=True)
 
-        # With 60/40 split over 10 iterations, statistically both should
-        # be called. If one is 0, the test would be extremely unlikely
-        # (p < 0.01%) to fail randomly.
-        total = hunt_count + patrol_count
-        assert total == WARP_MAX_ITERATIONS, f"Expected {WARP_MAX_ITERATIONS} actions, got {total}"
-        assert hunt_count > 0, "Hunt should have been called at least once"
-        assert patrol_count > 0, "Patrol should have been called at least once"
+        assert hunt_count == WARP_MAX_ITERATIONS, \
+            f"All {WARP_MAX_ITERATIONS} iterations should be Hunt, got {hunt_count}"
+        assert patrol_count == 0, \
+            "Patrol should NOT be called when under target"
 
     @pytest.mark.asyncio
-    async def test_controlled_target_uses_stochastic_first_action(self, mock_pipeline, mock_memory):
-        """A controlled target still uses 60/40 stochastic roll for all actions."""
-        mock_memory.get_today_pr_count = AsyncMock(side_effect=[0] + [1] * 16)
-        controlled_loop = SuperHumanLoop(
-            mock_pipeline,
-            mock_memory,
-            dry_run=True,
-            target_repo_url="https://github.com/hieuit095/gitvisualizer-ai",
-        )
-        controlled_loop._daily_limit = 5
-
-        hunt_count = 0
-        patrol_count = 0
-
-        async def fake_hunt(*a, **kw):
-            nonlocal hunt_count
-            hunt_count += 1
-
-        async def fake_patrol(*a, **kw):
-            nonlocal patrol_count
-            patrol_count += 1
-
-        with patch.object(controlled_loop, "_do_hunt", side_effect=fake_hunt), \
-             patch.object(controlled_loop, "_do_patrol", side_effect=fake_patrol):
-            await controlled_loop.run_daily_routine(time_warp=True)
-
-        # Total actions should equal WARP_MAX_ITERATIONS
-        assert hunt_count + patrol_count == WARP_MAX_ITERATIONS
-
-    @pytest.mark.asyncio
-    async def test_controlled_hunt_uses_single_repo_path(self, mock_pipeline, mock_memory):
+    async def test_controlled_target_uses_single_repo_path(self, mock_pipeline, mock_memory):
         """Targeted hunts should use run_single instead of discovery hunt."""
         controlled_loop = SuperHumanLoop(
             mock_pipeline,
@@ -182,7 +162,7 @@ class TestActionSelection:
     async def test_controlled_hunt_calls_run_single_once(self, mock_pipeline, mock_memory):
         """Targeted hunts call run_single exactly once (no retry logic)."""
         mock_pipeline.run_single = AsyncMock(
-            return_value=MagicMock(repos_analyzed=1, prs_created=0)
+            return_value=MagicMock(repos_analyzed=1, prs_created=0, pr_urls=[])
         )
         controlled_loop = SuperHumanLoop(
             mock_pipeline,
@@ -195,39 +175,88 @@ class TestActionSelection:
 
         assert mock_pipeline.run_single.await_count == 1
 
-    @pytest.mark.asyncio
-    async def test_controlled_target_uses_stochastic_roll(
-        self, mock_pipeline, mock_memory
-    ):
-        """With a target URL and open PRs, actions still follow 60/40 stochastic roll."""
-        mock_memory.get_today_pr_count = AsyncMock(side_effect=[1] * 16)
-        mock_memory.get_prs = AsyncMock(return_value=[{"pr_number": 12, "status": "open"}])
-        controlled_loop = SuperHumanLoop(
-            mock_pipeline,
-            mock_memory,
-            dry_run=True,
-            target_repo_url="https://github.com/hieuit095/gitvisualizer-ai",
-        )
-        controlled_loop._daily_limit = 5
 
+class TestPRCounter:
+    """Tests for the strict PR counter logic."""
+
+    @pytest.mark.asyncio
+    async def test_counter_increments_only_on_success(self, loop, mock_pipeline):
+        """_prs_created_today should ONLY increment when _do_hunt returns > 0."""
+        # Initialize the day first so _new_day_check() won't reset counter
+        loop._new_day_check()
+        loop._daily_pr_target = 99  # will never be reached
+        call_count = 0
+
+        async def fake_hunt_alternating(*a, **kw):
+            nonlocal call_count
+            call_count += 1
+            # Return 1 PR on odd calls, 0 on even
+            return (1, 1) if call_count % 2 == 1 else (0, 1)
+
+        with patch.object(loop, "_do_hunt", side_effect=fake_hunt_alternating):
+            await loop.run_daily_routine(time_warp=True)
+
+        # With 10 iterations: calls 1,3,5,7,9 return 1 = 5 PRs
+        expected_prs = 5
+        assert loop._prs_created_today == expected_prs, \
+            f"Expected {expected_prs} PRs, got {loop._prs_created_today}"
+
+    @pytest.mark.asyncio
+    async def test_counter_does_not_increment_on_error(self, loop, mock_pipeline):
+        """Errors in _do_hunt should NOT increment _prs_created_today."""
+        loop._daily_pr_target = 99
+
+        async def always_fail(*a, **kw):
+            raise GitHubAPIError("rate limit", status_code=429)
+
+        with patch.object(loop, "_do_hunt", side_effect=always_fail):
+            await loop.run_daily_routine(time_warp=True)
+
+        assert loop._prs_created_today == 0, \
+            "Counter should be 0 after all errors"
+
+    @pytest.mark.asyncio
+    async def test_counter_does_not_increment_on_zero_prs(self, loop, mock_pipeline):
+        """Scanning 50 repos without a PR means counter stays at 0."""
+        loop._daily_pr_target = 99
+
+        async def no_pr_hunt(*a, **kw):
+            return 0, 1  # 0 PRs, 1 repo scanned
+
+        with patch.object(loop, "_do_hunt", side_effect=no_pr_hunt):
+            await loop.run_daily_routine(time_warp=True)
+
+        assert loop._prs_created_today == 0, \
+            "Counter should be 0 when no PRs are created"
+
+    @pytest.mark.asyncio
+    async def test_switches_to_patrol_after_target_met(self, loop, mock_pipeline):
+        """After reaching target, loop should switch to patrol-only."""
+        # Initialize the day first so _new_day_check() won't reset counter
+        loop._new_day_check()
+        loop._daily_pr_target = 2
         hunt_count = 0
         patrol_count = 0
 
-        async def fake_hunt(*a, **kw):
+        async def hunt_returns_one(*a, **kw):
             nonlocal hunt_count
             hunt_count += 1
+            return 1, 1  # 1 PR, 1 repo
 
-        async def fake_patrol(*a, **kw):
+        async def count_patrol(*a, **kw):
             nonlocal patrol_count
             patrol_count += 1
 
-        with patch.object(controlled_loop, "_do_hunt", side_effect=fake_hunt), \
-             patch.object(controlled_loop, "_do_patrol", side_effect=fake_patrol):
-            await controlled_loop.run_daily_routine(time_warp=True)
+        with patch.object(loop, "_do_hunt", side_effect=hunt_returns_one), \
+             patch.object(loop, "_do_patrol", side_effect=count_patrol):
+            await loop.run_daily_routine(time_warp=True)
 
-        # Both should be called — 60/40 split over 10 iterations
-        total = hunt_count + patrol_count
-        assert total == WARP_MAX_ITERATIONS
+        # First 2 iterations: hunt → get 1 PR each → target=2 met
+        # Remaining 8 iterations: patrol only
+        assert hunt_count == 2, f"Expected 2 hunts, got {hunt_count}"
+        assert patrol_count == WARP_MAX_ITERATIONS - 2, \
+            f"Expected {WARP_MAX_ITERATIONS - 2} patrols, got {patrol_count}"
+        assert loop._prs_created_today == 2
 
 
 class TestErrorResilience:
@@ -236,9 +265,7 @@ class TestErrorResilience:
     @pytest.mark.asyncio
     async def test_github_api_error_does_not_crash(self, loop, mock_memory):
         """GitHubAPIError during Hunt should not crash the loop."""
-        mock_memory.get_today_pr_count.return_value = 0
-        loop._daily_limit = 5
-
+        loop._daily_pr_target = 99
         call_count = 0
 
         async def failing_hunt(*a, **kw):
@@ -247,12 +274,9 @@ class TestErrorResilience:
             if call_count <= 3:
                 raise GitHubAPIError("API rate limit exceeded", status_code=429)
             # After 3 failures, succeed silently
+            return 0, 1
 
-        async def noop_patrol(*a, **kw):
-            pass
-
-        with patch.object(loop, "_do_hunt", side_effect=failing_hunt), \
-             patch.object(loop, "_do_patrol", side_effect=noop_patrol):
+        with patch.object(loop, "_do_hunt", side_effect=failing_hunt):
             # Should complete without raising
             await loop.run_daily_routine(time_warp=True)
 
@@ -262,8 +286,10 @@ class TestErrorResilience:
     @pytest.mark.asyncio
     async def test_generic_exception_does_not_crash(self, loop, mock_memory):
         """Any unexpected exception during Patrol should not crash the loop."""
-        mock_memory.get_today_pr_count.return_value = 5  # quota reached
-        loop._daily_limit = 3
+        # Initialize the day first so _new_day_check() won't reset counter
+        loop._new_day_check()
+        loop._daily_pr_target = 3
+        loop._prs_created_today = 5  # quota reached → patrol mode
 
         error_count = 0
 
@@ -286,14 +312,12 @@ class TestTimeWarp:
     @pytest.mark.asyncio
     async def test_time_warp_exits_after_max_iterations(self, loop, mock_memory):
         """Time-warp mode should exit after exactly WARP_MAX_ITERATIONS iterations."""
-        mock_memory.get_today_pr_count.return_value = 0
-        loop._daily_limit = 5
+        loop._daily_pr_target = 99
 
         async def noop(*a, **kw):
-            pass
+            return 0, 1
 
-        with patch.object(loop, "_do_hunt", side_effect=noop), \
-             patch.object(loop, "_do_patrol", side_effect=noop):
+        with patch.object(loop, "_do_hunt", side_effect=noop):
             await loop.run_daily_routine(time_warp=True)
 
         # _iteration is incremented at start of each iteration, then checked
@@ -307,3 +331,75 @@ class TestTimeWarp:
             for action in ("hunt", "patrol", "patrol_only"):
                 delay = loop._pick_delay(action, time_warp=True)
                 assert 1 <= delay <= 3, f"Time-warp delay for {action} was {delay}"
+
+
+class TestDynamicSleep:
+    """Tests for dynamic sleep based on hunt outcome."""
+
+    def test_pick_delay_hunt_dry_range(self, loop):
+        """hunt_dry delay should be 120-300 seconds (2-5 min)."""
+        for _ in range(200):
+            delay = loop._pick_delay("hunt_dry", time_warp=False)
+            assert DRY_HUNT_DELAY_MIN <= delay <= DRY_HUNT_DELAY_MAX, \
+                f"hunt_dry delay {delay} outside [{DRY_HUNT_DELAY_MIN}, {DRY_HUNT_DELAY_MAX}]"
+
+    def test_pick_delay_hunt_normal_range(self, loop):
+        """Normal hunt delay should be 1800-5400 seconds (30-90 min)."""
+        for _ in range(200):
+            delay = loop._pick_delay("hunt", time_warp=False)
+            assert HUNT_DELAY_MIN <= delay <= HUNT_DELAY_MAX, \
+                f"hunt delay {delay} outside [{HUNT_DELAY_MIN}, {HUNT_DELAY_MAX}]"
+
+    def test_pick_delay_hunt_dry_time_warp(self, loop):
+        """hunt_dry in time-warp mode should still use 1-3s."""
+        for _ in range(100):
+            delay = loop._pick_delay("hunt_dry", time_warp=True)
+            assert 1 <= delay <= 3, f"Time-warp hunt_dry delay was {delay}"
+
+    @pytest.mark.asyncio
+    async def test_dry_hunt_uses_short_delay(self, loop, mock_pipeline):
+        """When _do_hunt returns (0, 0), delay should use hunt_dry."""
+        loop._new_day_check()
+        loop._daily_pr_target = 99
+        delays_used = []
+
+        async def dry_hunt(*a, **kw):
+            return 0, 0  # 0 PRs, 0 repos scanned (dry run)
+
+        original_pick = loop._pick_delay
+
+        def tracking_pick(action, tw):
+            delays_used.append(action)
+            return original_pick(action, tw)
+
+        with patch.object(loop, "_do_hunt", side_effect=dry_hunt), \
+             patch.object(loop, "_pick_delay", side_effect=tracking_pick):
+            await loop.run_daily_routine(time_warp=True)
+
+        # All iterations should have used "hunt_dry" since no repos were scanned
+        assert all(d == "hunt_dry" for d in delays_used), \
+            f"Expected all hunt_dry delays, got {delays_used}"
+
+    @pytest.mark.asyncio
+    async def test_productive_hunt_uses_normal_delay(self, loop, mock_pipeline):
+        """When _do_hunt returns repos scanned, delay should use normal hunt."""
+        loop._new_day_check()
+        loop._daily_pr_target = 99
+        delays_used = []
+
+        async def productive_hunt(*a, **kw):
+            return 0, 3  # 0 PRs but 3 repos scanned
+
+        original_pick = loop._pick_delay
+
+        def tracking_pick(action, tw):
+            delays_used.append(action)
+            return original_pick(action, tw)
+
+        with patch.object(loop, "_do_hunt", side_effect=productive_hunt), \
+             patch.object(loop, "_pick_delay", side_effect=tracking_pick):
+            await loop.run_daily_routine(time_warp=True)
+
+        # All iterations should have used "hunt" since repos were scanned
+        assert all(d == "hunt" for d in delays_used), \
+            f"Expected all hunt delays, got {delays_used}"

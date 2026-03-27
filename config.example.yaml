@@ -8,15 +8,15 @@ github:
   rate_limit_buffer: 100
 
 llm:
-  provider: "gemini"  # gemini | openai | anthropic | ollama
-  model: "gemini-2.5-flash"
-  api_key: "your_api_key_here"
+  provider: "minimax"
+  model: "MiniMax-M2.7"
+  api_key: "your_minimax_api_key_here"
   temperature: 0.3
   max_tokens: 8192
-  # For ollama (local models):
-  # provider: "ollama"
-  # model: "codellama:13b"
-  # base_url: "http://localhost:11434"
+
+notifications:
+  telegram_token: ""          # BotFather token (123456:ABC-DEF)
+  telegram_chat_id: ""        # Your Telegram chat ID
 
 analysis:
   enabled_analyzers:

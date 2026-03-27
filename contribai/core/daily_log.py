@@ -36,8 +36,8 @@ class DailyMarkdownLogger:
     # ── Public API ────────────────────────────────────────────────────
 
     def log_new_day(self, daily_limit: int) -> None:
-        """Log the start of a new day with the PR quota."""
-        self._write(f"🎯 NEW DAY: Daily quota set to {daily_limit} PRs.")
+        """Log the start of a new day with the PR target."""
+        self._write(f"🎯 NEW DAY: Daily target set to {daily_limit} successful PRs.")
 
     def log_hunt_success(
         self, repo: str, pr_number: int, pr_url: str,

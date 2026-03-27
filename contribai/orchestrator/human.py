@@ -27,6 +27,8 @@ ABSOLUTE_MAX_PRS_PER_DAY = 6
 # Delay ranges (seconds) for real operation
 HUNT_DELAY_MIN = 1800   # 30 minutes
 HUNT_DELAY_MAX = 5400   # 90 minutes
+DRY_HUNT_DELAY_MIN = 120   # 2 minutes — retry quickly when no repos scanned
+DRY_HUNT_DELAY_MAX = 300   # 5 minutes
 PATROL_DELAY_MIN = 600  # 10 minutes
 PATROL_DELAY_MAX = 1800 # 30 minutes
 PATROL_ONLY_DELAY_MIN = 3600   # 1 hour
@@ -70,6 +72,11 @@ HUMAN_THOUGHTS = {
         "☕ Code xong mệt ghê, nghỉ {mins} phút uống cà phê cái đã.",
         "🎮 Tay rung rồi, kệ, chơi game {mins} phút cho thư giãn rồi quay lại.",
         "📱 Nghỉ tay {mins} phút, đi scroll TikTok một tí rồi code tiếp!",
+    ],
+    "REST_HUNT_DRY": [
+        "🔄 Dry run — 0 repos scanned. Retry in {mins} min with different criteria...",
+        "⏩ Nothing to scan this round. Quick {mins} min pause then try again!",
+        "🎲 No targets found. Switching criteria in {mins} min...",
     ],
     "START_PATROL": [
         "🛡️ Vào xem mấy cái PR cũ có ai comment gì chưa nào...",
@@ -139,9 +146,9 @@ class SuperHumanLoop:
     """Orchestrates a stochastically driven daily routine.
 
     Mimics a real human developer by:
-    - Setting a random daily PR quota (2-5, capped at 6)
-    - Injecting random delays to simulate coding, breaks, and sleep
-    - Shifting to patrol-only mode once the daily PR limit is reached
+    - Setting a random daily PR target (1-5, capped at 6)
+    - Hunting INFINITELY until the target number of successful PRs is met
+    - Shifting to patrol-only mode once the daily PR target is reached
     - Handling errors gracefully with "stress breaks"
     """
 
@@ -171,7 +178,8 @@ class SuperHumanLoop:
         self._dry_run = dry_run
         self._target_repo_url = target_repo_url
         self._target_repo_max_prs = max(1, target_repo_max_prs)
-        self._daily_limit: int = 0
+        self._daily_pr_target: int = 0
+        self._prs_created_today: int = 0
         self._current_day: date | None = None
         self._iteration = 0
         self._quota_logged_today = False
@@ -186,12 +194,13 @@ class SuperHumanLoop:
         today = datetime.utcnow().date()
         if self._current_day != today:
             self._current_day = today
-            self._daily_limit = min(
-                random.randint(2, 5),
+            self._daily_pr_target = min(
+                random.randint(1, 5),
                 ABSOLUTE_MAX_PRS_PER_DAY,
             )
-            logger.info(_thought("WAKE_UP", limit=self._daily_limit))
-            self._daily_log.log_new_day(self._daily_limit)
+            self._prs_created_today = 0
+            logger.info(_thought("WAKE_UP", limit=self._daily_pr_target))
+            self._daily_log.log_new_day(self._daily_pr_target)
             self._quota_logged_today = False  # reset for new day
             return True
         return False
@@ -207,6 +216,8 @@ class SuperHumanLoop:
 
         if action == "hunt":
             return random.randint(HUNT_DELAY_MIN, HUNT_DELAY_MAX)
+        elif action == "hunt_dry":
+            return random.randint(DRY_HUNT_DELAY_MIN, DRY_HUNT_DELAY_MAX)
         elif action == "patrol_only":
             return random.randint(PATROL_ONLY_DELAY_MIN, PATROL_ONLY_DELAY_MAX)
         else:  # patrol
@@ -228,11 +239,14 @@ class SuperHumanLoop:
         hours = minutes // 60
         return f"{hours}h {minutes % 60}m"
 
-    async def _do_hunt(self) -> None:
+    async def _do_hunt(self) -> tuple[int, int]:
         """Execute a single Hunt action.
 
         If target_repo_url is set, hunts that specific repo.
         Otherwise, uses DiscoveryEngine for wild GitHub discovery.
+
+        Returns:
+            Tuple of (prs_created, repos_analyzed).
         """
         logger.info(_thought("START_HUNT"))
         try:
@@ -263,8 +277,8 @@ class SuperHumanLoop:
                 prs=result.prs_created,
             ))
             # ── Daily log: record hunt outcome ──
-            if result.prs_created > 0 and hasattr(result, "pr_urls"):
-                for url in (result.pr_urls or []):
+            if result.prs_created > 0 and result.pr_urls:
+                for url in result.pr_urls:
                     # Extract repo and PR# from URL
                     parts = url.rstrip("/").split("/")
                     repo = f"{parts[-4]}/{parts[-3]}" if len(parts) >= 4 else "unknown"
@@ -283,11 +297,12 @@ class SuperHumanLoop:
                 )
             else:
                 self._daily_log.log_hunt_no_result(result.repos_analyzed)
+            return result.prs_created, result.repos_analyzed
         except GitHubAPIError as exc:
-            logger.error("🦅 HUNT thất bại (GitHubAPIError): %s", exc)
+            logger.error("🦅 HUNT failed (GitHubAPIError): %s", exc)
             raise
         except Exception as exc:
-            logger.error("🦅 HUNT thất bại (lỗi không xác định): %s", exc)
+            logger.error("🦅 HUNT failed (unexpected error): %s", exc)
             raise
 
     async def _do_patrol(self) -> None:
@@ -344,6 +359,10 @@ class SuperHumanLoop:
     async def run_daily_routine(self, *, time_warp: bool = False) -> None:
         """Run the continuous Super Human daily routine.
 
+        The bot hunts INFINITELY until its daily PR target is met.
+        Only successful PR creations count towards the target.
+        Scanning repos without creating PRs does NOT consume quota.
+
         Args:
             time_warp: If True, overrides delays to 1-3 seconds and exits
                        after 10 iterations (for testing / verification).
@@ -351,7 +370,7 @@ class SuperHumanLoop:
         if time_warp:
             logger.info(_thought("TIME_WARP_START", max_iter=WARP_MAX_ITERATIONS))
 
-        logger.info("🧠 Super Human Mode khởi động — bắt đầu vòng lặp ngày mới...")
+        logger.info("🧠 Super Human Mode initialized — starting daily loop...")
         self._iteration = 0
 
         while True:
@@ -360,28 +379,28 @@ class SuperHumanLoop:
             # ── Time-warp exit gate ─────────────────────────────────────
             if time_warp and self._iteration > WARP_MAX_ITERATIONS:
                 logger.info(
-                    "⏩ TIME-WARP: Hoàn thành %d iterations — kết thúc.",
+                    "⏩ TIME-WARP: Completed %d iterations — exiting.",
                     WARP_MAX_ITERATIONS,
                 )
                 break
 
-            # ── New day check & quota reset ─────────────────────────────
+            # ── New day check & target reset ────────────────────────────
             self._new_day_check()
 
-            # ── Query actual PR count from Memory ───────────────────────
-            today_prs = await self._memory.get_today_pr_count()
-            remaining = max(0, self._daily_limit - today_prs)
+            remaining = max(0, self._daily_pr_target - self._prs_created_today)
 
-            # ── Decide action ───────────────────────────────────────────
-            if today_prs >= self._daily_limit:
-                # Quota reached — patrol-only mode
+            # ── Decide action based on LOCAL PR counter ─────────────────
+            if self._prs_created_today >= self._daily_pr_target:
+                # ── TARGET MET — Patrol-only mode ──────────────────────
                 if not self._quota_logged_today:
-                    self._daily_log.log_quota_met(today_prs, self._daily_limit)
+                    self._daily_log.log_quota_met(
+                        self._prs_created_today, self._daily_pr_target,
+                    )
                     self._quota_logged_today = True
                 logger.info(_thought(
                     "QUOTA_MET",
-                    today=today_prs,
-                    limit=self._daily_limit,
+                    today=self._prs_created_today,
+                    limit=self._daily_pr_target,
                 ))
                 try:
                     await self._do_patrol()
@@ -400,50 +419,59 @@ class SuperHumanLoop:
                 await asyncio.sleep(delay)
 
             else:
-                # Under quota — log iteration status
+                # ── UNDER TARGET — Hunt infinitely until target met ────
                 logger.info(_thought(
                     "ITERATION",
                     iter=self._iteration,
-                    today=today_prs,
-                    limit=self._daily_limit,
+                    today=self._prs_created_today,
+                    limit=self._daily_pr_target,
                     remaining=remaining,
                 ))
 
-                # ── Stochastic action selection (60% Hunt / 40% Patrol) ──
-                roll = random.random()
-                action = "hunt" if roll < HUNT_WEIGHT else "patrol"
-                logger.debug(
-                    "Quota check: today=%d, limit=%d, remaining=%d | roll=%.2f → %s",
-                    today_prs, self._daily_limit, remaining, roll, action,
-                )
-                action_vn = "HUNT 🦅" if action == "hunt" else "PATROL 🛡️"
-
                 logger.info(_thought(
                     "ACTION_ROLL",
-                    roll=roll,
-                    action=action_vn,
+                    roll=0.0,
+                    action="HUNT 🦅",
                 ))
 
                 try:
-                    if action == "hunt":
-                        await self._do_hunt()
+                    prs_opened, repos_scanned = await self._do_hunt()
+                    # CRITICAL: Only count ACTUAL successful PR creations
+                    if prs_opened > 0:
+                        self._prs_created_today += prs_opened
+                        logger.info(
+                            "🎯 PR COUNTER: +%d → %d/%d today",
+                            prs_opened,
+                            self._prs_created_today,
+                            self._daily_pr_target,
+                        )
                     else:
-                        await self._do_patrol()
+                        logger.info(
+                            "🔄 No PR created this hunt. Counter stays %d/%d.",
+                            self._prs_created_today,
+                            self._daily_pr_target,
+                        )
                 except (GitHubAPIError, ContribAIError, Exception) as exc:
-                    logger.error("Action error: %s", exc)
-                    self._daily_log.log_error(action.upper(), str(exc))
+                    # Errors do NOT increment the counter
+                    logger.error("Hunt error: %s", exc)
+                    self._daily_log.log_error("HUNT", str(exc))
                     stress_delay = self._pick_stress_delay(time_warp)
                     mins = max(1, stress_delay // 60)
                     logger.warning(_thought("API_ERROR", mins=mins))
                     await asyncio.sleep(stress_delay)
                     continue
 
-                delay = self._pick_delay(action, time_warp)
-                mins = max(1, delay // 60)
-                if action == "hunt":
-                    logger.info(_thought("REST_HUNT", mins=mins))
+                # ── Dynamic Sleep ──────────────────────────────────────
+                # Dry run (0 repos scanned, 0 PRs) → short retry (2-5 min)
+                # Productive hunt (repos scanned or PRs created) → normal rest (30-90 min)
+                if prs_opened == 0 and repos_scanned == 0:
+                    delay = self._pick_delay("hunt_dry", time_warp)
+                    mins = max(1, delay // 60)
+                    logger.info(_thought("REST_HUNT_DRY", mins=mins))
                 else:
-                    logger.info(_thought("REST_PATROL", mins=mins))
+                    delay = self._pick_delay("hunt", time_warp)
+                    mins = max(1, delay // 60)
+                    logger.info(_thought("REST_HUNT", mins=mins))
                 await asyncio.sleep(delay)
 
         self._daily_log.log_shutdown(self._iteration - 1)

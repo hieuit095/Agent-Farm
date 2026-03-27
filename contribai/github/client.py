@@ -375,6 +375,21 @@ class GitHubClient:
         resp.raise_for_status()
         return resp.text
 
+    async def get_pr_commits(self, owner: str, repo: str, pr_number: int) -> list[dict]:
+        """Get commits on a pull request."""
+        return await self._get(f"/repos/{owner}/{repo}/pulls/{pr_number}/commits")
+
+    async def get_commit_diff(self, owner: str, repo: str, sha: str) -> str:
+        """Get the diff of a specific commit."""
+        resp = await self._client.get(
+            f"/repos/{owner}/{repo}/commits/{sha}",
+            headers={"Accept": "application/vnd.github.v3.diff"},
+        )
+        if resp.status_code in (404, 422):
+            return ""
+        resp.raise_for_status()
+        return resp.text
+
     async def get_authenticated_user(self) -> dict:
         """Get the authenticated user's profile."""
         return await self._get("/user")

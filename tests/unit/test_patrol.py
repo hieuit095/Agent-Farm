@@ -391,6 +391,20 @@ class TestBuildFixPrompt:
         prompt = patrol._build_fix_prompt(item, "", None, "diff content")
         assert "@@ -1,3 +1,4 @@" in prompt
 
+    def test_prompt_includes_previous_diff(self):
+        github = MagicMock()
+        llm = MagicMock()
+        patrol = PRPatrol(github=github, llm=llm)
+        item = FeedbackItem(
+            comment_id=1,
+            author="reviewer",
+            body="Fix it",
+            action=FeedbackAction.CODE_CHANGE,
+        )
+        prompt = patrol._build_fix_prompt(item, "", None, "", previous_diff="-bad\n+worse")
+        assert "-bad" in prompt
+        assert "It FAILED (was rejected)" in prompt
+
 
 class TestExtractFixedContent:
     """Test _extract_fixed_content method."""
@@ -879,7 +893,8 @@ class TestCIAutoHealing:
             "owner/repo", 20, "https://github.com/owner/repo/pull/20",
             "fix: broken", "code_quality",
         )
-        # Simulate 2 previous attempts
+        # Simulate 3 previous attempts
+        await memory.increment_ci_fix_attempts("owner/repo", 20)
         await memory.increment_ci_fix_attempts("owner/repo", 20)
         await memory.increment_ci_fix_attempts("owner/repo", 20)
 
@@ -940,6 +955,69 @@ class TestCIAutoHealing:
         result = patrol._guess_file_from_traceback("some error", diff)
         assert result == "src/main.py"
 
+
+class TestDiscussionKillswitch:
+    """Validate that the patrol loop surrenders when hitting the discussion reply limit."""
+
+    @pytest.mark.asyncio
+    async def test_discussion_killswitch_closes_pr(self, tmp_path):
+        from contribai.orchestrator.memory import Memory
+
+        memory = Memory(tmp_path / "test_disc_max.db")
+        await memory.init()
+        await memory.record_pr(
+            "owner/repo", 30, "http", "title", "code",
+        )
+
+        # Simulate 3 past discussion replies
+        for _ in range(3):
+            await memory.increment_discussion_replies("owner/repo", 30)
+
+        github = MagicMock()
+        github.get_authenticated_user = AsyncMock(return_value={"login": "bot"})
+        github._get = AsyncMock(
+            return_value={
+                "state": "open",
+                "number": 30,
+                "html_url": "http",
+                "head": {"sha": "sha", "ref": "branch", "repo": {"owner": {"login": "owner"}, "name": "repo"}},
+            }
+        )
+        github.get_pr_check_runs = AsyncMock(return_value=[])
+        github.get_pr_comments = AsyncMock(return_value=[
+            {"id": 1, "user": {"login": "reviewer", "type": "User"}, "body": "comment", "created_at": "2026-01-01"}
+        ])
+        github.get_pr_review_comments = AsyncMock(return_value=[])
+        github.close_pull_request = AsyncMock()
+
+        llm = MagicMock()
+        llm.complete = AsyncMock(side_effect=[
+            "```yaml\nclassifications:\n  - comment_number: 1\n    action: code_change\n    reason: fix\n```",
+        ])
+
+        patrol = PRPatrol(github=github, llm=llm, memory=memory)
+        patrol._notifier = AsyncMock()
+
+        result = await patrol.patrol(
+            [{"repo": "owner/repo", "pr_number": 30, "status": "open", "title": "t"}],
+        )
+
+        # The PR should be closed due to the killswitch
+        github.close_pull_request.assert_called_once()
+        close_args = github.close_pull_request.call_args
+        assert close_args.args == ("owner", "repo", 30)
+
+        # Telegram surrender alert should be triggered
+        patrol._notifier.send_message.assert_called_once()
+        assert "SURRENDER" in patrol._notifier.send_message.call_args.args[0]
+
+        # No automated fix / reply happens for this comment
+        assert result.replies_sent == 0
+        assert result.prs_closed_hostile == 1
+
+        await memory.close()
+
+
 class TestGitHubReplies:
     """Validate the GITHUB_REPLIES human persona dictionary."""
 
@@ -947,7 +1025,7 @@ class TestGitHubReplies:
         expected = {
             "FIX_APPLIED", "COMMIT_FIX", "QUESTION_OPENER",
             "QUESTION_CLOSER", "HOSTILE_CLOSE", "CI_FIX_APPLIED",
-            "CI_LIMIT_CLOSE", "COMMIT_CI_FIX",
+            "CI_LIMIT_CLOSE", "COMMIT_CI_FIX", "SURRENDER",
         }
         assert set(GITHUB_REPLIES.keys()) == expected
 
@@ -959,7 +1037,7 @@ class TestGitHubReplies:
 
     def test_no_robot_emojis(self):
         """No bot-flagging emojis in any reply variant."""
-        robot_emojis = {"\U0001f4dd", "\U0001f527", "\u2705", "\U0001f916", "\U0001f64f"}
+        robot_emojis = {"\U0001f4dd", "\U0001f527", "\u2705", "\U0001f916"} # Removed pray as it's used in SURRENDER
         for state, variants in GITHUB_REPLIES.items():
             for v in variants:
                 for emoji in robot_emojis:

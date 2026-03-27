@@ -37,6 +37,7 @@ CREATE TABLE IF NOT EXISTS submitted_prs (
     created_at  TEXT,
     updated_at  TEXT,
     ci_fix_attempts INTEGER DEFAULT 0,
+    discussion_replies INTEGER DEFAULT 0,
     UNIQUE(repo, pr_number)
 );
 
@@ -115,14 +116,18 @@ class Memory:
         await self._db.commit()
 
         # ── Migrations ────────────────────────────────────────────────────
-        # Add ci_fix_attempts column to existing databases that lack it.
-        try:
-            await self._db.execute(
-                "ALTER TABLE submitted_prs ADD COLUMN ci_fix_attempts INTEGER DEFAULT 0"
-            )
-            await self._db.commit()
-        except Exception:
-            pass  # column already exists
+        # Add columns to existing databases that lack them.
+        for col in (
+            "ci_fix_attempts INTEGER DEFAULT 0",
+            "discussion_replies INTEGER DEFAULT 0",
+        ):
+            try:
+                await self._db.execute(
+                    f"ALTER TABLE submitted_prs ADD COLUMN {col}"
+                )
+                await self._db.commit()
+            except Exception:
+                pass  # column already exists
 
         logger.info("Memory initialized at %s", self._db_path)
 
@@ -243,6 +248,27 @@ class Memory:
         )
         await self._db.commit()
         return await self.get_ci_fix_attempts(repo, pr_number)
+
+    # ── Discussion Reply Tracking ──────────────────────────────────────────
+
+    async def get_discussion_replies(self, repo: str, pr_number: int) -> int:
+        """Get the number of discussion replies the bot sent on a PR."""
+        cursor = await self._db.execute(
+            "SELECT discussion_replies FROM submitted_prs WHERE repo = ? AND pr_number = ?",
+            (repo, pr_number),
+        )
+        row = await cursor.fetchone()
+        return row[0] if row else 0
+
+    async def increment_discussion_replies(self, repo: str, pr_number: int) -> int:
+        """Increment the discussion reply counter for a PR. Returns the new count."""
+        await self._db.execute(
+            "UPDATE submitted_prs SET discussion_replies = discussion_replies + 1, updated_at = ? "
+            "WHERE repo = ? AND pr_number = ?",
+            (datetime.utcnow().isoformat(), repo, pr_number),
+        )
+        await self._db.commit()
+        return await self.get_discussion_replies(repo, pr_number)
 
     # ── Run Log ────────────────────────────────────────────────────────────
 

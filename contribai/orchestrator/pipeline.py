@@ -90,6 +90,7 @@ class PipelineResult:
     contributions_generated: int = 0
     prs_created: int = 0
     prs: list[PRResult] = field(default_factory=list)
+    pr_urls: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
 
 
@@ -377,34 +378,25 @@ class ContribPipeline:
                         await asyncio.sleep(delay_sec)
                     continue
 
-                # Filter to merge-friendly repos
+                # Filter to valid targets (skip already-analyzed repos)
                 targets: list[Repository] = []
-                for repo in repos[:5]:
+                for repo in repos:
                     if await self._memory.has_analyzed(repo.full_name):
+                        logger.debug("Skipping %s (already analyzed)", repo.full_name)
                         continue
-                    try:
-                        prs = await self._github.list_pull_requests(
-                            repo.owner,
-                            repo.name,
-                            state="closed",
-                            per_page=10,
-                        )
-                        merged = [p for p in prs if p.get("merged_at")]
-                        if merged:
-                            logger.info(
-                                "✅ %s — %d merged PRs, good target!",
-                                repo.full_name,
-                                len(merged),
-                            )
-                            targets.append(repo)
-                    except Exception:
-                        pass
+                    targets.append(repo)
 
                 if not targets:
-                    logger.info("No merge-friendly repos this round")
+                    logger.info("No new repos to scan this round (all previously analyzed)")
                     if rnd < rounds:
                         await asyncio.sleep(delay_sec)
                     continue
+
+                logger.info(
+                    "🎯 %d target repo(s) after filtering (from %d discovered)",
+                    len(targets),
+                    len(repos),
+                )
 
                 max_targets = self.config.github.max_repos_per_run
                 max_conc = self.config.pipeline.max_concurrent_repos
@@ -817,6 +809,7 @@ class ContribPipeline:
                 )
                 result.prs_created += 1
                 result.prs.append(pr_result)
+                result.pr_urls.append(pr_result.pr_url)
 
                 # Record in memory
                 await self._memory.record_pr(
