@@ -364,6 +364,16 @@ class PRPatrol:
                         self.MAX_DISCUSSION_REPLIES, pr["pr_number"],
                     )
                     if not dry_run:
+                        if random.random() < 0.10:
+                            logger.warning(
+                                "  👻 Chán cãi nhau rồi, bơ luôn PR #%d. (Ghosting the maintainer)",
+                                pr["pr_number"],
+                            )
+                            if self._memory:
+                                await self._memory.update_pr_status(pr["repo"], pr["pr_number"], "ghosted")
+                            result.prs_closed_hostile += 1
+                            continue
+
                         try:
                             await self._github.close_pull_request(
                                 owner, repo_name, pr["pr_number"],
@@ -837,6 +847,10 @@ class PRPatrol:
                 sha = None
 
             if not dry_run:
+                read_delay = random.randint(600, 7200)
+                logger.info("  Mới check mail thấy có notification từ Maintainer. Bắt đầu đọc... (Simulating notification lag: %ds)", read_delay)
+                await asyncio.sleep(read_delay)
+
                 delay = self._calculate_typing_delay(fixed_content)
                 logger.info("  ⏳ WPM Simulator: 'Typing' code fix for %ds...", delay)
                 await asyncio.sleep(delay)
@@ -979,6 +993,10 @@ class PRPatrol:
             reply_body = f"{greeting}{opener}\n\n{raw_answer}\n\n{closer}\n\n<!-- contribai-patrol -->"
 
             if not dry_run:
+                read_delay = random.randint(600, 7200)
+                logger.info("  Mới check mail thấy có notification từ Maintainer. Bắt đầu đọc... (Simulating notification lag: %ds)", read_delay)
+                await asyncio.sleep(read_delay)
+
                 delay = self._calculate_typing_delay(reply_body)
                 logger.info("  ⏳ WPM Simulator: 'Typing' reply for %ds...", delay)
                 await asyncio.sleep(delay)

@@ -115,6 +115,7 @@ class ContribPipeline:
             token=self.config.notifications.telegram_token,
             chat_id=self.config.notifications.telegram_chat_id,
         )
+        self._human_typing_lock = asyncio.Lock()
 
     async def _init_components(self):
         """Initialize all pipeline components."""
@@ -828,10 +829,24 @@ class ContribPipeline:
 
             # Create PR
             try:
-                logger.info("📤 Creating PR...")
-                pr_result = await self._pr_manager.create_pr(
-                    contribution, repo, guidelines=guidelines
-                )
+                import random
+                base_coding_time = random.randint(300, 900)
+                patch_length = len(str(contribution.changes)) if hasattr(contribution, "changes") else 500
+                typing_time = int(patch_length / 3.75)
+                total_coding_delay = min(base_coding_time + typing_time, 3600)
+
+                if not dry_run:
+                    logger.info(f"⏳ Bắt đầu code cho {repo.full_name}... (Simulating {total_coding_delay}s of heavy coding)")
+                    await asyncio.sleep(total_coding_delay)
+
+                async with self._human_typing_lock:
+                    if not dry_run:
+                        await asyncio.sleep(random.randint(15, 45))
+                        
+                    logger.info("📤 Creating PR...")
+                    pr_result = await self._pr_manager.create_pr(
+                        contribution, repo, guidelines=guidelines
+                    )
                 result.prs_created += 1
                 result.prs.append(pr_result)
                 result.pr_urls.append(pr_result.pr_url)
@@ -1026,13 +1041,27 @@ class ContribPipeline:
 
             # Create PR with "Closes #N" in body
             try:
-                logger.info("📤 Creating PR for issue #%d...", issue.number)
-                pr_result = await self._pr_manager.create_pr(
-                    contribution,
-                    repo,
-                    guidelines=guidelines,
-                    closes_issue=issue.number,
-                )
+                import random
+                base_coding_time = random.randint(300, 900)
+                patch_length = len(str(contribution.changes)) if hasattr(contribution, "changes") else 500
+                typing_time = int(patch_length / 3.75)
+                total_coding_delay = min(base_coding_time + typing_time, 3600)
+
+                if not dry_run:
+                    logger.info(f"⏳ Bắt đầu code cho {repo.full_name}... (Simulating {total_coding_delay}s of heavy coding)")
+                    await asyncio.sleep(total_coding_delay)
+
+                async with self._human_typing_lock:
+                    if not dry_run:
+                        await asyncio.sleep(random.randint(15, 45))
+                        
+                    logger.info("📤 Creating PR for issue #%d...", issue.number)
+                    pr_result = await self._pr_manager.create_pr(
+                        contribution,
+                        repo,
+                        guidelines=guidelines,
+                        closes_issue=issue.number,
+                    )
                 result.prs_created += 1
                 result.prs.append(pr_result)
 

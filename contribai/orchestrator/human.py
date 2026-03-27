@@ -276,6 +276,12 @@ class SuperHumanLoop:
                 repos=result.repos_analyzed,
                 prs=result.prs_created,
             ))
+            
+            if result.prs_created > 0:
+                rest_time = random.randint(900, 2700)
+                logger.info(f"Mới nộp PR xong, căng não quá. Đi hút điếu thuốc / dạo bộ 30 phút rồi mới làm tiếp. (Sleeping {rest_time}s)")
+                await asyncio.sleep(rest_time)
+
             # ── Daily log: record hunt outcome ──
             if result.prs_created > 0 and result.pr_urls:
                 for url in result.pr_urls:
