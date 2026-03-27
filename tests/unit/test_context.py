@@ -87,3 +87,24 @@ class TestBuildRepoContextPrompt:
         ctx = RepoContext(repo=sample_repo, readme_content=long_readme)
         prompt = build_repo_context_prompt(ctx, max_tokens=500)
         assert len(prompt) < 100_000
+
+
+class TestBuildGeneratorSystemPrompt:
+    def test_surgical_precision_rules_present(self, sample_repo):
+        from contribai.llm.context import build_generator_system_prompt
+
+        ctx = RepoContext(repo=sample_repo)
+        prompt = build_generator_system_prompt(ctx)
+        assert "SURGICAL PRECISION" in prompt
+        assert "NO AI EXPLANATIONS" in prompt
+        assert "absolute minimum number of lines" in prompt
+
+    def test_commit_tone_rules_present(self, sample_repo):
+        from contribai.llm.context import build_generator_system_prompt
+
+        ctx = RepoContext(repo=sample_repo)
+        prompt = build_generator_system_prompt(ctx)
+        assert "COMMIT & PR TITLE TONE" in prompt
+        assert "Ensure" in prompt  # banned word listed
+        assert "First line max 50 characters" in prompt
+

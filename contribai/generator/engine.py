@@ -335,7 +335,7 @@ class ContributionGenerator:
                 "Improve the CODE QUALITY. Make the code cleaner, more maintainable, "
                 "and more robust. Keep changes minimal and focused."
             ),
-            ContributionType.DOCS_IMPROVE: (
+            ContributionType.README_FIX: (
                 "Improve the DOCUMENTATION. Add missing docstrings, improve README sections, "
                 "or fix documentation issues. Be thorough but concise."
             ),
@@ -696,6 +696,21 @@ class ContributionGenerator:
                                         break
 
                         if matched:
+                            # Diff Minimizer: reject edits where the LLM
+                            # rewrote far more than it searched for — a sign
+                            # of hallucinated full-function rewrites.
+                            search_line_count = len(search.split("\n"))
+                            replace_line_count = len(replace.split("\n"))
+                            if replace_line_count > 30 and search_line_count < 5:
+                                logger.warning(
+                                    "Diff Minimizer: replace block too large "
+                                    "(%d lines) for a %d-line search in %s "
+                                    "— rejecting edit",
+                                    replace_line_count,
+                                    search_line_count,
+                                    path,
+                                )
+                                continue
                             edits_applied += 1
                         else:
                             logger.warning(
@@ -758,7 +773,7 @@ class ContributionGenerator:
         type_prefixes = {
             ContributionType.SECURITY_FIX: "fix(security)",
             ContributionType.CODE_QUALITY: "refactor",
-            ContributionType.DOCS_IMPROVE: "docs",
+            ContributionType.README_FIX: "docs",
             ContributionType.UI_UX_FIX: "fix(ui)",
             ContributionType.PERFORMANCE_OPT: "perf",
             ContributionType.FEATURE_ADD: "feat",
@@ -799,7 +814,7 @@ class ContributionGenerator:
         prefix_map = {
             ContributionType.SECURITY_FIX: "fix/security",
             ContributionType.CODE_QUALITY: "improve/quality",
-            ContributionType.DOCS_IMPROVE: "docs",
+            ContributionType.README_FIX: "docs",
             ContributionType.UI_UX_FIX: "fix/ui",
             ContributionType.PERFORMANCE_OPT: "perf",
             ContributionType.FEATURE_ADD: "feat",
@@ -831,7 +846,7 @@ class ContributionGenerator:
         type_labels = {
             ContributionType.SECURITY_FIX: "🔒 Security",
             ContributionType.CODE_QUALITY: "✨ Quality",
-            ContributionType.DOCS_IMPROVE: "📝 Docs",
+            ContributionType.README_FIX: "📝 Docs",
             ContributionType.UI_UX_FIX: "🎨 UI/UX",
             ContributionType.PERFORMANCE_OPT: "⚡ Performance",
             ContributionType.FEATURE_ADD: "🚀 Feature",

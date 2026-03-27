@@ -18,8 +18,10 @@ from contribai.core.models import (
     AnalysisResult,
     ContributionType,
     DiscoveryCriteria,
+    ImpactLevel,
     PRResult,
     Repository,
+    Severity,
 )
 from contribai.generator.engine import ContributionGenerator
 from contribai.github.client import GitHubClient
@@ -460,27 +462,44 @@ class ContribPipeline:
         remaining: int,
         sem: asyncio.Semaphore,
     ) -> PipelineResult:
-        """Process a single repo in hunt mode (used for parallel execution)."""
+        """Process a single repo in hunt mode (used for parallel execution).
+
+        Priority: Issues FIRST, then static analysis.
+        If issue-solving produces ≥1 PR, skip analysis to avoid
+        flooding the maintainer with multiple PRs simultaneously.
+        """
         async with sem:
             rr = PipelineResult()
             try:
-                if mode in ("analysis", "both"):
-                    analysis_rr = await self._process_repo(repo, dry_run, remaining)
-                    rr.repos_analyzed += analysis_rr.repos_analyzed
-                    rr.findings_total += analysis_rr.findings_total
-                    rr.contributions_generated += analysis_rr.contributions_generated
-                    rr.prs_created += analysis_rr.prs_created
-                    rr.prs.extend(analysis_rr.prs)
-
+                # --- Issues FIRST (higher value: fixes real reported problems) ---
                 if mode in ("issues", "both"):
                     issue_rr = await self._process_repo_issues(
-                        repo, dry_run, remaining - rr.prs_created
+                        repo, dry_run, remaining
                     )
                     rr.repos_analyzed = max(rr.repos_analyzed, issue_rr.repos_analyzed)
                     rr.findings_total += issue_rr.findings_total
                     rr.contributions_generated += issue_rr.contributions_generated
                     rr.prs_created += issue_rr.prs_created
                     rr.prs.extend(issue_rr.prs)
+
+                # --- Static analysis SECOND (skip if issues already produced PRs) ---
+                if mode in ("analysis", "both"):
+                    if rr.prs_created > 0:
+                        logger.info(
+                            "⏭️ Bỏ qua phân tích tĩnh cho %s — đã tạo %d PR từ "
+                            "Issues. Tránh spam maintainer.",
+                            repo.full_name,
+                            rr.prs_created,
+                        )
+                    else:
+                        analysis_rr = await self._process_repo(
+                            repo, dry_run, remaining - rr.prs_created
+                        )
+                        rr.repos_analyzed += analysis_rr.repos_analyzed
+                        rr.findings_total += analysis_rr.findings_total
+                        rr.contributions_generated += analysis_rr.contributions_generated
+                        rr.prs_created += analysis_rr.prs_created
+                        rr.prs.extend(analysis_rr.prs)
 
                 rr.repos_analyzed = max(rr.repos_analyzed, 1)
             except Exception as e:
@@ -596,6 +615,45 @@ class ContribPipeline:
                 len(guidelines.required_sections),
             )
 
+        # ── Maintainer Vibe Check ──────────────────────────────────────────
+        logger.info(
+            "🕵️ Đang 'nằm vùng' đọc comment để đánh giá tính cách Maintainer của %s...",
+            repo.full_name,
+        )
+        try:
+            comments_context = await self._github.fetch_recent_maintainer_comments(
+                repo.owner, repo.name
+            )
+            if comments_context:
+                vibe = await self._analyzer.check_maintainer_vibe(
+                    repo.full_name, comments_context
+                )
+                if "HOSTILE" in vibe.upper():
+                    logger.warning(
+                        "🚫 [VIBE CHECK FAILED] Maintainer dự án %s có lịch sử "
+                        "toxic/khó tính. Quay xe để đỡ tốn thời gian!",
+                        repo.full_name,
+                    )
+                    try:
+                        await self._memory.add_to_blacklist(
+                            repo.full_name, reason="toxic_maintainer"
+                        )
+                    except Exception:
+                        pass  # blacklist is best-effort
+                    result.repos_analyzed = 1
+                    return result
+                else:
+                    logger.info(
+                        "✅ Vibe Check OK (%s). Maintainer tử tế, tiến hành phân tích code.",
+                        vibe,
+                    )
+        except Exception as exc:
+            logger.debug(
+                "Vibe check skipped for %s (non-critical): %s",
+                repo.full_name, exc,
+            )
+        # ──────────────────────────────────────────────────────────────────
+
         # Analyze — set task context for model routing
         logger.info("🔬 Analyzing code...")
         self._set_task("analysis")
@@ -646,6 +704,56 @@ class ContribPipeline:
 
         if not analysis.findings:
             logger.info("All findings filtered (non-code targets) for %s", repo.full_name)
+            return result
+
+        # --- Anti-Farming Filter (impact-level gatekeeper) ---
+        # Filter out trivial/low-impact findings to prevent AI-bot farming perception
+        _FARMING_KEYWORDS = {
+            "docstring", "comment", "typo", "format", "style", "rename",
+            "whitespace", "indent", "spacing", "missing type hint",
+            "type annotation", "naming convention",
+        }
+        pre_farming_count = len(analysis.findings)
+        high_impact_findings = []
+        for finding in analysis.findings:
+            # Gate 1: Drop TRIVIAL / LOW impact
+            if finding.impact_level in (ImpactLevel.TRIVIAL, ImpactLevel.LOW):
+                logger.info(
+                    "🗑️ Bỏ qua lỗi '%s' vì mức độ tác động quá thấp (%s). "
+                    "Tránh spam repo.",
+                    finding.title,
+                    finding.impact_level.value,
+                )
+                continue
+
+            # Gate 2: Heuristic keyword check (ONLY for non-critical findings)
+            # Bypass: HIGH/CRITICAL findings must survive even if title contains
+            # farming keywords (e.g., "Format string injection" has "format")
+            if finding.severity in (Severity.LOW, Severity.MEDIUM):
+                title_lower = finding.title.lower()
+                if any(kw in title_lower for kw in _FARMING_KEYWORDS):
+                    logger.info(
+                        "🗑️ Bỏ qua lỗi '%s' vì có dấu hiệu PR rác (Farming).",
+                        finding.title,
+                    )
+                    continue
+
+            high_impact_findings.append(finding)
+
+        if len(high_impact_findings) < pre_farming_count:
+            logger.info(
+                "🛡️ Anti-Farming: %d → %d findings (dropped %d low-impact/farming)",
+                pre_farming_count,
+                len(high_impact_findings),
+                pre_farming_count - len(high_impact_findings),
+            )
+        analysis.findings = high_impact_findings
+
+        if not analysis.findings:
+            logger.info(
+                "All findings filtered by Anti-Farming gate for %s",
+                repo.full_name,
+            )
             return result
 
         logger.info(
@@ -709,7 +817,7 @@ class ContribPipeline:
             if preferred:
                 preferred.sort(
                     key=lambda finding: (
-                        finding.type == ContributionType.DOCS_IMPROVE,
+                        finding.type == ContributionType.README_FIX,
                         -finding.priority_score,
                     )
                 )
@@ -826,6 +934,39 @@ class ContribPipeline:
             if dry_run:
                 logger.info("🏃 [DRY RUN] Would create PR: %s", contribution.title)
                 continue
+
+            # --- Sandbox Guillotine ---
+            if getattr(self, "_sandbox", None) is not None:
+                guillotine_passed = False
+                max_retries = getattr(self.config.pipeline, "max_retries", 3)
+                
+                for attempt in range(max_retries):
+                    sandbox_result = await self._sandbox.run_in_sandbox(
+                        repo_path=str(repo.full_name),
+                        command="pytest",  # Default test command
+                    )
+                    
+                    is_success = getattr(sandbox_result, "is_success", False) if not isinstance(sandbox_result, dict) else sandbox_result.get("is_success", False)
+                    
+                    if is_success:
+                        guillotine_passed = True
+                        break
+                        
+                    logger.warning("Sandbox validation failed (attempt %d/%d). Invoking LLM fix...", attempt + 1, max_retries)
+                    logs = getattr(sandbox_result, "logs", "Validation failed") if not isinstance(sandbox_result, dict) else sandbox_result.get("logs", "Validation failed")
+                    
+                    if hasattr(self._generator, "fix_contribution_from_error"):
+                        contribution = await self._generator.fix_contribution_from_error(
+                            contribution,
+                            repo,
+                            logs,
+                            context
+                        )
+                    
+                if not guillotine_passed:
+                    logger.error("🚫 SANDBOX GUILLOTINE: PR creation blocked. Code still failing after %d retries.", max_retries)
+                    continue
+            # --------------------------
 
             # Create PR
             try:

@@ -63,7 +63,7 @@ LABEL_MAP: dict[str, IssueCategory] = {
 CATEGORY_TO_CONTRIB = {
     IssueCategory.BUG: ContributionType.CODE_QUALITY,
     IssueCategory.FEATURE: ContributionType.FEATURE_ADD,
-    IssueCategory.DOCS: ContributionType.DOCS_IMPROVE,
+    IssueCategory.DOCS: ContributionType.README_FIX,
     IssueCategory.SECURITY: ContributionType.SECURITY_FIX,
     IssueCategory.PERFORMANCE: ContributionType.PERFORMANCE_OPT,
     IssueCategory.UI_UX: ContributionType.UI_UX_FIX,

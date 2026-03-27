@@ -205,7 +205,7 @@ class QualityScorer:
             return CheckResult("file_coherence", True, 1.0, "Finding file is changed")
 
         # Some contributions legitimately change different files
-        if c.contribution_type in (ContributionType.DOCS_IMPROVE, ContributionType.FEATURE_ADD):
+        if c.contribution_type in (ContributionType.README_FIX, ContributionType.FEATURE_ADD):
             return CheckResult("file_coherence", True, 0.8, "Different file but type allows it")
 
         return CheckResult(

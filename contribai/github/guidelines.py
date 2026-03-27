@@ -242,7 +242,7 @@ def adapt_pr_body(
     type_info = {
         ContributionType.SECURITY_FIX: ("🔒", "Security Fix"),
         ContributionType.CODE_QUALITY: ("✨", "Code Quality"),
-        ContributionType.DOCS_IMPROVE: ("📝", "Documentation"),
+        ContributionType.README_FIX: ("📝", "Documentation"),
         ContributionType.UI_UX_FIX: ("🎨", "UI/UX Improvement"),
         ContributionType.PERFORMANCE_OPT: ("⚡", "Performance"),
         ContributionType.FEATURE_ADD: ("🚀", "New Feature"),
@@ -313,7 +313,7 @@ def _fill_pr_template(
     type_checkbox_map = {
         ContributionType.SECURITY_FIX: ["bug fix"],
         ContributionType.CODE_QUALITY: ["refactor", "code improvement"],
-        ContributionType.DOCS_IMPROVE: ["documentation"],
+        ContributionType.README_FIX: ["documentation"],
         ContributionType.UI_UX_FIX: ["bug fix"],
         ContributionType.PERFORMANCE_OPT: ["refactor", "code improvement"],
         ContributionType.FEATURE_ADD: ["new feature"],

@@ -72,7 +72,7 @@ class TestPRBody:
 
     def test_docs_emoji(self, pr_manager):
         finding = Finding(
-            type=ContributionType.DOCS_IMPROVE,
+            type=ContributionType.README_FIX,
             severity=Severity.LOW,
             title="Add docs",
             description="Missing docs",
@@ -80,7 +80,7 @@ class TestPRBody:
         )
         contrib = Contribution(
             finding=finding,
-            contribution_type=ContributionType.DOCS_IMPROVE,
+            contribution_type=ContributionType.README_FIX,
             title="📝 Docs: Add docs",
             description="Added documentation",
             changes=[FileChange(path="README.md", new_content="# Docs")],

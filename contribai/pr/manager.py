@@ -219,7 +219,7 @@ class PRManager:
         type_prefix = {
             ContributionType.SECURITY_FIX: "fix/security",
             ContributionType.CODE_QUALITY: "fix",
-            ContributionType.DOCS_IMPROVE: "docs",
+            ContributionType.README_FIX: "docs",
             ContributionType.UI_UX_FIX: "fix/ui",
             ContributionType.PERFORMANCE_OPT: "perf",
             ContributionType.FEATURE_ADD: "feat",
@@ -300,7 +300,7 @@ class PRManager:
         type_labels = {
             ContributionType.SECURITY_FIX: "bug",
             ContributionType.CODE_QUALITY: "bug",
-            ContributionType.DOCS_IMPROVE: "documentation",
+            ContributionType.README_FIX: "documentation",
             ContributionType.UI_UX_FIX: "bug",
             ContributionType.PERFORMANCE_OPT: "perf",
             ContributionType.FEATURE_ADD: "enhancement",
@@ -311,7 +311,7 @@ class PRManager:
         type_map = {
             ContributionType.SECURITY_FIX: "fix",
             ContributionType.CODE_QUALITY: "fix",
-            ContributionType.DOCS_IMPROVE: "docs",
+            ContributionType.README_FIX: "docs",
             ContributionType.UI_UX_FIX: "fix",
             ContributionType.PERFORMANCE_OPT: "perf",
             ContributionType.FEATURE_ADD: "feat",

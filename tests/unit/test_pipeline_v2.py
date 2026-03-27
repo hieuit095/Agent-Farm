@@ -1,5 +1,6 @@
 """Tests for v2.0.0 pipeline issue-driven mode."""
 
+import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -12,6 +13,7 @@ from contribai.core.models import (
     FileChange,
     FileNode,
     Finding,
+    ImpactLevel,
     PRResult,
     Repository,
     Severity,
@@ -330,12 +332,13 @@ class TestGenerationContext:
     ):
         docs_finding = Finding(
             id="docs-1",
-            type=ContributionType.DOCS_IMPROVE,
+            type=ContributionType.README_FIX,
             severity=Severity.MEDIUM,
             title="Untitled finding",
             description="Improve docs",
             file_path="",
             confidence=0.95,
+            impact_level=ImpactLevel.MEDIUM,
         )
         ui_finding = Finding(
             id="ui-1",
@@ -345,6 +348,7 @@ class TestGenerationContext:
             description="Improve node affordance",
             file_path="src/components/nodes/FolderNode.tsx",
             confidence=0.8,
+            impact_level=ImpactLevel.MEDIUM,
         )
 
         sample_pipeline._github = AsyncMock()
@@ -411,3 +415,238 @@ class TestTitlesSimilar:
         from contribai.orchestrator.pipeline import _titles_similar
 
         assert not _titles_similar("a the in", "b or on")
+
+
+class TestAntiFarmingFilter:
+    """Tests for the Anti-Farming impact-level and keyword filter."""
+
+    @pytest.mark.asyncio
+    async def test_filter_drops_trivial_impact(
+        self,
+        sample_pipeline,
+        sample_repo,
+        monkeypatch,
+    ):
+        from contribai.core.models import ImpactLevel
+
+        trivial_finding = Finding(
+            id="triv-1",
+            type=ContributionType.README_FIX,
+            severity=Severity.MEDIUM,
+            title="Improve error handling",
+            description="",
+            file_path="src/main.py",
+            impact_level=ImpactLevel.TRIVIAL,
+        )
+        high_finding = Finding(
+            id="high-1",
+            type=ContributionType.SECURITY_FIX,
+            severity=Severity.HIGH,
+            title="SQL injection in query builder",
+            description="",
+            file_path="src/db.py",
+            impact_level=ImpactLevel.HIGH,
+        )
+
+        sample_pipeline._github = AsyncMock()
+        sample_pipeline._memory = AsyncMock()
+        sample_pipeline._analyzer = AsyncMock()
+        sample_pipeline._generator = AsyncMock()
+
+        monkeypatch.setattr(
+            "contribai.orchestrator.pipeline.fetch_repo_guidelines",
+            AsyncMock(return_value=SimpleNamespace(has_guidelines=False)),
+        )
+        sample_pipeline._check_ai_policy = AsyncMock(return_value=False)
+        sample_pipeline._memory.record_analysis = AsyncMock()
+        sample_pipeline._memory.get_repo_prs = AsyncMock(return_value=[])
+        sample_pipeline._github.get_file_tree = AsyncMock(return_value=[])
+        sample_pipeline._github.get_file_content = AsyncMock(return_value="x = 1")
+        sample_pipeline._github.list_pull_requests = AsyncMock(return_value=[])
+        sample_pipeline._github.check_interaction_limits = AsyncMock(return_value=False)
+        sample_pipeline._validate_findings = AsyncMock(return_value=[high_finding])
+        sample_pipeline._analyzer.analyze = AsyncMock(
+            return_value=AnalysisResult(
+                repo=sample_repo,
+                findings=[trivial_finding, high_finding],
+                analyzed_files=2,
+                analysis_duration_sec=0.1,
+            )
+        )
+        sample_pipeline._generator.generate = AsyncMock(return_value=None)
+
+        result = await sample_pipeline._process_repo(sample_repo, dry_run=True, max_prs=5)
+
+        # Only the HIGH impact finding should survive the anti-farming filter
+        validated_input = sample_pipeline._validate_findings.await_args.args[0]
+        assert len(validated_input) == 1
+        assert validated_input[0].id == "high-1"
+
+    @pytest.mark.asyncio
+    async def test_filter_drops_farming_keywords(
+        self,
+        sample_pipeline,
+        sample_repo,
+        monkeypatch,
+    ):
+        from contribai.core.models import ImpactLevel
+
+        farming_finding = Finding(
+            id="farm-1",
+            type=ContributionType.CODE_QUALITY,
+            severity=Severity.MEDIUM,
+            title="Add missing docstring to process_data",
+            description="",
+            file_path="src/main.py",
+            impact_level=ImpactLevel.MEDIUM,  # Even MEDIUM gets caught by keyword
+        )
+        real_finding = Finding(
+            id="real-1",
+            type=ContributionType.CODE_QUALITY,
+            severity=Severity.HIGH,
+            title="Unclosed database connection in worker loop",
+            description="",
+            file_path="src/worker.py",
+            impact_level=ImpactLevel.HIGH,
+        )
+
+        sample_pipeline._github = AsyncMock()
+        sample_pipeline._memory = AsyncMock()
+        sample_pipeline._analyzer = AsyncMock()
+        sample_pipeline._generator = AsyncMock()
+
+        monkeypatch.setattr(
+            "contribai.orchestrator.pipeline.fetch_repo_guidelines",
+            AsyncMock(return_value=SimpleNamespace(has_guidelines=False)),
+        )
+        sample_pipeline._check_ai_policy = AsyncMock(return_value=False)
+        sample_pipeline._memory.record_analysis = AsyncMock()
+        sample_pipeline._memory.get_repo_prs = AsyncMock(return_value=[])
+        sample_pipeline._github.get_file_tree = AsyncMock(return_value=[])
+        sample_pipeline._github.get_file_content = AsyncMock(return_value="x = 1")
+        sample_pipeline._github.list_pull_requests = AsyncMock(return_value=[])
+        sample_pipeline._github.check_interaction_limits = AsyncMock(return_value=False)
+        sample_pipeline._validate_findings = AsyncMock(return_value=[real_finding])
+        sample_pipeline._analyzer.analyze = AsyncMock(
+            return_value=AnalysisResult(
+                repo=sample_repo,
+                findings=[farming_finding, real_finding],
+                analyzed_files=2,
+                analysis_duration_sec=0.1,
+            )
+        )
+        sample_pipeline._generator.generate = AsyncMock(return_value=None)
+
+        await sample_pipeline._process_repo(sample_repo, dry_run=True, max_prs=5)
+
+        validated_input = sample_pipeline._validate_findings.await_args.args[0]
+        assert len(validated_input) == 1
+        assert validated_input[0].id == "real-1"
+
+    @pytest.mark.asyncio
+    async def test_filter_keeps_high_impact(
+        self,
+        sample_pipeline,
+        sample_repo,
+        monkeypatch,
+    ):
+        from contribai.core.models import ImpactLevel
+
+        critical_finding = Finding(
+            id="crit-1",
+            type=ContributionType.SECURITY_FIX,
+            severity=Severity.CRITICAL,
+            title="Remote code execution via pickle deserialization",
+            description="",
+            file_path="src/api.py",
+            impact_level=ImpactLevel.CRITICAL,
+        )
+
+        sample_pipeline._github = AsyncMock()
+        sample_pipeline._memory = AsyncMock()
+        sample_pipeline._analyzer = AsyncMock()
+        sample_pipeline._generator = AsyncMock()
+
+        monkeypatch.setattr(
+            "contribai.orchestrator.pipeline.fetch_repo_guidelines",
+            AsyncMock(return_value=SimpleNamespace(has_guidelines=False)),
+        )
+        sample_pipeline._check_ai_policy = AsyncMock(return_value=False)
+        sample_pipeline._memory.record_analysis = AsyncMock()
+        sample_pipeline._memory.get_repo_prs = AsyncMock(return_value=[])
+        sample_pipeline._github.get_file_tree = AsyncMock(return_value=[])
+        sample_pipeline._github.get_file_content = AsyncMock(return_value="x = 1")
+        sample_pipeline._github.list_pull_requests = AsyncMock(return_value=[])
+        sample_pipeline._github.check_interaction_limits = AsyncMock(return_value=False)
+        sample_pipeline._validate_findings = AsyncMock(return_value=[critical_finding])
+        sample_pipeline._analyzer.analyze = AsyncMock(
+            return_value=AnalysisResult(
+                repo=sample_repo,
+                findings=[critical_finding],
+                analyzed_files=1,
+                analysis_duration_sec=0.1,
+            )
+        )
+        sample_pipeline._generator.generate = AsyncMock(return_value=None)
+
+        await sample_pipeline._process_repo(sample_repo, dry_run=True, max_prs=5)
+
+        validated_input = sample_pipeline._validate_findings.await_args.args[0]
+        assert len(validated_input) == 1
+        assert validated_input[0].impact_level == ImpactLevel.CRITICAL
+
+
+class TestIssuesFirstHunt:
+    """Tests for issues-first priority in hunt mode."""
+
+    @pytest.mark.asyncio
+    async def test_issues_run_before_analysis(self, sample_pipeline, sample_repo):
+        from contribai.orchestrator.pipeline import PipelineResult
+
+        call_order = []
+
+        async def mock_process_repo_issues(repo, dry_run, max_prs):
+            call_order.append("issues")
+            return PipelineResult(repos_analyzed=1, prs_created=0)
+
+        async def mock_process_repo(repo, dry_run, max_prs):
+            call_order.append("analysis")
+            return PipelineResult(repos_analyzed=1, prs_created=0)
+
+        sample_pipeline._process_repo_issues = mock_process_repo_issues
+        sample_pipeline._process_repo = mock_process_repo
+
+        sem = asyncio.Semaphore(1)
+        await sample_pipeline._hunt_process_repo(
+            sample_repo, mode="both", dry_run=True, remaining=5, sem=sem
+        )
+
+        assert call_order == ["issues", "analysis"]
+
+    @pytest.mark.asyncio
+    async def test_skips_analysis_after_successful_issue_pr(
+        self, sample_pipeline, sample_repo
+    ):
+        from contribai.orchestrator.pipeline import PipelineResult
+
+        call_order = []
+
+        async def mock_process_repo_issues(repo, dry_run, max_prs):
+            call_order.append("issues")
+            return PipelineResult(repos_analyzed=1, prs_created=1)
+
+        async def mock_process_repo(repo, dry_run, max_prs):
+            call_order.append("analysis")
+            return PipelineResult(repos_analyzed=1, prs_created=0)
+
+        sample_pipeline._process_repo_issues = mock_process_repo_issues
+        sample_pipeline._process_repo = mock_process_repo
+
+        sem = asyncio.Semaphore(1)
+        rr = await sample_pipeline._hunt_process_repo(
+            sample_repo, mode="both", dry_run=True, remaining=5, sem=sem
+        )
+
+        # Issues ran, but analysis was skipped because issues created a PR
+        assert call_order == ["issues"]
+        assert rr.prs_created == 1

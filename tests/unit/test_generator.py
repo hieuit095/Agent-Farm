@@ -52,7 +52,7 @@ class TestGenerateBranchName:
 
     def test_docs_branch(self, generator):
         finding = Finding(
-            type=ContributionType.DOCS_IMPROVE,
+            type=ContributionType.README_FIX,
             severity=Severity.LOW,
             title="Missing README section",
             description="",
@@ -83,7 +83,7 @@ class TestGeneratePRTitle:
 
     def test_docs_title(self, generator):
         finding = Finding(
-            type=ContributionType.DOCS_IMPROVE,
+            type=ContributionType.README_FIX,
             severity=Severity.LOW,
             title="Add API docs",
             description="",
@@ -489,4 +489,43 @@ class TestAgenticLoop:
 
         assert result is not None
         assert result.changes[0].new_content == "print()\n"
+
+
+class TestDiffMinimizer:
+    """Test that bloated replace blocks are rejected by _parse_changes."""
+
+    @pytest.fixture
+    def mock_context(self, sample_repo):
+        original = "line1\nline2\nline3\nline4\nline5\n"
+        return RepoContext(
+            repo=sample_repo,
+            relevant_files={"src/app.py": original},
+        )
+
+    def test_rejects_bloated_replace(self, generator, mock_context):
+        """A 2-line search with a 40-line replace must be rejected."""
+        bloated_replace = "\\n".join(f"new_line_{i}" for i in range(40))
+        response = (
+            '```json\n'
+            '{"changes": [{"path": "src/app.py", "is_new_file": false, '
+            '"edits": [{"search": "line1\\nline2", '
+            f'"replace": "{bloated_replace}"'
+            '}]}]}\n```'
+        )
+        changes = generator._parse_changes(response, mock_context)
+        assert len(changes) == 0
+
+    def test_allows_proportional_replace(self, generator, mock_context):
+        """A 3-line search with a 5-line replace should pass."""
+        response = (
+            '```json\n'
+            '{"changes": [{"path": "src/app.py", "is_new_file": false, '
+            '"edits": [{"search": "line1\\nline2\\nline3", '
+            '"replace": "new1\\nnew2\\nnew3\\nnew4\\nnew5"'
+            '}]}]}\n```'
+        )
+        changes = generator._parse_changes(response, mock_context)
+        assert len(changes) == 1
+        assert "new1" in changes[0].new_content
+
 

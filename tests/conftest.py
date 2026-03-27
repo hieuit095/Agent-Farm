@@ -19,6 +19,7 @@ from contribai.core.models import (
     ContributionType,
     FileNode,
     Finding,
+    ImpactLevel,
     Repository,
     Severity,
 )
@@ -75,6 +76,7 @@ def sample_finding():
         line_start=42,
         suggestion="Use environment variables instead of hardcoded keys.",
         confidence=0.9,
+        impact_level=ImpactLevel.HIGH,
     )
 
 

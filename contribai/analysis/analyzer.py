@@ -22,6 +22,7 @@ from contribai.core.models import (
     ContributionType,
     FileNode,
     Finding,
+    ImpactLevel,
     RepoContext,
     Repository,
     Severity,
@@ -516,6 +517,7 @@ class CodeAnalyzer:
             "For each finding, provide:\n"
             "- title: short descriptive title (be specific, not generic)\n"
             "- severity: low|medium|high|critical\n"
+            "- impact_level: CRITICAL|HIGH|MEDIUM|LOW|TRIVIAL\n"
             "- file_path: path to the affected file\n"
             "- line_start: approximate line number (or 0 if unknown)\n"
             "- description: explain WHY this is a problem with concrete impact\n"
@@ -523,6 +525,29 @@ class CodeAnalyzer:
             "Return ONLY valid YAML. Do not include commentary before or after it.\n"
             "If no issues found, return exactly 'findings: []'.\n\n"
             f"{profile_ctx}"
+            '═══════════════════════════════════════════════════════════════\n'
+            'CRITICAL "ANTI-FARMING" RULES (MANDATORY — ZERO TOLERANCE):\n'
+            'You are a senior engineer. Do NOT act like a spammy AI bot '
+            'trying to farm GitHub commits.\n'
+            '1. IGNORE all stylistic issues, formatting, whitespace, or '
+            'naming conventions.\n'
+            '2. IGNORE missing documentation, missing type hints, or '
+            'typos in comments.\n'
+            '3. IGNORE subjective refactoring (e.g., changing a `for` loop '
+            'to a `map` function just because it looks cleaner).\n'
+            '4. NEVER suggest adding docstrings, comments, or type annotations '
+            'as a finding.\n'
+            '5. NEVER report code style preferences (f-string vs .format(), '
+            'single vs double quotes, import ordering).\n'
+            '6. ONLY report findings if they cause ACTUAL HARM: Runtime '
+            'crashes, Null Pointer Exceptions, Memory/Resource Leaks, '
+            'Concurrency/Thread safety issues, Security vulnerabilities, '
+            'or mathematically provable performance bottlenecks (O(n²) → O(n)).\n'
+            '7. If the code works fine but is just "ugly", return '
+            'findings: []. Do NOT invent issues.\n'
+            '8. Set impact_level to TRIVIAL or LOW for any cosmetic/style '
+            'issue that somehow slips through — these will be auto-filtered.\n'
+            '═══════════════════════════════════════════════════════════════\n\n'
             "ANTI-FALSE-POSITIVE RULES (mandatory checks before reporting):\n"
             "1. ALREADY HANDLED — Is the code already protected by try/except, "
             "guards, or fallback patterns? If yes, do NOT report.\n"
@@ -597,15 +622,22 @@ class CodeAnalyzer:
             f"Repository: {ctx.repo.full_name}\n\n"
             f"README:\n{readme[:2000]}\n\n"
             f"{files_text}\n\n"
-            "Look for:\n"
-            "1. Missing or incomplete README sections (install, usage, API docs)\n"
-            "2. Undocumented public functions/classes/modules\n"
-            "3. Outdated or incorrect code examples\n"
-            "4. Missing docstrings\n"
-            "5. Missing CHANGELOG entries\n"
-            "6. Missing or incomplete API documentation\n"
-            "7. Broken links in documentation\n"
-            "8. Missing contributing guidelines\n"
+            "⚠️ ANTI-FARMING WARNING: Documentation-only changes are LOW VALUE.\n"
+            "Set impact_level to TRIVIAL for ALL documentation findings UNLESS:\n"
+            "- The documentation causes users to execute dangerous commands\n"
+            "- Installation instructions are completely wrong and break setup\n"
+            "- API examples have bugs that cause runtime errors when copied\n\n"
+            "Look for ONLY these critical documentation issues:\n"
+            "1. Code examples in README/docs that contain bugs causing crashes\n"
+            "2. Installation instructions that are fundamentally broken\n"
+            "3. Outdated API docs that reference removed functions\n\n"
+            "DO NOT report:\n"
+            "- Missing docstrings on functions\n"
+            "- Missing type hints\n"
+            "- Typos in comments or documentation\n"
+            "- Missing CHANGELOG entries\n"
+            "- Missing contributing guidelines\n"
+            "- Formatting or style issues in docs\n"
         )
 
     def _ui_ux_prompt(self, ctx: RepoContext) -> str:
@@ -652,19 +684,20 @@ class CodeAnalyzer:
             f"Analyze this {ctx.repo.language} repository for REFACTORING opportunities:\n\n"
             f"Repository: {ctx.repo.full_name}\n\n"
             f"{files_text}\n\n"
+            "⚠️ ANTI-FARMING WARNING: Subjective refactoring is FORBIDDEN.\n"
+            "Set impact_level to TRIVIAL for ANY refactoring that is purely aesthetic.\n"
+            "ONLY report refactorings that FIX or PREVENT real bugs:\n\n"
             "Look for:\n"
-            "1. Functions/methods that are too long (>50 lines) and should be split\n"
-            "2. DRY violations (duplicated logic across multiple files)\n"
-            "3. God classes/modules that do too many things\n"
-            "4. Deeply nested conditionals (>3 levels) that need extraction\n"
-            "5. Inappropriate use of inheritance vs composition\n"
-            "6. Magic numbers/strings that should be named constants\n"
-            "7. Complex boolean expressions that need helper methods\n"
-            "8. Mixed abstraction levels within a single function\n"
-            "9. Feature envy (methods that use other class's data more than their own)\n"
-            "10. Dead code or unused imports/variables\n\n"
-            "Focus on refactorings that improve readability and maintainability. "
-            "Each finding should be a single, self-contained refactoring.\n"
+            "1. Dead code that could mask bugs or confuse maintainers\n"
+            "2. DRY violations causing inconsistent bug fixes across copies\n"
+            "3. God classes/modules with tangled state causing race conditions\n"
+            "4. Deeply nested conditionals (>3 levels) hiding logic bugs\n\n"
+            "DO NOT report:\n"
+            "- Magic numbers/strings that are obvious from context\n"
+            "- 'Could be cleaner' without a concrete bug risk\n"
+            "- Renaming variables for style preference\n"
+            "- Splitting functions just because they are long\n"
+            "- Import ordering or formatting\n"
         )
 
     def _testing_prompt(self, ctx: RepoContext) -> str:
@@ -706,7 +739,7 @@ class CodeAnalyzer:
         type_map = {
             "security": ContributionType.SECURITY_FIX,
             "code_quality": ContributionType.CODE_QUALITY,
-            "docs": ContributionType.DOCS_IMPROVE,
+            "docs": ContributionType.README_FIX,
             "ui_ux": ContributionType.UI_UX_FIX,
             "performance": ContributionType.PERFORMANCE_OPT,
             "refactor": ContributionType.REFACTOR,
@@ -764,6 +797,13 @@ class CodeAnalyzer:
                 except ValueError:
                     severity = Severity.MEDIUM
 
+                # Parse impact_level (Anti-Farming field)
+                impact_str = str(item.get("impact_level", "MEDIUM")).upper()
+                try:
+                    impact = ImpactLevel(impact_str)
+                except ValueError:
+                    impact = ImpactLevel.MEDIUM
+
                 findings.append(
                     Finding(
                         id=str(uuid.uuid4())[:8],
@@ -775,6 +815,7 @@ class CodeAnalyzer:
                         line_start=item.get("line_start"),
                         line_end=item.get("line_end"),
                         suggestion=item.get("suggestion"),
+                        impact_level=impact,
                     )
                 )
         except Exception as e:
@@ -837,9 +878,76 @@ class CodeAnalyzer:
     def _filter_severity(self, findings: list[Finding]) -> list[Finding]:
         """Filter findings by minimum severity threshold."""
         order = [Severity.LOW, Severity.MEDIUM, Severity.HIGH, Severity.CRITICAL]
+        # Define a mapping from Severity enum to an integer order for comparison
+        severity_order = {
+            Severity.LOW.value: 0,
+            Severity.MEDIUM.value: 1,
+            Severity.HIGH.value: 2,
+            Severity.CRITICAL.value: 3,
+        }
         try:
-            threshold = Severity(self._config.severity_threshold)
+            threshold_enum = Severity(self._config.severity_threshold)
+            threshold = severity_order.get(threshold_enum.value, 1) # Default to MEDIUM's order
         except ValueError:
-            threshold = Severity.MEDIUM
-        min_idx = order.index(threshold)
-        return [f for f in findings if order.index(f.severity) >= min_idx]
+            threshold = severity_order.get(Severity.MEDIUM.value, 1) # Default to MEDIUM's order
+        return [f for f in findings if severity_order.get(f.severity.value, 0) >= threshold]
+
+    # ── Maintainer Vibe Check ─────────────────────────────────────────────
+
+    async def check_maintainer_vibe(
+        self, repo_full_name: str, comments_context: str
+    ) -> str:
+        """Classify maintainer persona from recent PR review comments.
+
+        Uses the LLM to analyze comment tone and returns one of:
+        - WELCOMING: polite, constructive, encourages contributors.
+        - STRICT: demanding about quality, but professional and fair.
+        - HOSTILE: toxic, insulting, passive-aggressive, or arbitrary rejections.
+
+        Returns the classification string. Defaults to "WELCOMING" on failure.
+        """
+        system = (
+            "You are a senior developer evaluating open-source repository culture. "
+            "Read the following recent comments made by maintainers of this repository.\n\n"
+            "CRITICAL: Focus ONLY on the interpersonal tone and attitude between "
+            "the reviewer and the author. Completely ignore technical discussions "
+            "about system behavior (e.g., 'the network environment is hostile', "
+            "'strict mode is enabled'). We are evaluating human-to-human toxicity, "
+            "not code logic."
+        )
+        prompt = (
+            f"## Maintainer Comments from {repo_full_name}\n\n"
+            f"{comments_context}\n\n"
+            "## Task\n"
+            "Classify the maintainer's persona into EXACTLY one of three categories:\n"
+            "1. WELCOMING — Polite, constructive, encourages contributors.\n"
+            "2. STRICT — Highly demanding about code quality, but professional and fair.\n"
+            "3. HOSTILE — Toxic, insulting, passive-aggressive, or arbitrarily "
+            "rejecting PRs without clear guidance.\n\n"
+            "Respond with ONLY the single category word (WELCOMING, STRICT, or HOSTILE)."
+        )
+
+        try:
+            response = await self._llm.complete(
+                prompt, system=system, temperature=0.1
+            )
+            classification = response.strip().upper()
+            # Extract the classification word from potential surrounding text
+            for label in ("HOSTILE", "STRICT", "WELCOMING"):
+                if label in classification:
+                    logger.info(
+                        "Vibe check for %s: %s", repo_full_name, label
+                    )
+                    return label
+            # Fallback if response is unexpected
+            logger.warning(
+                "Vibe check: unexpected LLM response for %s: %s",
+                repo_full_name, classification[:50],
+            )
+            return "WELCOMING"
+        except Exception as exc:
+            logger.warning(
+                "Vibe check LLM call failed for %s: %s, assuming WELCOMING",
+                repo_full_name, exc,
+            )
+            return "WELCOMING"

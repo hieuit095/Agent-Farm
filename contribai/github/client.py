@@ -820,6 +820,95 @@ class GitHubClient:
         )
         return merged
 
+    # ── Maintainer Vibe Check ─────────────────────────────────────────────
+
+    async def fetch_recent_maintainer_comments(
+        self, owner: str, repo: str, limit: int = 3
+    ) -> str:
+        """Fetch recent PR review comments from maintainers for vibe analysis.
+
+        Queries recently closed/merged PRs and extracts review comments
+        made by repo owners/collaborators. Returns a concatenated context
+        string capped at ~1500 words to avoid token bloat.
+
+        Args:
+            owner: Repository owner.
+            repo: Repository name.
+            limit: Max number of PRs to sample comments from.
+
+        Returns:
+            Concatenated maintainer comment text, or empty string on failure.
+        """
+        try:
+            prs = await self._get(
+                f"/repos/{owner}/{repo}/pulls",
+                params={
+                    "state": "all",
+                    "sort": "updated",
+                    "direction": "desc",
+                    "per_page": min(limit * 2, 10),
+                },
+            )
+        except Exception as exc:
+            logger.debug(
+                "Vibe check: could not fetch PRs for %s/%s: %s", owner, repo, exc
+            )
+            return ""
+
+        comments_parts: list[str] = []
+        word_count = 0
+        sampled = 0
+
+        for pr in prs:
+            if sampled >= limit:
+                break
+
+            pr_number = pr.get("number")
+            if not pr_number:
+                continue
+
+            # Skip bot-authored PRs (Dependabot, renovate, etc.)
+            pr_user = pr.get("user") or {}
+            if pr_user.get("type", "").lower() == "bot":
+                continue
+            if "[bot]" in (pr_user.get("login") or "").lower():
+                continue
+
+            # Fetch review comments for this PR
+            try:
+                reviews = await self._get(
+                    f"/repos/{owner}/{repo}/pulls/{pr_number}/reviews"
+                )
+            except Exception:
+                continue
+
+            sampled += 1
+
+            for review in reviews:
+                # Only include comments from maintainers (OWNER, COLLABORATOR, MEMBER)
+                author_assoc = (review.get("author_association") or "").upper()
+                if author_assoc not in ("OWNER", "COLLABORATOR", "MEMBER"):
+                    continue
+
+                body = (review.get("body") or "").strip()
+                if not body:
+                    continue
+
+                comments_parts.append(body)
+
+        # Last-In-Keep-First truncation: keep the newest comments
+        full_context = "\n---\n".join(comments_parts)
+        words = full_context.split()
+        if len(words) > 1500:
+            words = words[-1500:]
+            full_context = " ".join(words)
+
+        logger.debug(
+            "Vibe check: collected %d comment(s) (%d words) from %d PR(s) for %s/%s",
+            len(comments_parts), len(words), sampled, owner, repo,
+        )
+        return full_context
+
     @staticmethod
     def _parse_repo(data: dict) -> Repository:
         """Parse raw API response into Repository model."""

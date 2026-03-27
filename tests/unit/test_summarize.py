@@ -133,7 +133,7 @@ class TestSummarizeFindings:
         """
         finding = Finding(
             id="f1",
-            type=ContributionType.DOCS_IMPROVE,
+            type=ContributionType.README_FIX,
             severity=Severity.LOW,
             title="Missing docstring",
             description="Add docstring",
@@ -141,5 +141,5 @@ class TestSummarizeFindings:
         )
         # This should NOT raise AttributeError
         result = CodeAnalyzer.summarize_findings([finding])
-        assert "docs_improve" in result
+        assert "readme_fix" in result
         assert "Missing docstring" in result

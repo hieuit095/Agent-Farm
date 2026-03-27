@@ -15,7 +15,8 @@ class ContributionType(StrEnum):
 
     SECURITY_FIX = "security_fix"
     FEATURE_ADD = "feature_add"
-    DOCS_IMPROVE = "docs_improve"
+    DOCS_IMPROVE = "docs_improve"  # DEPRECATED alias — use README_FIX
+    README_FIX = "readme_fix"
     UI_UX_FIX = "ui_ux_fix"
     PERFORMANCE_OPT = "performance_opt"
     REFACTOR = "refactor"
@@ -29,6 +30,21 @@ class Severity(StrEnum):
     MEDIUM = "medium"
     HIGH = "high"
     CRITICAL = "critical"
+
+
+class ImpactLevel(StrEnum):
+    """Impact level for findings — used by Anti-Farming filter.
+
+    CRITICAL/HIGH: real bugs, crashes, security flaws, resource leaks.
+    MEDIUM: meaningful improvements with measurable benefit.
+    LOW/TRIVIAL: stylistic, cosmetic, or subjective changes — filtered out.
+    """
+
+    CRITICAL = "CRITICAL"
+    HIGH = "HIGH"
+    MEDIUM = "MEDIUM"
+    LOW = "LOW"
+    TRIVIAL = "TRIVIAL"
 
 
 class PRStatus(StrEnum):
@@ -107,6 +123,7 @@ class Finding(BaseModel):
     line_end: int | None = None
     suggestion: str | None = None
     confidence: float = 0.8  # 0.0 - 1.0
+    impact_level: ImpactLevel = ImpactLevel.TRIVIAL
 
     @property
     def priority_score(self) -> float:
@@ -117,7 +134,18 @@ class Finding(BaseModel):
             Severity.MEDIUM: 2.0,
             Severity.LOW: 1.0,
         }
-        return severity_weights[self.severity] * self.confidence
+        impact_weights = {
+            ImpactLevel.CRITICAL: 1.5,
+            ImpactLevel.HIGH: 1.2,
+            ImpactLevel.MEDIUM: 1.0,
+            ImpactLevel.LOW: 0.5,
+            ImpactLevel.TRIVIAL: 0.1,
+        }
+        return (
+            severity_weights[self.severity]
+            * self.confidence
+            * impact_weights.get(self.impact_level, 1.0)
+        )
 
 
 class AnalysisResult(BaseModel):

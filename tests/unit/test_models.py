@@ -6,6 +6,7 @@ from contribai.core.models import (
     AnalysisResult,
     ContributionType,
     Finding,
+    ImpactLevel,
     Repository,
     Severity,
 )
@@ -23,8 +24,44 @@ class TestRepository:
 
 class TestFinding:
     def test_priority_score(self, sample_finding):
-        # HIGH severity (3.0) * 0.9 confidence = 2.7
-        assert sample_finding.priority_score == pytest.approx(2.7)
+        # HIGH severity (3.0) * 0.9 confidence * 1.2 HIGH impact = 3.24
+        assert sample_finding.priority_score == pytest.approx(3.24)
+
+    def test_impact_level_default(self):
+        f = Finding(
+            type=ContributionType.CODE_QUALITY,
+            severity=Severity.MEDIUM,
+            title="Test",
+            description="",
+            file_path="a.py",
+        )
+        assert f.impact_level == ImpactLevel.TRIVIAL
+
+    def test_impact_level_trivial_crushes_score(self):
+        f = Finding(
+            type=ContributionType.README_FIX,
+            severity=Severity.MEDIUM,
+            title="Add docstring",
+            description="",
+            file_path="a.py",
+            confidence=1.0,
+            impact_level=ImpactLevel.TRIVIAL,
+        )
+        # MEDIUM(2.0) * 1.0 * TRIVIAL(0.1) = 0.2
+        assert f.priority_score == pytest.approx(0.2)
+
+    def test_impact_level_critical_boosts_score(self):
+        f = Finding(
+            type=ContributionType.SECURITY_FIX,
+            severity=Severity.CRITICAL,
+            title="SQL injection",
+            description="",
+            file_path="a.py",
+            confidence=1.0,
+            impact_level=ImpactLevel.CRITICAL,
+        )
+        # CRITICAL(4.0) * 1.0 * CRITICAL(1.5) = 6.0
+        assert f.priority_score == pytest.approx(6.0)
 
     def test_critical_priority(self):
         f = Finding(
@@ -34,17 +71,19 @@ class TestFinding:
             description="Test",
             file_path="test.py",
             confidence=1.0,
+            impact_level=ImpactLevel.MEDIUM,
         )
         assert f.priority_score == 4.0
 
     def test_low_priority(self):
         f = Finding(
-            type=ContributionType.DOCS_IMPROVE,
+            type=ContributionType.README_FIX,
             severity=Severity.LOW,
             title="Test",
             description="Test",
             file_path="test.py",
             confidence=0.5,
+            impact_level=ImpactLevel.MEDIUM,
         )
         assert f.priority_score == 0.5
 
@@ -53,7 +92,7 @@ class TestAnalysisResult:
     def test_top_findings_sorted(self, sample_repo):
         findings = [
             Finding(
-                type=ContributionType.DOCS_IMPROVE,
+                type=ContributionType.README_FIX,
                 severity=Severity.LOW,
                 title="Low",
                 description="",
@@ -89,7 +128,7 @@ class TestAnalysisResult:
                 file_path="a.py",
             ),
             Finding(
-                type=ContributionType.DOCS_IMPROVE,
+                type=ContributionType.README_FIX,
                 severity=Severity.LOW,
                 title="Doc",
                 description="",
