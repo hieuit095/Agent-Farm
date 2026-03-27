@@ -1,157 +1,112 @@
-<p align="center">
-  <h1 align="center">🤖 ContribAI</h1>
-  <p align="center">
-    <strong>The autonomous AI agent that hunts, fixes, and contributes to open-source projects — 24/7, like a relentless developer who never sleeps.</strong>
-  </p>
-  <p align="center">
-    <img src="https://img.shields.io/badge/python-3.11+-3776AB?logo=python&logoColor=white" alt="Python 3.11+">
-    <img src="https://img.shields.io/badge/license-GPL--3.0-blue" alt="License">
-    <img src="https://img.shields.io/badge/docker-edge--ready-2496ED?logo=docker&logoColor=white" alt="Docker">
-    <img src="https://img.shields.io/badge/LLM-MiniMax_M2.7-FF6B35" alt="MiniMax M2.7">
-    <img src="https://img.shields.io/badge/edge-Orange_Pi_|_RPi-green" alt="Edge Deployment">
-    <img src="https://img.shields.io/badge/version-2.5.0-brightgreen" alt="Version">
-  </p>
-</p>
+<div align="center">
+
+# 🤖 ContribAI
+
+**Autonomous AI Agent That Contributes to Open Source — Without Looking Like One.**
+
+[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-3776AB?logo=python&logoColor=white)](https://python.org)
+[![Docker](https://img.shields.io/badge/docker-ready-2496ED?logo=docker&logoColor=white)](Dockerfile.superhuman)
+[![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue)](LICENSE)
+[![Code Style: Ruff](https://img.shields.io/badge/code%20style-ruff-000000?logo=ruff)](https://github.com/astral-sh/ruff)
+[![Tests](https://img.shields.io/badge/tests-107%20passed-brightgreen?logo=pytest)](tests/)
+
+*An LLM-powered agent that discovers repositories, analyzes code for real bugs, generates fixes, opens Pull Requests, responds to maintainer feedback, and self-heals failed CI — all while mimicking human behavioral patterns to avoid spam detection.*
+
+</div>
 
 ---
 
-ContribAI is a fully autonomous, edge-deployable AI agent that discovers GitHub repositories, analyzes codebases for real issues, generates production-quality fixes, opens Pull Requests, and then **monitors, defends, and heals its own PRs** — all without human intervention.
+## The Problem
 
-> *"It doesn't just open PRs. It reads maintainer feedback, pushes follow-up fixes, auto-heals CI failures, and gracefully surrenders when it's wrong."*
+Most "AI contribution" bots spam repositories with trivial changes — adding docstrings nobody asked for, reformatting whitespace, or making subjective style changes. They get flagged, banned, and give AI-assisted development a bad name.
 
----
-
-## ✨ Core Features
-
-| Feature | Description |
-|---|---|
-| 🦅 **Autonomous Discovery** | Searches GitHub by language, stars, and activity. Stochastic criteria rotation prevents repetition. |
-| 🔬 **LLM-Powered Analysis** | Multi-strategy code analysis (security, quality, performance, docs) with language-specific rulesets. |
-| 🐳 **Docker Sandbox Validation** | Shift-left testing — runs linters/tests inside ephemeral Docker containers *before* opening a PR. |
-| 🛡️ **CI Auto-Healing** | Detects failing CI checks, downloads logs, generates fixes, and pushes follow-up commits. Capped at 3 retries. |
-| 🗣️ **Human-Persona Interactions** | Randomized natural English replies to maintainer feedback. Answers questions, pushes code fixes, and knows when to gracefully surrender. |
-| 📱 **Telegram Dispatcher** | Real-time push notifications for PR creation, CI events, merges, and critical errors. |
-| 🧠 **SQLite Persistent Memory** | Tracks analyzed repos, PR outcomes, rejection patterns, repo preferences, daily quotas, and API usage — survives reboots. |
-| 🎲 **Stochastic Daily Quotas** | Random daily PR target (1-5), infinite hunting until quota met, then patrol-only mode. |
-| ⚡ **Dynamic Sleep** | 2-5 min retry on dry runs, 30-90 min rest after productive hunts. No wasted idle time. |
-| 🔌 **Edge-Optimized** | Multi-stage Docker build for ARM64/AMD64. Runs on Orange Pi, Raspberry Pi, or any SBC with 512MB RAM. |
+**ContribAI takes the opposite approach.** It operates under a strict **Anti-Farming** filter that blocks trivial changes at the pipeline level, focuses exclusively on bugs, security flaws, and performance issues, and disguises its operational patterns behind realistic human behavioral simulation.
 
 ---
 
-## 🥸 Deep Cover Anti-Abuse System
+## Key Features
 
-To bypass sophisticated ML bot-detection heuristics, ContribAI employs a multi-layered behavioral spoofing engine:
-* **Human Imperfections:** Introduces stochastic "Notification Lag" (10m-2h delay before reading maintainer replies).
-* **Git Timestamp Spoofing:** Backdates `author.date` payloads by 15-45 minutes to simulate offline local coding rather than synchronous API automation.
-* **Circadian & Fatigue Modeling:** Implements mandatory lunch breaks, WPM-based typing delays tied to payload size, and a 10% probabilistic chance of "ghosting" maintainers in long feedback loops.
-* **API Throttling:** Utilizes a "Soft Fetch Throttler" with micro-sleeps and checks repo interaction limits to avoid 403s and 422s.
+### 🧠 Agentic LLM Engine
 
-## 📱 Telegram Command Center
+- **Multi-strategy analysis** — Security, code quality, performance, and UI/UX analyzers run concurrently against repository file trees
+- **Issue-first pipeline** — Solves open GitHub issues before falling back to static analysis, prioritizing what maintainers actually want fixed
+- **Self-healing CI** — Detects failed CI checks on submitted PRs, prompts the LLM with the failure log + previous diffs, and pushes corrective commits (up to 3 retries with killswitch)
+- **PR Patrol** — Monitors open PRs for maintainer comments and auto-generates code fixes, answers questions, re-signs CLAs, and addresses style feedback
+- **Impact-scored findings** — Every finding is scored by `severity × confidence × impact_level`. A dual-gate anti-farming filter drops trivial/low-impact results before they ever become PRs
 
-ContribAI can be controlled and monitored securely from your mobile device via Telegram Long-Polling. Send commands directly to the bot:
-* `/status`: Check if the background Super Human Loop is active.
-* `/rptoday`: Fetches a report of all successful PRs opened today.
-* `/quota`: Checks LLM token and API budget constraints.
+### 🥷 Deep Cover Stealth Mode
 
-## 🎮 Gamification (WIP)
+- **Circadian rhythm simulation** — Operates on a stochastic daily schedule with randomized wake times, coffee breaks, lunch hours, and sleep cycles
+- **WPM typing delay** — Response latency correlates with payload size, simulating a real developer's typing speed
+- **Probabilistic ghosting** — Randomly skips some notification responses to mimic developer burnout/busy patterns
+- **Git timestamp spoofing** — Commits carry slightly backdated timestamps to simulate local offline coding sessions
+- **Vibe Check** — Fetches recent maintainer comments and uses LLM classification (WELCOMING / STRICT / HOSTILE) to skip hostile repositories before wasting tokens
+- **Stochastic PR quota** — Daily target is randomly set between 1-5 PRs, then shifts to patrol-only mode once met
 
-A lightweight 2D pixel-art visualizer for the dashboard using a newly implemented WebSocket endpoint (`/ws/bot-state`). This emits real-time state transitions (`working`, `sleeping`, `coffee_break`) mapped directly to the bot's internal orchestrator state, allowing an interactive "Tamagotchi-style" observation of the agent's behavior.
+### 🛡️ Sandbox Guillotine
+
+- **Shift-Left Docker testing** — Runs generated patches inside isolated Docker containers before PR creation
+- **Fail-safe defaults** — Findings without explicit impact classification default to `TRIVIAL` (auto-dropped)
+- **Killswitch limits** — Hard caps on CI retries (3), discussion replies (3), and patch re-prompts (2)
+- **Duplicate PR detection** — Title similarity matching prevents re-submitting equivalent fixes
+
+### 📱 Telegram C2 Center
+
+- **Real-time alerts** — PR merged, PR closed, pipeline errors, and run-complete notifications via Telegram Bot API
+- **Multi-channel support** — Also supports Slack webhooks and Discord embeds
+- **Persistent HTTP session** — Connection-pooled `httpx.AsyncClient` for stable long-running notification delivery
+
+### 🏗️ Edge-First Architecture
+
+- **512MB RAM cap** — Designed for Orange Pi, Raspberry Pi, and other ARM64/AMD64 SBCs
+- **Multi-stage Docker build** — Builder stage compiles wheels, runtime stage carries only `python:3.11-slim` + `git`
+- **SQLite WAL mode** — Lock-free concurrent reads for quota tracking across async tasks
+- **Persistent state volumes** — `memory.db`, `config.yaml`, and `logs/` survive container restarts
 
 ---
 
-## 🏗️ Architecture
+## Architecture
 
-```mermaid
-flowchart TB
-    subgraph SuperHumanLoop["🧠 Super Human Loop"]
-        direction TB
-        WAKE["☀️ Wake Up<br/><i>Random daily target: 1-5 PRs</i>"]
-        CHECK{"Quota met?"}
-        ROLL["🎲 Action Roll"]
-    end
-
-    subgraph HuntPipeline["🦅 Hunt Pipeline"]
-        direction TB
-        DISC["🔍 Discovery Engine<br/><i>GitHub API search</i>"]
-        FILTER["🎯 Target Filter<br/><i>Skip analyzed repos</i>"]
-        ANALYZE["🔬 Code Analyzer<br/><i>Security · Quality · Perf · Docs</i>"]
-        VALIDATE["✅ Finding Validator<br/><i>LLM false-positive filter</i>"]
-        GENERATE["🛠️ Contribution Generator<br/><i>Style-aware code gen</i>"]
-        SANDBOX["🐳 Docker Sandbox<br/><i>Lint + Test before PR</i>"]
-        PR["📤 PR Creation<br/><i>Conventional commits · DCO</i>"]
-    end
-
-    subgraph PatrolLoop["🛡️ PR Patrol"]
-        direction TB
-        SCAN["📬 Scan Open PRs"]
-        CLASSIFY["🏷️ Classify Feedback<br/><i>LLM: fix_needed · question · hostile</i>"]
-        FIX["🔧 Push Fix Commit"]
-        REPLY["💬 Human-like Reply"]
-        CI_HEAL["⚕️ CI Auto-Heal<br/><i>Download logs → Generate fix</i>"]
-        SURRENDER["🏳️ Graceful Surrender<br/><i>Close PR + Blacklist repo</i>"]
-    end
-
-    subgraph Infrastructure["⚙️ Infrastructure"]
-        direction LR
-        MEMORY[("🧠 SQLite Memory<br/><i>memory.db</i>")]
-        TELEGRAM["📱 Telegram<br/><i>Alerts</i>"]
-        MINIMAX["🤖 MiniMax M2.7<br/><i>LLM Engine</i>"]
-        CONFIG["⚙️ config.yaml"]
-    end
-
-    WAKE --> CHECK
-    CHECK -- "No" --> ROLL
-    CHECK -- "Yes" --> SCAN
-    ROLL --> DISC
-    DISC --> FILTER --> ANALYZE --> VALIDATE --> GENERATE --> SANDBOX --> PR
-
-    PR -- "Success" --> TELEGRAM
-    PR -- "Dynamic Sleep" --> CHECK
-
-    SCAN --> CLASSIFY
-    CLASSIFY -- "fix_needed" --> FIX --> REPLY
-    CLASSIFY -- "question" --> REPLY
-    CLASSIFY -- "hostile / max retries" --> SURRENDER
-    CLASSIFY -- "CI failure" --> CI_HEAL
-
-    PR -.-> MEMORY
-    FIX -.-> MEMORY
-    SURRENDER -.-> MEMORY
-    ANALYZE -.-> MINIMAX
-    GENERATE -.-> MINIMAX
-    CLASSIFY -.-> MINIMAX
-    CI_HEAL -.-> MINIMAX
+```
+┌─────────────────────────────────────────────────────────┐
+│                    CLI (Click + Rich)                    │
+│  run · hunt · patrol · superhuman · analyze · solve     │
+│  cleanup · status · stats · leaderboard · sysinfo       │
+├─────────────────────────────────────────────────────────┤
+│              SuperHumanLoop (Orchestrator)               │
+│  Stochastic daily routine · Hunt/Patrol interleaving    │
+│  Circadian delays · PR quota management                 │
+├──────────────────────┬──────────────────────────────────┤
+│   ContribPipeline    │         PR Patrol                │
+│  Discovery → Analyze │  Monitor → Respond → Self-Heal   │
+│  → Generate → Submit │  CI retry · Discussion reply     │
+├──────────────────────┼──────────────────────────────────┤
+│    CodeAnalyzer      │       ContribGenerator           │
+│  Security · Quality  │  Jinja2 templates · GitPython    │
+│  Perf · UI/UX        │  Conventional commits · DCO      │
+├──────────────────────┼──────────────────────────────────┤
+│    GitHub Client     │      LLM Provider (MiniMax)      │
+│  httpx async · GHAPI │  MiniMax-M2.7 · Structured YAML │
+├──────────────────────┼──────────────────────────────────┤
+│  SQLite Memory (WAL) │  Notifier (TG · Slack · Discord) │
+└──────────────────────┴──────────────────────────────────┘
 ```
 
 ---
 
-## 🚀 Quick Start
-
-### Prerequisites
-
-- **Python 3.11+**
-- **Git** (with `gh` CLI recommended)
-- **Docker** (optional, for sandbox validation and edge deployment)
+## Quick Start
 
 ### 1. Clone & Install
 
-```bash
+```sh
 git clone https://github.com/hieuit095/ContribAI.git
 cd ContribAI
-
-# Create virtual environment
-python -m venv venv
-source venv/bin/activate    # Linux/macOS
-venv\Scripts\activate       # Windows
-
-# Install dependencies
 pip install -e ".[dev]"
-# Or: pip install -r requirements.txt
 ```
 
 ### 2. Configure
 
-```bash
+```sh
 cp config.example.yaml config.yaml
 ```
 
@@ -159,138 +114,117 @@ Edit `config.yaml` with your credentials:
 
 ```yaml
 github:
-  token: "ghp_your_token_here"
+  token: "ghp_your_token"       # or set GITHUB_TOKEN env var
 
 llm:
   provider: "minimax"
-  model: "MiniMax-M2.7"
-  api_key: "your_minimax_api_key"
+  api_key: "your_minimax_key"   # or set MINIMAX_API_KEY env var
 
 notifications:
   telegram_token: "123456:ABC-DEF"
   telegram_chat_id: "your_chat_id"
 ```
 
-Or use environment variables:
-
-```bash
-export GITHUB_TOKEN="ghp_..."
-export MINIMAX_API_KEY="..."
-```
-
 ### 3. Run
 
-#### Interactive Command Center (Windows)
+```sh
+# Single hunt round (discover repos, analyze, create PRs)
+contribai hunt --rounds 1 --dry-run
 
-```cmd
-start.bat
-```
+# Target a specific repo
+contribai target https://github.com/owner/repo --dry-run
 
-#### CLI Commands
-
-```bash
-# 🧠 Super Human Mode — autonomous 24/7 loop
+# 24/7 autonomous mode (Super Human)
 contribai superhuman
-
-# 🦅 Single hunt session (5 rounds)
-contribai hunt --rounds 5
-
-# 🎯 Target a specific repo
-contribai run https://github.com/owner/repo
-
-# 🛡️ Patrol open PRs
-contribai patrol
-
-# 📊 View dashboard
-contribai dashboard
-
-# ⏩ Time-warp test mode (1-3s delays, 10 iterations)
-contribai superhuman --time-warp
 ```
 
----
+### 4. Deploy (Edge Device)
 
-## 🐳 Edge Deployment
+```sh
+# Create .env with secrets
+echo "GITHUB_TOKEN=ghp_xxx" > .env
+echo "MINIMAX_API_KEY=xxx" >> .env
 
-Deploy ContribAI to an Orange Pi, Raspberry Pi, or any ARM64/AMD64 device:
-
-```bash
-# Create .env with your secrets
-echo "GITHUB_TOKEN=ghp_..." > .env
-echo "MINIMAX_API_KEY=..." >> .env
-
-# Deploy with Docker Compose
+# Launch containerized agent
 docker compose -f docker-compose.superhuman.yml up -d
 
 # Monitor logs
 docker compose -f docker-compose.superhuman.yml logs -f
 ```
 
-**Resource constraints** are pre-configured for low-power SBCs:
-- **512MB RAM** hard limit
-- **0.5 CPU** cap
-- Log rotation (10MB × 3 files) prevents SD card fill-up
-- SQLite memory persisted via volume mount
+See [DEPLOYMENT.md](DEPLOYMENT.md) for full edge deployment guide.
 
 ---
 
-## 🧪 Testing
+## CLI Commands
 
-```bash
-# Run all tests
-python -m pytest tests/ -v
+| Command | Description |
+|---------|-------------|
+| `contribai run` | Auto-discover repos and contribute |
+| `contribai hunt` | Aggressive multi-round discovery + contribution |
+| `contribai patrol` | Monitor open PRs and respond to feedback |
+| `contribai superhuman` | 24/7 autonomous loop with human-like behavior |
+| `contribai target <url>` | Target a specific repository |
+| `contribai analyze <url>` | Analyze without creating PRs |
+| `contribai solve <url>` | Solve open issues in a repo |
+| `contribai status` | Show submitted PR statuses |
+| `contribai stats` | Overall contribution statistics |
+| `contribai leaderboard` | Success rates per repository |
+| `contribai cleanup` | Delete forks with all PRs merged/closed |
+| `contribai sysinfo` | System health, memory, rate limits |
+| `contribai notify-test` | Send a test notification |
+| `contribai serve` | Start web dashboard (port 8787) |
+| `contribai config` | Show current configuration |
 
-# Run unit tests only
-python -m pytest tests/unit/ -v
+---
 
-# Run with coverage
-python -m pytest tests/ --cov=contribai --cov-report=term
+## Anti-Farming Pipeline
+
+Every finding passes through a dual-gate filter before becoming a PR:
+
+```
+Finding → Gate 1: Impact Filter → Gate 2: Keyword Filter → PR
+          ↓ drop if TRIVIAL/LOW     ↓ drop if farming keyword
+          (default: TRIVIAL)        (bypass for HIGH/CRITICAL)
 ```
 
+**Gate 1** drops any finding with `impact_level ∈ {TRIVIAL, LOW}`. Since the default is `TRIVIAL`, any finding the LLM fails to classify is automatically rejected (fail-safe).
+
+**Gate 2** scans titles for farming keywords (`docstring`, `format`, `style`, `whitespace`, etc.) but **only** for `LOW`/`MEDIUM` severity findings. A `CRITICAL` finding like "Format string injection" will never be accidentally filtered.
+
 ---
 
-## 📁 Project Structure
-
-See [`project_map.md`](project_map.md) for the complete annotated file tree.
+## Project Structure
 
 ```
 contribai/
-├── analysis/       # Multi-strategy code analysis engine
-├── cli/            # Click-based CLI + interactive TUI
-├── core/           # Config, models, sandbox, memory, notifier
-├── generator/      # LLM-powered contribution generation
-├── github/         # GitHub API client + repo discovery
-├── issues/         # Issue solver (deep multi-file planning)
-├── llm/            # LLM provider abstraction (MiniMax M2.7)
-├── orchestrator/   # Pipeline, SuperHumanLoop, Memory
-├── pr/             # PR manager + Patrol (CI auto-heal)
-├── scheduler/      # Cron-based background scheduling
-├── templates/      # PR description + commit templates
-├── tools/          # DeerFlow-pattern tool registry
-└── web/            # FastAPI dashboard + webhook server
+├── analysis/       # CodeAnalyzer, skills, multi-strategy scan
+├── cli/            # Click CLI + Rich TUI
+├── core/           # Pydantic models, config, exceptions
+├── generator/      # ContribGenerator, scorer, Jinja2 templates
+├── github/         # GitHub API client, guidelines parser
+├── issues/         # Issue solver, category classifier
+├── llm/            # LLM provider abstraction (MiniMax)
+├── notifications/  # Telegram, Slack, Discord notifier
+├── orchestrator/   # Pipeline, SuperHumanLoop, SQLite memory
+├── pr/             # PR manager, commit, push
+├── scheduler/      # APScheduler cron daemon
+├── tools/          # Docker sandbox, utility scripts
+└── web/            # FastAPI dashboard + webhooks
 ```
 
 ---
 
-## 🛡️ Safety & Ethics
+## Configuration Reference
 
-ContribAI is designed to be a **good citizen** of the open-source ecosystem:
+ContribAI uses a YAML-based config system with Pydantic validation. See [`config.example.yaml`](config.example.yaml) for a complete reference with all 13 sections:
 
-- **Daily PR caps** prevent repo spam (random 1-5 target, hard cap at 6)
-- **Graceful surrender** — closes PR and blacklists repo after 3 CI retries or 3 discussion rounds
-- **AI transparency** — PRs are clearly labeled as AI-generated contributions
-- **CONTRIBUTING.md respect** — reads and follows repo guidelines, commit conventions, and PR templates
-- **Repo blacklisting** — hostile repos are permanently excluded from future targeting
-- **DCO sign-off** — automatic `Signed-off-by` on all commits
+`github` · `llm` · `analysis` · `contribution` · `discovery` · `storage` · `pipeline` · `scheduler` · `web` · `quota` · `notifications` · `logging` · `multi_model`
 
 ---
 
-## 📄 License
+## License
 
-This project is licensed under the **GNU General Public License v3.0** — see [`LICENSE`](LICENSE) for details.
+**AGPL-3.0** with **Commons Clause** — free to use, modify, and self-host. Commercial SaaS redistribution is restricted. See [LICENSE](LICENSE) for full terms.
 
----
-
-<p align="center">
-  <sub>Built with 🔥 by a developer who believes AI should contribute to open source, not just consume it.</sub>
-</p>
+Copyright © 2025-2026 [tang-vu](https://github.com/tang-vu)
