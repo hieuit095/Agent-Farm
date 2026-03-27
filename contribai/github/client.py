@@ -258,6 +258,10 @@ class GitHubClient:
     ) -> dict:
         """Create or update a file in the repository.
 
+        When updating an existing file, GitHub requires the blob SHA of the
+        current version.  If ``sha`` is not supplied by the caller, this
+        method automatically fetches it via a GET request first.
+
         Args:
             signoff: If provided, appends ``Signed-off-by: <signoff>`` to the
                      commit message for DCO compliance.  Value should be
@@ -266,6 +270,29 @@ class GitHubClient:
         # Append DCO signoff trailer if requested
         if signoff and "Signed-off-by:" not in message:
             message = f"{message}\n\nSigned-off-by: {signoff}"
+
+        # ── Auto-fetch existing blob SHA if not provided ──────────────
+        # GitHub Contents API requires the current blob SHA when updating
+        # an existing file (HTTP 422 otherwise).  A 404 means the file is
+        # new and no SHA is needed.
+        if not sha:
+            try:
+                existing = await self._get(
+                    f"/repos/{owner}/{repo}/contents/{path}",
+                    params={"ref": branch},
+                )
+                sha = existing.get("sha")
+                logger.debug(
+                    "Fetched existing blob SHA for %s: %s",
+                    path,
+                    sha[:12] if sha else "None",
+                )
+            except GitHubAPIError as exc:
+                if getattr(exc, "status_code", None) == 404:
+                    # File does not exist yet — this is a creation, no SHA needed
+                    logger.debug("File %s does not exist on %s — creating new", path, branch)
+                else:
+                    raise
 
         encoded = base64.b64encode(content.encode("utf-8")).decode("utf-8")
         payload: dict[str, Any] = {

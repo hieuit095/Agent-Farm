@@ -121,6 +121,30 @@ REVIEW_BOT_LOGINS = {
 
 CONTROLLED_TEST_MARKER = "[CONTROLLED_TEST]"
 
+# CI check names and log patterns that indicate infrastructure/auth failures
+# that CANNOT be fixed via code changes.  The bot must skip these.
+CI_INFRA_IGNORE_PATTERNS: list[str] = [
+    # Deployment preview services (require manual auth for fork PRs)
+    "vercel",
+    "cloudflare",
+    "pages",
+    "netlify",
+    # Missing credentials / secrets
+    "no existing credentials found",
+    "unauthorized",
+    "authorization required",
+    "missing secret",
+    "secrets.",
+    # Coverage-only checks (not fixable via code)
+    "codecov",
+    "coverage",
+    # CLA / license signing bots
+    "cla/",
+    "license/",
+    "cla-bot",
+    "license-check",
+]
+
 
 class PRPatrol:
     """Monitor open PRs and respond to maintainer feedback."""
@@ -1045,8 +1069,28 @@ class PRPatrol:
                     )
             return True
 
-        # Pick the first failed run to fix
-        failed = failed_runs[0]
+        # Filter out infrastructure/auth failures that cannot be fixed by code
+        fixable_runs = [
+            r for r in failed_runs
+            if not self._is_infra_ci_failure(r.get("name", ""))
+        ]
+
+        if len(fixable_runs) < len(failed_runs):
+            skipped = len(failed_runs) - len(fixable_runs)
+            logger.info(
+                "  ⚙️ Skipped %d infra/auth CI failure(s) (not code-fixable)",
+                skipped,
+            )
+
+        if not fixable_runs:
+            logger.info(
+                "  ✅ All %d CI failure(s) are infra/auth — nothing to auto-heal",
+                len(failed_runs),
+            )
+            return False
+
+        # Pick the first fixable run
+        failed = fixable_runs[0]
         check_name = failed.get("name", "CI")
         check_run_id = failed.get("id", 0)
 
@@ -1054,6 +1098,7 @@ class PRPatrol:
             "  🔴 CI check '%s' failed on PR #%d (attempt %d/%d)",
             check_name, pr_number, attempts + 1, self.MAX_CI_RETRIES,
         )
+
 
         if dry_run:
             logger.info("  🏃 [DRY RUN] Would attempt CI auto-fix")
@@ -1067,6 +1112,15 @@ class PRPatrol:
             logger.warning("  ⚠️ Could not extract traceback from CI log")
             return False
 
+        # Second-pass: check log content for infra/auth patterns
+        if self._is_infra_ci_failure(traceback):
+            logger.info(
+                "  ⚙️ CI log for '%s' contains infra/auth patterns — skipping auto-heal",
+                check_name,
+            )
+            return False
+
+
         ci_status = await self._handle_ci_failure(
             owner, repo, pr_record, pr_data, traceback, check_name, attempts,
         )
@@ -1076,6 +1130,17 @@ class PRPatrol:
             return True
 
         return ci_status == "closed"
+
+    @staticmethod
+    def _is_infra_ci_failure(text: str) -> bool:
+        """Check if a CI check name or log indicates an infrastructure failure.
+
+        Infrastructure/auth failures (Vercel previews, missing secrets,
+        Codecov, CLA bots) cannot be fixed via code changes and must not
+        trigger the auto-heal loop.
+        """
+        text_lower = text.lower()
+        return any(pattern in text_lower for pattern in CI_INFRA_IGNORE_PATTERNS)
 
     @staticmethod
     def _extract_ci_traceback(raw_log: str) -> str:

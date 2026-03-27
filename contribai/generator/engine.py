@@ -113,10 +113,44 @@ class ContributionGenerator:
             )
 
             # 3: Parse output → apply search/replace to original content
+            # Patch-Correction Retry Loop: if the patcher fails to apply
+            # any edits (LLM hallucinated the SEARCH block), re-prompt the
+            # LLM with the file content and ask for a corrected patch.
+            MAX_PATCH_RETRIES = 2
             changes = self._parse_changes(response, context)
+            patch_attempt = 0
+            while not changes and patch_attempt < MAX_PATCH_RETRIES:
+                patch_attempt += 1
+                logger.warning(
+                    "Patch attempt %d/%d failed for %s — re-prompting LLM",
+                    patch_attempt, MAX_PATCH_RETRIES, finding.title,
+                )
+                # Build a correction prompt with the actual file content
+                file_content = context.relevant_files.get(finding.file_path, "")
+                retry_prompt = (
+                    "Your previous SEARCH block was NOT FOUND in the file. "
+                    "This usually happens because of hallucinated lines, "
+                    "incorrect indentation, or using `...` to skip lines.\n\n"
+                    "Here is the ACTUAL file content you must match against:\n"
+                    f"```\n{file_content[:6000]}\n```\n\n"
+                    "Please review and provide the EXACT, VERBATIM block of code "
+                    "you want to replace. Copy it character-for-character from the "
+                    "file above. Do not use `...` to skip lines. Do not modify "
+                    "indentation or whitespace.\n\n"
+                    + prompt  # Re-include the original task prompt
+                )
+                response = await self._agentic_generate(
+                    retry_prompt,
+                    system=system,
+                    github_client=github_client,
+                    context=context,
+                )
+                changes = self._parse_changes(response, context)
+
             if not changes:
                 logger.warning("No valid changes parsed for finding: %s", finding.title)
                 return None
+
 
             # 4: Generate commit message
             commit_msg = await self._generate_commit_message(finding, changes, context)
@@ -404,7 +438,20 @@ class ContributionGenerator:
                 "point and include it + the new content in `replace`\n"
                 "- To DELETE content, set `replace` to empty string\n"
                 "- Keep each edit small and focused\n"
-                "- DO NOT include the entire file in search or replace\n"
+                "- DO NOT include the entire file in search or replace\n\n"
+                "⚠️ CRITICAL RULES — FAILURE TO FOLLOW THESE WILL BREAK THE PATCH ENGINE:\n"
+                "1. The `search` value MUST be an EXACT, VERBATIM, copy-paste of a "
+                "CONTINUOUS block of lines from the file above. Character-for-character.\n"
+                "2. NEVER use `...` or `# ...` or any placeholder to skip lines. "
+                "If your edit spans a large block, you MUST include EVERY SINGLE LINE "
+                "between the first and last line of the search block.\n"
+                "3. DO NOT modify indentation, whitespace, quotes, or any character "
+                "in the `search` string. It must match the source file byte-for-byte.\n"
+                "4. Each `search` block must contain enough surrounding context "
+                "(at least 3-5 lines) to be UNIQUE within the file. Do not use "
+                "a 1-line search that could match multiple locations.\n"
+                "5. NEVER paraphrase, reformat, or re-indent code in the `search` block. "
+                "Copy it EXACTLY as it appears in the file content provided above.\n"
             )
         else:
             # For NEW files: provide full content
@@ -579,9 +626,7 @@ class ContributionGenerator:
                                 line.rstrip() for line in new_content.split("\n")
                             )
                             if norm_search in norm_content:
-                                # Find position in normalized, apply to original
                                 idx = norm_content.index(norm_search)
-                                # Map back: count newlines to find line range
                                 start_line = norm_content[:idx].count("\n")
                                 end_line = start_line + norm_search.count("\n")
                                 lines = new_content.split("\n")
@@ -606,16 +651,59 @@ class ContributionGenerator:
                                     path,
                                 )
 
+                        # Try 4: Indentation-agnostic line-by-line matching
+                        # Strips leading whitespace from each line for
+                        # comparison, then re-applies the original file's
+                        # indentation to the replacement block.
+                        if not matched:
+                            search_lines = search.split("\n")
+                            content_lines = new_content.split("\n")
+                            stripped_search_lines = [l.lstrip() for l in search_lines]
+
+                            # Slide a window of len(search_lines) over content
+                            window = len(search_lines)
+                            if window >= 2:  # Require at least 2 lines for safety
+                                for start_idx in range(len(content_lines) - window + 1):
+                                    candidate = content_lines[start_idx : start_idx + window]
+                                    candidate_stripped = [l.lstrip() for l in candidate]
+                                    if candidate_stripped == stripped_search_lines:
+                                        # Match found — re-indent replacement
+                                        # using the original file's leading whitespace
+                                        replace_lines = replace.split("\n")
+                                        reindented: list[str] = []
+                                        for j, rline in enumerate(replace_lines):
+                                            if j < len(candidate):
+                                                # Borrow indent from the corresponding original line
+                                                orig_indent = candidate[j][: len(candidate[j]) - len(candidate[j].lstrip())]
+                                            elif candidate:
+                                                # Extra lines: use indent of the last matched line
+                                                last = candidate[-1]
+                                                orig_indent = last[: len(last) - len(last.lstrip())]
+                                            else:
+                                                orig_indent = ""
+                                            # Strip the LLM's indent and apply the file's indent
+                                            reindented.append(orig_indent + rline.lstrip())
+
+                                        content_lines[start_idx : start_idx + window] = reindented
+                                        new_content = "\n".join(content_lines)
+                                        matched = True
+                                        logger.debug(
+                                            "Indent-agnostic match for %s (lines %d-%d)",
+                                            path, start_idx + 1, start_idx + window,
+                                        )
+                                        break
+
                         if matched:
                             edits_applied += 1
                         else:
                             logger.warning(
-                                "Search text not found in %s (tried exact + fuzzy). "
+                                "Search text not found in %s (tried exact + fuzzy + indent-agnostic). "
                                 "Search[:%d]: %.80s...",
                                 path,
                                 len(search),
                                 search.replace("\n", "\\n"),
                             )
+
 
                     logger.info(
                         "Edits for %s: %d/%d applied",
