@@ -38,6 +38,27 @@ ContribAI is a fully autonomous, edge-deployable AI agent that discovers GitHub 
 
 ---
 
+## 🥸 Deep Cover Anti-Abuse System
+
+To bypass sophisticated ML bot-detection heuristics, ContribAI employs a multi-layered behavioral spoofing engine:
+* **Human Imperfections:** Introduces stochastic "Notification Lag" (10m-2h delay before reading maintainer replies).
+* **Git Timestamp Spoofing:** Backdates `author.date` payloads by 15-45 minutes to simulate offline local coding rather than synchronous API automation.
+* **Circadian & Fatigue Modeling:** Implements mandatory lunch breaks, WPM-based typing delays tied to payload size, and a 10% probabilistic chance of "ghosting" maintainers in long feedback loops.
+* **API Throttling:** Utilizes a "Soft Fetch Throttler" with micro-sleeps and checks repo interaction limits to avoid 403s and 422s.
+
+## 📱 Telegram Command Center
+
+ContribAI can be controlled and monitored securely from your mobile device via Telegram Long-Polling. Send commands directly to the bot:
+* `/status`: Check if the background Super Human Loop is active.
+* `/rptoday`: Fetches a report of all successful PRs opened today.
+* `/quota`: Checks LLM token and API budget constraints.
+
+## 🎮 Gamification (WIP)
+
+A lightweight 2D pixel-art visualizer for the dashboard using a newly implemented WebSocket endpoint (`/ws/bot-state`). This emits real-time state transitions (`working`, `sleeping`, `coffee_break`) mapped directly to the bot's internal orchestrator state, allowing an interactive "Tamagotchi-style" observation of the agent's behavior.
+
+---
+
 ## 🏗️ Architecture
 
 ```mermaid

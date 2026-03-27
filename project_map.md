@@ -40,7 +40,7 @@
 | `models.py` | Domain models: `Repository`, `AnalysisResult`, `Finding`, `Contribution`, `PRResult`, `RepoContext`, `DiscoveryCriteria`, `FileNode`, `Issue` |
 | `exceptions.py` | Custom exception hierarchy: `ContribAIError`, `ConfigError`, `GitHubAPIError`, `RateLimitError`, `LLMError`, `LLMRateLimitError` |
 | `sandbox.py` | **`DockerSandbox`** — runs linters/tests in ephemeral Docker containers. Shift-left validation before PR creation |
-| `notifier.py` | **`TelegramNotifier`** — async, non-blocking push notifications via Telegram Bot API with HTML formatting |
+| `notifier.py` | **`TelegramNotifier`** — Interactive Command & Control (C2) center. Uses async Long-Polling for command handling (`/status`, `/rptoday`, `/quota`, `/help`), Command Menu registration (`setMyCommands`), and push notifications via Telegram Bot API. |
 | `daily_log.py` | `DailyMarkdownLogger` — generates daily Markdown reports (hunt results, patrol activity, errors) |
 | `middleware.py` | DeerFlow-pattern middleware chain (rate limiting, quality gates, daily PR cap enforcement) |
 | `logger.py` | Structured logging setup with daily file rotation and configurable retention |
@@ -70,7 +70,7 @@
 
 | File | Responsibility |
 |---|---|
-| `client.py` | **`GitHubClient`** (752 lines) — full GitHub REST API v3 wrapper. 40+ methods covering repos, PRs, issues, files, commits, reactions, check runs, CI log download, review comments, forks, branches. **Auto-SHA fetch** in `create_or_update_file()` (GET before PUT to prevent 422 errors) |
+| `client.py` | **`GitHubClient`** (752 lines) — full GitHub REST API v3 wrapper. 40+ methods. Features **Git Timestamp Spoofing** (backdating `author.date` 15-45m) for local-coding illusion, `check_interaction_limits` radar to evade 422 errors, and **Auto-SHA fetch** in `create_or_update_file()`. |
 | `discovery.py` | **`RepoDiscovery`** — GitHub search API integration. Builds queries from `DiscoveryCriteria`, handles pagination, relaxed merge-friendly filtering |
 | `guidelines.py` | `fetch_repo_guidelines()` — extracts CONTRIBUTING.md, PR templates, commit conventions, and AI policy detection |
 
@@ -94,8 +94,8 @@
 
 | File | Responsibility |
 |---|---|
-| `pipeline.py` | **`ContribPipeline`** — main orchestrator. Modes: `run()`, `hunt()`, `run_single()`. Coordinates discover→analyze→generate→sandbox→PR flow |
-| `human.py` | **`SuperHumanLoop`** — stochastic daily routine. Random PR targets (1-5/day), hunt/patrol interleaving, dynamic sleep (short delay on dry hunts, normal on productive runs), Vietnamese developer persona |
+| `pipeline.py` | **`ContribPipeline`** — main orchestrator. Coordinates discover→analyze→generate→sandbox→PR flow. Implements the "Soft Fetch Throttler" (micro-sleeps during file fetching) and Global PR Lock (`_human_typing_lock`) to create a human bottleneck and prevent concurrent PR pushes. |
+| `human.py` | **`SuperHumanLoop`** — stochastic daily routine. Random PR targets (1-5/day), Mandatory Lunch Break, `LLMRateLimitError` 1-hour cooldown sleeps. Gamification Phase 1: State Emitter broadcasts (`working`, `sleeping`, `coffee_break`) to WebSockets. |
 | `memory.py` | **`Memory`** (561 lines) — SQLite persistence. 9 tables: `repos`, `prs`, `findings`, `run_log`, `pr_outcomes`, `repo_preferences`, `blacklist`, `api_usage_log`, `ci_fix_attempts`. Tracks CI auto-heal counters, discussion reply counts, Minimax sliding-window quota (1000/5h, 10000/7d) |
 
 ### `pr/` — Pull Request Management (2 modules, 1860 lines core)
@@ -103,7 +103,7 @@
 | File | Responsibility |
 |---|---|
 | `manager.py` | **`PRManager`** — git operations (clone, branch, commit, push), PR creation via GitHub API, DCO sign-off |
-| `patrol.py` | **`PRPatrol`** (1860 lines) — human-persona feedback engine. Classifies maintainer comments (fix_needed, question, hostile, approval). Pushes code fixes, answers questions, auto-heals CI with sandbox validation, handles CLA re-signing. **CI infrastructure ignore list** (`CI_INFRA_IGNORE_PATTERNS`: Vercel, Cloudflare, missing secrets, Codecov, CLA bots) with 2-pass filtering (check name + log content). Fail-safe killswitches: 3 CI retries, 3 discussion replies → graceful surrender + blacklist + Telegram alert |
+| `patrol.py` | **`PRPatrol`** (1860 lines) — Deep Turing-passable feedback engine. Features Notification Lag (10m-2h), Probabilistic Ghosting (10% chance), Contextual Small Talk, and WPM-based typing simulation. Classifies maintainer comments, auto-heals CI with sandbox validation, handles CLA re-signing, and includes Fail-safe killswitches. |
 
 ### `scheduler/` — Background Scheduling
 
@@ -121,7 +121,7 @@
 
 | File | Responsibility |
 |---|---|
-| `server.py` | FastAPI-based REST API server |
+| `server.py` | FastAPI-based REST API server with a new WebSocket endpoint (`/ws/bot-state`) for real-time frontend gamification |
 | `dashboard.py` | Web dashboard routes (stats, PR history, run logs) |
 | `auth.py` | API key authentication middleware |
 | `webhooks.py` | GitHub webhook handler (PR events, review events) |
