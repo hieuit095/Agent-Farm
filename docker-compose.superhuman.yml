@@ -12,6 +12,6 @@ services:
     env_file: .env
     volumes:
       - ./config.yaml:/app/config.yaml:ro
-      - ./memory.db:/app/memory.db:rw
+      - ./memory.db:/root/.farm_agent/memory.db:rw
       - ./logs:/app/logs:rw
       - /var/run/docker.sock:/var/run/docker.sock:rw
