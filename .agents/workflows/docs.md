@@ -18,7 +18,7 @@ python -c "import pathlib; docs = list(pathlib.Path('.').rglob('*.md')); print('
 python -c "
 import pathlib, ast, sys
 total = covered = 0
-for f in pathlib.Path('contribai').rglob('*.py'):
+for f in pathlib.Path('farm_agent').rglob('*.py'):
     try:
         tree = ast.parse(f.read_text())
         for node in ast.walk(tree):
@@ -81,7 +81,7 @@ def function_name(param: str) -> bool:
 7. **Verify code examples work**
 // turbo
 ```bash
-python -c "print('contribai package importable:', end=' '); exec('from contribai import __version__; print(__version__)')"
+python -c "print('farm_agent package importable:', end=' '); exec('from farm_agent import __version__; print(__version__)')"
 ```
 
 8. **Check for broken links**

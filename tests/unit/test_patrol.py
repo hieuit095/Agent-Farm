@@ -6,8 +6,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from contribai.core.models import FeedbackAction, FeedbackItem, PatrolResult
-from contribai.pr.patrol import (
+from farm_agent.core.models import FeedbackAction, FeedbackItem, PatrolResult
+from farm_agent.pr.patrol import (
     CONTROLLED_TEST_MARKER,
     GITHUB_REPLIES,
     OUR_REPLY_MARKERS,
@@ -37,11 +37,11 @@ class TestReviewBotLogins:
 class TestOurReplyMarkers:
     """Test OUR_REPLY_MARKERS constant."""
 
-    def test_contains_contribai(self):
-        assert any("contribai" in m for m in OUR_REPLY_MARKERS)
+    def test_patrol_markers_present(self):
+        assert any("farm_agent" in m for m in OUR_REPLY_MARKERS)
 
     def test_contains_patrol_marker(self):
-        assert any("contribai-patrol" in m for m in OUR_REPLY_MARKERS)
+        assert any("farm_agent-patrol" in m for m in OUR_REPLY_MARKERS)
 
 
 # ── Test PatrolResult ──────────────────────────────────────────────────────
@@ -263,7 +263,7 @@ class TestCollectFeedback:
                 {
                     "id": 11,
                     "user": {"login": "tang-vu", "type": "User"},
-                    "body": "Updated in the latest commit. Thanks for pointing it out!\n\n<!-- contribai-patrol -->",
+                    "body": "Updated in the latest commit. Thanks for pointing it out!\n\n<!-- farm_agent-patrol -->",
                     "path": "server.py",
                     "line": 12,
                     "original_line": 12,
@@ -581,7 +581,7 @@ classifications:
     @pytest.mark.asyncio
     async def test_patrol_hostile_closes_pr_and_blacklists(self, tmp_path):
         """Full integration: hostile comment → close PR → blacklist in SQLite."""
-        from contribai.orchestrator.memory import Memory
+        from farm_agent.orchestrator.memory import Memory
 
         # Set up real SQLite memory
         memory = Memory(tmp_path / "test_hostile.db")
@@ -590,7 +590,7 @@ classifications:
         # Mock GitHub client
         github = MagicMock()
         github.get_authenticated_user = AsyncMock(
-            return_value={"login": "contribai-bot"}
+            return_value={"login": "farm_agent-bot"}
         )
         github._get = AsyncMock(return_value={"state": "open"})
         github.get_pr_comments = AsyncMock(
@@ -659,11 +659,11 @@ classifications:
     @pytest.mark.asyncio
     async def test_patrol_hostile_handles_deleted_repo(self):
         """If repo is already deleted, close_pull_request raises 404 — patrol must not crash."""
-        from contribai.core.exceptions import GitHubAPIError
+        from farm_agent.core.exceptions import GitHubAPIError
 
         github = MagicMock()
         github.get_authenticated_user = AsyncMock(
-            return_value={"login": "contribai-bot"}
+            return_value={"login": "farm_agent-bot"}
         )
         github._get = AsyncMock(return_value={"state": "open"})
         github.get_pr_comments = AsyncMock(
@@ -709,10 +709,10 @@ classifications:
     @pytest.mark.asyncio
     async def test_blacklist_filtering_in_discovery(self, tmp_path):
         """Discovery engine filters out blacklisted repos."""
-        from contribai.core.config import DiscoveryConfig
-        from contribai.core.models import Repository
-        from contribai.github.discovery import RepoDiscovery
-        from contribai.orchestrator.memory import Memory
+        from farm_agent.core.config import DiscoveryConfig
+        from farm_agent.core.models import Repository
+        from farm_agent.github.discovery import RepoDiscovery
+        from farm_agent.orchestrator.memory import Memory
 
         # Set up memory with a blacklisted repo
         memory = Memory(tmp_path / "test_discovery.db")
@@ -818,7 +818,7 @@ class TestCIAutoHealing:
     @pytest.mark.asyncio
     async def test_ci_auto_heal_triggers_fix(self, tmp_path):
         """Full flow: failed check → log download → LLM fix → commit pushed."""
-        from contribai.orchestrator.memory import Memory
+        from farm_agent.orchestrator.memory import Memory
 
         memory = Memory(tmp_path / "test_ci_heal.db")
         await memory.init()
@@ -875,7 +875,7 @@ class TestCIAutoHealing:
         github.create_or_update_file.assert_called_once()
         github.create_pr_comment.assert_called_once()
         comment_body = github.create_pr_comment.call_args.args[3]
-        assert "contribai-patrol" in comment_body
+        assert "farm_agent-patrol" in comment_body
 
         # Verify attempt counter incremented
         attempts = await memory.get_ci_fix_attempts("owner/repo", 10)
@@ -886,7 +886,7 @@ class TestCIAutoHealing:
     @pytest.mark.asyncio
     async def test_ci_auto_heal_max_attempts_closes_pr(self, tmp_path):
         """After MAX_CI_FIX_ATTEMPTS, PR is closed instead of retrying."""
-        from contribai.orchestrator.memory import Memory
+        from farm_agent.orchestrator.memory import Memory
 
         memory = Memory(tmp_path / "test_ci_max.db")
         await memory.init()
@@ -962,7 +962,7 @@ class TestDiscussionKillswitch:
 
     @pytest.mark.asyncio
     async def test_discussion_killswitch_closes_pr(self, tmp_path):
-        from contribai.orchestrator.memory import Memory
+        from farm_agent.orchestrator.memory import Memory
 
         memory = Memory(tmp_path / "test_disc_max.db")
         await memory.init()
@@ -1228,7 +1228,7 @@ class TestAddCommentReaction:
     @pytest.mark.asyncio
     async def test_review_comment_routes_to_pulls(self):
         """is_review_comment=True routes to /pulls/comments/{id}/reactions."""
-        from contribai.github.client import GitHubClient
+        from farm_agent.github.client import GitHubClient
 
         client = GitHubClient(token="fake")
         client._post = AsyncMock(return_value={"id": 1, "content": "+1"})
@@ -1244,7 +1244,7 @@ class TestAddCommentReaction:
     @pytest.mark.asyncio
     async def test_issue_comment_routes_to_issues(self):
         """is_review_comment=False routes to /issues/comments/{id}/reactions."""
-        from contribai.github.client import GitHubClient
+        from farm_agent.github.client import GitHubClient
 
         client = GitHubClient(token="fake")
         client._post = AsyncMock(return_value={"id": 2, "content": "+1"})
@@ -1260,7 +1260,7 @@ class TestAddCommentReaction:
     @pytest.mark.asyncio
     async def test_custom_reaction(self):
         """Custom reaction types (heart, rocket, etc.) work."""
-        from contribai.github.client import GitHubClient
+        from farm_agent.github.client import GitHubClient
 
         client = GitHubClient(token="fake")
         client._post = AsyncMock(return_value={"id": 3, "content": "heart"})
@@ -1278,7 +1278,7 @@ class TestAddCommentReaction:
     @pytest.mark.asyncio
     async def test_api_failure_returns_none(self):
         """If API fails, returns None instead of raising."""
-        from contribai.github.client import GitHubClient
+        from farm_agent.github.client import GitHubClient
 
         client = GitHubClient(token="fake")
         client._post = AsyncMock(side_effect=Exception("403 Forbidden"))

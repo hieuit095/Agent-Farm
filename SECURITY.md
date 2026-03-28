@@ -13,8 +13,8 @@
 
 If you discover a security vulnerability, please report it responsibly:
 
-1. **Create a [GitHub Issue](https://github.com/tang-vu/ContribAI/issues/new)** with the `security` label
-2. For critical vulnerabilities, use [GitHub Security Advisories](https://github.com/tang-vu/ContribAI/security/advisories) instead
+1. **Create a [GitHub Issue](https://github.com/tang-vu/Farm-Agent/issues/new)** with the `security` label
+2. For critical vulnerabilities, use [GitHub Security Advisories](https://github.com/tang-vu/Farm-Agent/security/advisories) instead
 3. Include:
    - Description of the vulnerability
    - Steps to reproduce
@@ -28,7 +28,7 @@ If you discover a security vulnerability, please report it responsibly:
 
 ## Security Considerations
 
-ContribAI handles sensitive data:
+Farm-Agent handles sensitive data:
 - **GitHub Tokens** – Stored in `config.yaml` (gitignored)
 - **LLM API Keys** – Stored in `config.yaml` (gitignored)
 - **LLM Outputs** – Treated as untrusted data, sanitized before use

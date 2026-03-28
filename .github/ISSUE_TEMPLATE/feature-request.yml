@@ -1,5 +1,5 @@
 name: ✨ Feature Request
-description: Suggest a new feature for ContribAI
+description: Suggest a new feature for Farm-Agent
 labels: ["type/feature"]
 body:
   - type: markdown

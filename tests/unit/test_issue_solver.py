@@ -8,8 +8,8 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from contribai.core.models import ContributionType, FileNode, Issue, RepoContext
-from contribai.issues.solver import IssueCategory, IssueSolver
+from farm_agent.core.models import ContributionType, FileNode, Issue, RepoContext
+from farm_agent.issues.solver import IssueCategory, IssueSolver
 
 
 @pytest.fixture

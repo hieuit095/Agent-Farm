@@ -6,7 +6,7 @@ import asyncio
 
 import pytest
 
-from contribai.core.sandbox import DockerSandbox
+from farm_agent.core.sandbox import DockerSandbox
 
 
 @pytest.mark.asyncio

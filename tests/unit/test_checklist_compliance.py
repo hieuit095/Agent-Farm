@@ -1,6 +1,6 @@
 """Unit test for auto_check_pr_template."""
 
-from contribai.pr.manager import auto_check_pr_template
+from farm_agent.pr.manager import auto_check_pr_template
 
 
 def test_auto_check_safe_boxes_only():

@@ -1,4 +1,4 @@
-"""Tests for contribai.tools.protocol — MCP-inspired tool protocol."""
+"""Tests for farm_agent.tools.protocol — MCP-inspired tool protocol."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from contribai.tools.protocol import (
+from farm_agent.tools.protocol import (
     GitHubTool,
     LLMTool,
     ToolRegistry,

@@ -4,13 +4,13 @@ services:
   # ── Dashboard mode ─────────────────────────────────
   dashboard:
     build: .
-    container_name: contribai-dashboard
+    container_name: farm_agent-dashboard
     command: ["serve", "--host", "0.0.0.0"]
     ports:
       - "8787:8787"
     volumes:
-      - contribai-data:/home/contribai/.contribai
-      - ./config.yaml:/home/contribai/config.yaml:ro
+      - farm_agent-data:/home/farm_agent/.farm_agent
+      - ./config.yaml:/home/farm_agent/config.yaml:ro
     environment:
       - GITHUB_TOKEN=${GITHUB_TOKEN}
       - GEMINI_API_KEY=${GEMINI_API_KEY}
@@ -24,11 +24,11 @@ services:
   # ── Scheduler mode ─────────────────────────────────
   scheduler:
     build: .
-    container_name: contribai-scheduler
+    container_name: farm_agent-scheduler
     command: ["schedule"]
     volumes:
-      - contribai-data:/home/contribai/.contribai
-      - ./config.yaml:/home/contribai/config.yaml:ro
+      - farm_agent-data:/home/farm_agent/.farm_agent
+      - ./config.yaml:/home/farm_agent/config.yaml:ro
     environment:
       - GITHUB_TOKEN=${GITHUB_TOKEN}
       - GEMINI_API_KEY=${GEMINI_API_KEY}
@@ -41,10 +41,10 @@ services:
   # Usage: docker compose run --rm runner run --dry-run
   runner:
     build: .
-    container_name: contribai-runner
+    container_name: farm_agent-runner
     volumes:
-      - contribai-data:/home/contribai/.contribai
-      - ./config.yaml:/home/contribai/config.yaml:ro
+      - farm_agent-data:/home/farm_agent/.farm_agent
+      - ./config.yaml:/home/farm_agent/config.yaml:ro
     environment:
       - GITHUB_TOKEN=${GITHUB_TOKEN}
       - GEMINI_API_KEY=${GEMINI_API_KEY}
@@ -52,5 +52,5 @@ services:
       - cli
 
 volumes:
-  contribai-data:
+  farm_agent-data:
     driver: local

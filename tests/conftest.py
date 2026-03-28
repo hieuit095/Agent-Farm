@@ -1,4 +1,4 @@
-"""Shared test fixtures and mocks for ContribAI."""
+"""Shared test fixtures and mocks for Farm-Agent."""
 
 from __future__ import annotations
 
@@ -6,16 +6,16 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from contribai.core.config import (
+from farm_agent.core.config import (
     AnalysisConfig,
-    ContribAIConfig,
+    FarmAgentConfig,
     ContributionConfig,
     DiscoveryConfig,
     GitHubConfig,
     LLMConfig,
     StorageConfig,
 )
-from contribai.core.models import (
+from farm_agent.core.models import (
     ContributionType,
     FileNode,
     Finding,
@@ -30,7 +30,7 @@ from contribai.core.models import (
 @pytest.fixture
 def sample_config(tmp_path):
     """Full config with tmp path for DB."""
-    return ContribAIConfig(
+    return FarmAgentConfig(
         github=GitHubConfig(token="test_token", max_prs_per_day=5),
         llm=LLMConfig(provider="minimax", model="MiniMax-M2.7", api_key="test_key"),
         analysis=AnalysisConfig(enabled_analyzers=["security", "quality", "performance"]),

@@ -4,8 +4,8 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from contribai.core.config import ContributionConfig
-from contribai.core.models import (
+from farm_agent.core.config import ContributionConfig
+from farm_agent.core.models import (
     Contribution,
     ContributionType,
     FileChange,
@@ -13,7 +13,7 @@ from contribai.core.models import (
     RepoContext,
     Severity,
 )
-from contribai.generator.engine import ContributionGenerator
+from farm_agent.generator.engine import ContributionGenerator
 
 
 @pytest.fixture
@@ -47,7 +47,7 @@ def context(sample_repo):
 class TestGenerateBranchName:
     def test_security_fix_branch(self, generator, security_finding):
         name = generator._generate_branch_name(security_finding)
-        assert name.startswith("contribai/fix/security/")
+        assert name.startswith("farm_agent/fix/security/")
         assert "hardcoded" in name
 
     def test_docs_branch(self, generator):
@@ -59,7 +59,7 @@ class TestGenerateBranchName:
             file_path="README.md",
         )
         name = generator._generate_branch_name(finding)
-        assert name.startswith("contribai/docs/")
+        assert name.startswith("farm_agent/docs/")
 
     def test_branch_name_sanitized(self, generator):
         finding = Finding(
@@ -301,8 +301,8 @@ class TestArchitecturalAwareness:
         it to the system prompt. Verify the LLM receives the map content."""
         from unittest.mock import MagicMock
 
-        from contribai.core.models import FileNode, Repository
-        from contribai.llm.provider import LLMToolResponse
+        from farm_agent.core.models import FileNode, Repository
+        from farm_agent.llm.provider import LLMToolResponse
 
         mock_llm = MagicMock()
         received_system = {}
@@ -384,7 +384,7 @@ class TestAgenticLoop:
     async def test_agentic_loop_read_file_success(self, context):
         """Verify the agentic loop calls read_file and then returns generation."""
         from unittest.mock import AsyncMock, MagicMock
-        from contribai.llm.provider import LLMToolResponse, ToolCallRequest
+        from farm_agent.llm.provider import LLMToolResponse, ToolCallRequest
 
         mock_llm = MagicMock()
         call_count = {"tools": 0, "complete": 0}
@@ -440,8 +440,8 @@ class TestAgenticLoop:
     async def test_agentic_loop_max_calls_limit(self, context):
         """Verify the loop doesn't exceed MAX_TOOL_CALLS."""
         from unittest.mock import AsyncMock, MagicMock
-        from contribai.llm.provider import LLMToolResponse, ToolCallRequest
-        from contribai.generator.engine import MAX_TOOL_CALLS
+        from farm_agent.llm.provider import LLMToolResponse, ToolCallRequest
+        from farm_agent.generator.engine import MAX_TOOL_CALLS
 
         mock_llm = MagicMock()
         call_count = {"tools": 0, "complete": 0}

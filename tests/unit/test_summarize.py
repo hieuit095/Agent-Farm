@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from contribai.analysis.analyzer import CodeAnalyzer
-from contribai.core.models import ContributionType, Finding, Severity
+from farm_agent.analysis.analyzer import CodeAnalyzer
+from farm_agent.core.models import ContributionType, Finding, Severity
 
 
 class TestSummarizeFindings:

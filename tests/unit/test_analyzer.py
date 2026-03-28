@@ -2,9 +2,9 @@
 
 import pytest
 
-from contribai.analysis.analyzer import ANALYZABLE_EXTENSIONS, CodeAnalyzer
-from contribai.core.config import AnalysisConfig
-from contribai.core.models import (
+from farm_agent.analysis.analyzer import ANALYZABLE_EXTENSIONS, CodeAnalyzer
+from farm_agent.core.config import AnalysisConfig
+from farm_agent.core.models import (
     ContributionType,
     FileNode,
     Finding,

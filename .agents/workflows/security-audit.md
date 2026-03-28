@@ -9,12 +9,12 @@ description: Security audit workflow – scan for vulnerabilities, review depend
 1. **Check for hardcoded secrets**
 // turbo
 ```bash
-ruff check contribai/ --select S105,S106,S107
+ruff check farm_agent/ --select S105,S106,S107
 ```
 Also manually search for common patterns:
 // turbo
 ```bash
-python -c "import pathlib; files = list(pathlib.Path('contribai').rglob('*.py')); [print(f'{f}:{i+1}: {line.strip()}') for f in files for i, line in enumerate(f.read_text().splitlines()) if any(kw in line.lower() for kw in ['password', 'secret', 'api_key', 'token'] if 'config' not in str(f))]"
+python -c "import pathlib; files = list(pathlib.Path('farm_agent').rglob('*.py')); [print(f'{f}:{i+1}: {line.strip()}') for f in files for i, line in enumerate(f.read_text().splitlines()) if any(kw in line.lower() for kw in ['password', 'secret', 'api_key', 'token'] if 'config' not in str(f))]"
 ```
 
 2. **Check dependencies for known vulnerabilities**
@@ -24,16 +24,16 @@ pip audit
 
 3. **Review security-sensitive files**
 Manually inspect these critical files:
-- `contribai/core/config.py` – Token/key handling
-- `contribai/github/client.py` – API authentication
-- `contribai/llm/provider.py` – API key handling
-- `contribai/pr/manager.py` – Git operations
-- `contribai/analysis/analyzer.py` – LLM output parsing
+- `farm_agent/core/config.py` – Token/key handling
+- `farm_agent/github/client.py` – API authentication
+- `farm_agent/llm/provider.py` – API key handling
+- `farm_agent/pr/manager.py` – Git operations
+- `farm_agent/analysis/analyzer.py` – LLM output parsing
 
 4. **Check for unsafe deserialization**
 // turbo
 ```bash
-python -c "import pathlib; files = list(pathlib.Path('contribai').rglob('*.py')); [print(f'{f}:{i+1}: {line.strip()}') for f in files for i, line in enumerate(f.read_text().splitlines()) if 'yaml.load(' in line and 'safe_load' not in line]"
+python -c "import pathlib; files = list(pathlib.Path('farm_agent').rglob('*.py')); [print(f'{f}:{i+1}: {line.strip()}') for f in files for i, line in enumerate(f.read_text().splitlines()) if 'yaml.load(' in line and 'safe_load' not in line]"
 ```
 
 5. **Check .gitignore covers sensitive files**

@@ -24,7 +24,7 @@ Objective was to execute a real Hunt -> Patrol crucible against a controlled pub
 ### Live superhuman loop
 
 ```powershell
-.\venv\Scripts\python.exe -m contribai.cli.main --config logs\config.superhuman.controlled.yaml superhuman --time-warp --target-repo https://github.com/hieuit095/gitvisualizer-ai
+.\venv\Scripts\python.exe -m farm_agent.cli.main --config logs\config.superhuman.controlled.yaml superhuman --time-warp --target-repo https://github.com/hieuit095/gitvisualizer-ai
 ```
 
 This command was launched multiple times (`run1`..`run6`) with stdout/stderr redirected into:
@@ -68,7 +68,7 @@ Finding: Minimax responses were leaking raw `<think>...</think>` blocks into dow
 
 Fix applied:
 
-- `contribai/llm/provider.py`
+- `farm_agent/llm/provider.py`
   - Strip `<think>` / `<thinking>` artifacts at provider boundary.
 
 ### Run 2 / Run 3: Hunt reliability fixes, then successful live PR creation
@@ -80,14 +80,14 @@ Observed issue:
 
 Fixes applied:
 
-- `contribai/orchestrator/human.py`
+- `farm_agent/orchestrator/human.py`
   - Added `--target-repo` controlled mode.
   - Forced first action to targeted Hunt.
   - Retried targeted Hunt immediately when no PR was produced.
   - Prioritized Patrol when an open targeted PR already existed.
-- `contribai/orchestrator/pipeline.py`
+- `farm_agent/orchestrator/pipeline.py`
   - Added `run_single(..., max_prs=...)` so controlled Hunt opens only one PR.
-- `contribai/cli/main.py`
+- `farm_agent/cli/main.py`
   - Added `superhuman --target-repo`.
 
 Raw terminal output proving PR creation:
@@ -138,7 +138,7 @@ Root cause:
 
 Fixes applied:
 
-- `contribai/pr/patrol.py`
+- `farm_agent/pr/patrol.py`
   - Added `[CONTROLLED_TEST]` marker support so same-login review comments can be treated as maintainer-simulation feedback in controlled tests.
 - `scripts/inject_maintainer_feedback.py`
   - Auto-prefixes review comments with `[CONTROLLED_TEST]`.
@@ -202,9 +202,9 @@ Observed issue after Run 5:
 
 Fix applied:
 
-- `contribai/pr/patrol.py`
+- `farm_agent/pr/patrol.py`
   - Detect review threads that already have a bot reply and skip the root comment on future patrol cycles.
-- `contribai/github/client.py`
+- `farm_agent/github/client.py`
   - Added `ref` support to `get_file_content()` so Patrol can fetch branch-specific file content correctly.
 
 Verification output:
@@ -255,12 +255,12 @@ Conclusion:
 
 ## Core Files Fixed During the Crucible
 
-- `contribai/cli/main.py`
-- `contribai/orchestrator/human.py`
-- `contribai/orchestrator/pipeline.py`
-- `contribai/llm/provider.py`
-- `contribai/pr/patrol.py`
-- `contribai/github/client.py`
+- `farm_agent/cli/main.py`
+- `farm_agent/orchestrator/human.py`
+- `farm_agent/orchestrator/pipeline.py`
+- `farm_agent/llm/provider.py`
+- `farm_agent/pr/patrol.py`
+- `farm_agent/github/client.py`
 - `scripts/inject_maintainer_feedback.py`
 - `tests/unit/test_superhuman.py`
 - `tests/unit/test_minimax.py`

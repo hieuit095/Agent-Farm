@@ -2,7 +2,7 @@
 
 import pytest
 
-from contribai.orchestrator.memory import Memory
+from farm_agent.orchestrator.memory import Memory
 
 
 @pytest.fixture

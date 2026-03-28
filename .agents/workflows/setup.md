@@ -8,8 +8,8 @@ description: New developer onboarding – environment setup, project orientation
 
 1. **Clone the repository**
 ```bash
-git clone https://github.com/tang-vu/ContribAI.git
-cd ContribAI
+git clone https://github.com/tang-vu/Farm-Agent.git
+cd Farm-Agent
 ```
 
 2. **Verify Python version**
@@ -41,7 +41,7 @@ pip install -e ".[dev]"
 6. **Verify installation**
 // turbo
 ```bash
-contribai --help
+farm_agent --help
 ```
 
 7. **Set up configuration**
@@ -55,7 +55,7 @@ Edit `config.yaml` and add:
 8. **Verify configuration**
 // turbo
 ```bash
-contribai config
+farm_agent config
 ```
 
 9. **Run tests to verify setup**
@@ -76,7 +76,7 @@ Key files to read:
 ```bash
 python -c "
 import pathlib
-for p in sorted(pathlib.Path('contribai').rglob('*.py')):
+for p in sorted(pathlib.Path('farm_agent').rglob('*.py')):
     lines = len(p.read_text().splitlines())
     print(f'  {str(p):50s} {lines:>4d} lines')
 "
@@ -84,7 +84,7 @@ for p in sorted(pathlib.Path('contribai').rglob('*.py')):
 
 12. **Try a dry run**
 ```bash
-contribai analyze https://github.com/some-small-public-repo
+farm_agent analyze https://github.com/some-small-public-repo
 ```
 
 13. **Make your first contribution**

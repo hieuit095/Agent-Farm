@@ -4,9 +4,9 @@ import argparse
 import asyncio
 from pathlib import Path
 
-from contribai.core.config import load_config
-from contribai.core.exceptions import GitHubAPIError
-from contribai.github.client import GitHubClient
+from farm_agent.core.config import load_config
+from farm_agent.core.exceptions import GitHubAPIError
+from farm_agent.github.client import GitHubClient
 
 CI_TRAP_PATH = ".github/workflows/ci-trap.yml"
 CI_TRAP_CONTENT = """name: CI Trap
@@ -72,7 +72,7 @@ def main() -> None:
     parser.add_argument(
         "--config",
         default="logs/config.auto_healing.yaml",
-        help="Path to ContribAI YAML config with GitHub token",
+        help="Path to Farm-Agent YAML config with GitHub token",
     )
     parser.add_argument("--owner", default="hieuit095")
     parser.add_argument("--repo", default="gitvisualizer-ai")

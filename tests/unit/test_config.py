@@ -3,20 +3,20 @@
 import pytest
 import yaml
 
-from contribai.core.config import ContribAIConfig, LLMConfig, load_config
-from contribai.core.exceptions import ConfigError
+from farm_agent.core.config import FarmAgentConfig, LLMConfig, load_config
+from farm_agent.core.exceptions import ConfigError
 
 
-class TestContribAIConfig:
+class TestFarmAgentConfig:
     def test_default_config(self):
-        config = ContribAIConfig()
+        config = FarmAgentConfig()
         assert config.llm.provider == "minimax"
         assert config.llm.model == "MiniMax-M2.7"
         assert config.github.max_prs_per_day == 10
         assert "security" in config.analysis.enabled_analyzers
 
     def test_custom_config(self):
-        config = ContribAIConfig(
+        config = FarmAgentConfig(
             llm=LLMConfig(provider="minimax", model="abab6.5s-chat", api_key="test"),
         )
         assert config.llm.provider == "minimax"

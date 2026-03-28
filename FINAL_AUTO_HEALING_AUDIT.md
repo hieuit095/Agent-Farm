@@ -4,7 +4,7 @@
 
 The self-set trap sequence succeeded.
 
-`ContribAI`:
+`Farm-Agent`:
 
 - injected a live failing workflow into `main`
 - opened a new live PR on `hieuit095/gitvisualizer-ai`
@@ -33,7 +33,7 @@ Because `ci-trap.yml` is designed to `exit 1` unconditionally, the PR remains re
 ```
 
 ```powershell
-.\venv\Scripts\python.exe -m contribai.cli.main -c logs/config.auto_healing.yaml superhuman --target-repo https://github.com/hieuit095/gitvisualizer-ai --time-warp
+.\venv\Scripts\python.exe -m farm_agent.cli.main -c logs/config.auto_healing.yaml superhuman --target-repo https://github.com/hieuit095/gitvisualizer-ai --time-warp
 ```
 
 ## Trap Injection Proof
@@ -147,7 +147,7 @@ Raw terminal excerpt from the successful auto-heal branch:
 1105: [03/26/26 19:17:09] INFO     HTTP Request: POST
 1106:                              https://api.minimax.io/v1/text/chatcompletion_v2 "HTTP/1.1 200 OK"
 1108:                    INFO     HTTP Request: GET
-1109:                              https://api.github.com/repos/hieuit095/gitvisualizer-ai/contents/src/lib/utils.ts?ref=contribai%2Ffix%2Fui%2Fmodule-import-from-non-existent-file-cau "HTTP/1.1 200 OK"
+1109:                              https://api.github.com/repos/hieuit095/gitvisualizer-ai/contents/src/lib/utils.ts?ref=farm_agent%2Ffix%2Fui%2Fmodule-import-from-non-existent-file-cau "HTTP/1.1 200 OK"
 1113: [03/26/26 19:17:10] INFO     HTTP Request: PUT
 1114:                              https://api.github.com/repos/hieuit095/gitvisualizer-ai/contents/src/lib/utils.ts "HTTP/1.1 200 OK"
 1116:                    INFO       ✅ Pushed CI fix for 'build' on src/lib/utils.ts
@@ -233,15 +233,15 @@ So no code change in the PR branch can make the trap turn green. The proof targe
 
 - `scripts/inject_ci_trap.py`
   - added a real `GitHubClient`-based workflow injector
-- `contribai/orchestrator/pipeline.py`
+- `farm_agent/orchestrator/pipeline.py`
   - added controlled duplicate bypass
   - passed `github_client` into generation
   - improved controlled finding selection to prefer concrete code findings
   - changed post-PR CI handling to leave failed PRs open for Patrol
   - returns immediately when there are zero check runs
-- `contribai/orchestrator/human.py`
+- `farm_agent/orchestrator/human.py`
   - targeted hunts use `allow_duplicate_prs=True`
-- `contribai/generator/engine.py`
+- `farm_agent/generator/engine.py`
   - caches project-map and tool-read file contents into `context.relevant_files`
   - self-review now only hard-blocks on explicit `REJECT`
 - `tests/unit/test_pipeline_v2.py`

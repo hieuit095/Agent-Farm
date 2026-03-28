@@ -2,7 +2,7 @@
 
 import pytest
 
-from contribai.analysis.strategies import (
+from farm_agent.analysis.strategies import (
     DjangoStrategy,
     ExpressStrategy,
     FastAPIStrategy,
@@ -10,7 +10,7 @@ from contribai.analysis.strategies import (
     ReactStrategy,
     detect_frameworks,
 )
-from contribai.core.models import FileNode, RepoContext, Repository
+from farm_agent.core.models import FileNode, RepoContext, Repository
 
 
 @pytest.fixture

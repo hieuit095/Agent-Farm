@@ -1,5 +1,5 @@
 """
-Fork Cleanup Script for ContribAI
+Fork Cleanup Script for Farm-Agent
 Lists all forks, checks PR status, and deletes forks that are safe to remove.
 
 Safe to delete: forks where all associated PRs are merged or closed.

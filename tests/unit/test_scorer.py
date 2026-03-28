@@ -2,14 +2,14 @@
 
 import pytest
 
-from contribai.core.models import (
+from farm_agent.core.models import (
     Contribution,
     ContributionType,
     FileChange,
     Finding,
     Severity,
 )
-from contribai.generator.scorer import QualityScorer
+from farm_agent.generator.scorer import QualityScorer
 
 
 @pytest.fixture
@@ -37,7 +37,7 @@ def good_contribution():
             )
         ],
         commit_message="fix(security): parameterize sql queries to prevent injection",
-        branch_name="contribai/fix/sql-injection",
+        branch_name="farm_agent/fix/sql-injection",
     )
 
 

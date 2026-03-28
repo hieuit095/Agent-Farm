@@ -7,9 +7,9 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from contribai.core.sandbox import DockerSandbox
-from contribai.orchestrator.memory import Memory
-from contribai.pr.patrol import PRPatrol
+from farm_agent.core.sandbox import DockerSandbox
+from farm_agent.orchestrator.memory import Memory
+from farm_agent.pr.patrol import PRPatrol
 
 
 class ScriptedLLM:

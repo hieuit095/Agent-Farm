@@ -1,11 +1,11 @@
-# AI Agent Guide for ContribAI
+# AI Agent Guide for Farm-Agent
 
 > This document is designed for AI assistants (GitHub Copilot, Claude, Cursor, Coderabbit, etc.)
 > scanning this repository. It provides structured context to help AI understand the codebase.
 
 ## What This Project Is
 
-ContribAI is an **autonomous AI agent** that contributes to open source projects on GitHub.
+Farm-Agent is an **autonomous AI agent** that contributes to open source projects on GitHub.
 It discovers repos, analyzes code, generates fixes, and submits pull requests — all without human intervention.
 
 **It is NOT** a library/SDK, web app, or CLI tool intended for end-user consumption.
@@ -34,12 +34,12 @@ Discovery → Middleware Chain → Analysis → Generation → PR → CI Monitor
 ```
 
 ### Key Patterns
-1. **Middleware Chain** — 5 ordered middlewares (`contribai/core/middleware.py`)
-2. **Progressive Skills** — 17 analysis skills loaded on-demand (`contribai/analysis/skills.py`)
-3. **Sub-Agent Registry** — 4 agents with parallel execution (`contribai/agents/registry.py`)
-4. **Tool Protocol** — MCP-inspired tool interface (`contribai/tools/protocol.py`)
-5. **Outcome Learning** — Tracks PR outcomes to learn per-repo preferences (`contribai/orchestrator/memory.py`)
-6. **Context Summarization** — Compresses analysis results for LLM context (`contribai/analysis/analyzer.py`)
+1. **Middleware Chain** — 5 ordered middlewares (`farm_agent/core/middleware.py`)
+2. **Progressive Skills** — 17 analysis skills loaded on-demand (`farm_agent/analysis/skills.py`)
+3. **Sub-Agent Registry** — 4 agents with parallel execution (`farm_agent/agents/registry.py`)
+4. **Tool Protocol** — MCP-inspired tool interface (`farm_agent/tools/protocol.py`)
+5. **Outcome Learning** — Tracks PR outcomes to learn per-repo preferences (`farm_agent/orchestrator/memory.py`)
+6. **Context Summarization** — Compresses analysis results for LLM context (`farm_agent/analysis/analyzer.py`)
 
 ### Module Dependency Graph
 ```
@@ -101,7 +101,7 @@ config.analysis.enabled_analyzers  # list[str]
 ### Memory/Persistence
 ```python
 # SQLite via aiosqlite
-memory = Memory("~/.contribai/memory.db")
+memory = Memory("~/.farm_agent/memory.db")
 await memory.init()
 await memory.record_outcome(repo, pr_number, url, type, "merged")
 prefs = await memory.get_repo_preferences(repo)
@@ -109,7 +109,7 @@ prefs = await memory.get_repo_preferences(repo)
 
 ## File Organization Rules
 
-- **Code files only**: ContribAI only modifies `.py`, `.js`, `.ts`, `.go`, `.rs` etc.
+- **Code files only**: Farm-Agent only modifies `.py`, `.js`, `.ts`, `.go`, `.rs` etc.
 - **Never modify**: `LICENSE`, `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, `.github/FUNDING.yml`
 - **Skip extensions**: `.md`, `.yaml`, `.json`, `.toml`, `.cfg`, `.ini`
 - **Protected meta files**: Any governance/meta files are off-limits
@@ -118,7 +118,7 @@ prefs = await memory.get_repo_preferences(repo)
 
 ```bash
 pytest tests/ -v                  # 333 tests
-pytest tests/ -v --cov=contribai  # With coverage (threshold: 50%)
+pytest tests/ -v --cov=farm_agent  # With coverage (threshold: 50%)
 ```
 
 Test structure:
@@ -146,7 +146,7 @@ tests/
 
 ## Known Limitations
 
-1. No sandbox execution — ContribAI generates code but doesn't run it
+1. No sandbox execution — Farm-Agent generates code but doesn't run it
 2. Single-repo PRs only — no cross-repo changes
 3. No interactive mode — fully autonomous
 4. Rate limited by GitHub API (5000 req/hour for authenticated users)

@@ -17,13 +17,13 @@ git status
 2. **Run full test suite**
 // turbo
 ```bash
-pytest tests/ -v --cov=contribai --cov-report=term-missing
+pytest tests/ -v --cov=farm_agent --cov-report=term-missing
 ```
 
 3. **Update version number**
-Update version in `contribai/__init__.py` and `pyproject.toml`:
+Update version in `farm_agent/__init__.py` and `pyproject.toml`:
 ```python
-# contribai/__init__.py
+# farm_agent/__init__.py
 __version__ = "X.Y.Z"
 ```
 

@@ -1,20 +1,20 @@
-# Contributing to ContribAI
+# Contributing to Farm-Agent
 
-Thank you for your interest in contributing to ContribAI! 🎉
+Thank you for your interest in contributing to Farm-Agent! 🎉
 
 ## 🚀 Quick Start
 
 ```bash
 # Clone & install
-git clone https://github.com/tang-vu/ContribAI.git
-cd ContribAI
+git clone https://github.com/tang-vu/Farm-Agent.git
+cd Farm-Agent
 python -m venv .venv
 .venv\Scripts\Activate.ps1  # or source .venv/bin/activate on Unix
 pip install -e ".[dev]"
 
 # Verify
 pytest tests/ -v  # 247 tests must pass
-contribai --help
+farm_agent --help
 ```
 
 ## 📋 Development Workflow
@@ -35,8 +35,8 @@ contribai --help
 
 4. **Lint & format**:
    ```bash
-   ruff format contribai/ tests/
-   ruff check contribai/ tests/ --fix
+   ruff format farm_agent/ tests/
+   ruff check farm_agent/ tests/ --fix
    ```
 
 5. **Run tests**:
@@ -56,18 +56,18 @@ contribai --help
 
 | Directory | Purpose |
 |-----------|---------|
-| `contribai/core/` | Config, models, middleware chain (5 middlewares) |
-| `contribai/analysis/` | 7 analyzers + progressive skill loading (17 skills) |
-| `contribai/agents/` | Sub-agent registry (Analyzer, Generator, Patrol, Compliance) |
-| `contribai/tools/` | MCP-inspired tool protocol (GitHubTool, LLMTool) |
-| `contribai/llm/` | LLM providers (Gemini, OpenAI, Anthropic, Ollama, Vertex AI) |
-| `contribai/github/` | GitHub API client, discovery, guidelines |
-| `contribai/generator/` | Code generation + self-review + quality scorer |
-| `contribai/pr/` | PR lifecycle manager + patrol + CLA + DCO signoff |
-| `contribai/orchestrator/` | Pipeline, hunt mode, outcome memory (SQLite) |
-| `contribai/issues/` | Issue-driven contribution solver |
-| `contribai/web/` | FastAPI dashboard, auth, webhooks |
-| `contribai/cli/` | Rich CLI interface |
+| `farm_agent/core/` | Config, models, middleware chain (5 middlewares) |
+| `farm_agent/analysis/` | 7 analyzers + progressive skill loading (17 skills) |
+| `farm_agent/agents/` | Sub-agent registry (Analyzer, Generator, Patrol, Compliance) |
+| `farm_agent/tools/` | MCP-inspired tool protocol (GitHubTool, LLMTool) |
+| `farm_agent/llm/` | LLM providers (Gemini, OpenAI, Anthropic, Ollama, Vertex AI) |
+| `farm_agent/github/` | GitHub API client, discovery, guidelines |
+| `farm_agent/generator/` | Code generation + self-review + quality scorer |
+| `farm_agent/pr/` | PR lifecycle manager + patrol + CLA + DCO signoff |
+| `farm_agent/orchestrator/` | Pipeline, hunt mode, outcome memory (SQLite) |
+| `farm_agent/issues/` | Issue-driven contribution solver |
+| `farm_agent/web/` | FastAPI dashboard, auth, webhooks |
+| `farm_agent/cli/` | Rich CLI interface |
 | `tests/` | 247 unit tests |
 | `docs/` | Architecture documentation |
 | `.agents/workflows/` | Development workflows |

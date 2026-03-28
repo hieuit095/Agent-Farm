@@ -1,8 +1,8 @@
-"""Tests for contribai.analysis.skills — Progressive skill loading."""
+"""Tests for farm_agent.analysis.skills — Progressive skill loading."""
 
 from __future__ import annotations
 
-from contribai.analysis.skills import (
+from farm_agent.analysis.skills import (
     SKILLS,
     AnalysisSkill,
     detect_frameworks,

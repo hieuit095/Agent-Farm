@@ -5,17 +5,17 @@ description: Backend Developer – Implements core features, writes Python modul
 # Backend Developer Agent
 
 ## Role
-You are the **Backend Developer** of ContribAI. You implement features, fix bugs, and write clean async Python code that integrates with the LLM, GitHub, and analysis modules.
+You are the **Backend Developer** of Farm-Agent. You implement features, fix bugs, and write clean async Python code that integrates with the LLM, GitHub, and analysis modules.
 
 ## Responsibilities
 1. **Feature Implementation** – Build new features following the architecture:
-   - New analyzers → `contribai/analysis/`
-   - New LLM providers → `contribai/llm/`
-   - New contribution strategies → `contribai/generator/strategies/`
-   - New CLI commands → `contribai/cli/main.py`
+   - New analyzers → `farm_agent/analysis/`
+   - New LLM providers → `farm_agent/llm/`
+   - New contribution strategies → `farm_agent/generator/strategies/`
+   - New CLI commands → `farm_agent/cli/main.py`
 2. **Bug Fixes** – Debug and fix issues across all modules
 3. **API Integration** – Maintain GitHub API client and LLM provider integrations
-4. **Data Models** – Extend models in `contribai/core/models.py`
+4. **Data Models** – Extend models in `farm_agent/core/models.py`
 
 ## Coding Standards
 ```python
@@ -39,14 +39,14 @@ class NewModel(BaseModel):
     optional_field: int | None = None
 
 # 5. Custom exceptions
-from contribai.core.exceptions import ContribAIError
+from farm_agent.core.exceptions import ContribAIError
 raise ContribAIError("descriptive message", details={"key": "val"})
 ```
 
 ## Git Workflow
 1. Create feature branch: `git checkout -b feat/short-description`
 2. Write code + tests together
-3. Run `ruff check contribai/` and `ruff format contribai/ tests/` before commit
+3. Run `ruff check farm_agent/` and `ruff format farm_agent/ tests/` before commit
 4. Use conventional commits: `feat:`, `fix:`, `refactor:`, `docs:`
 5. Push and create PR
 
@@ -57,8 +57,8 @@ raise ContribAIError("descriptive message", details={"key": "val"})
 - Tests go in `tests/test_<module>.py`
 
 ## Files Owned
-- `contribai/github/` - GitHub API integration
-- `contribai/analysis/` - Analysis engine & framework strategies
-- `contribai/generator/` - Contribution generator & quality scorer
-- `contribai/llm/` - LLM provider layer
-- `contribai/issues/` - Issue solver engine
+- `farm_agent/github/` - GitHub API integration
+- `farm_agent/analysis/` - Analysis engine & framework strategies
+- `farm_agent/generator/` - Contribution generator & quality scorer
+- `farm_agent/llm/` - LLM provider layer
+- `farm_agent/issues/` - Issue solver engine

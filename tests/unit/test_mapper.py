@@ -6,7 +6,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from contribai.analysis.mapper import RepoMapper
+from farm_agent.analysis.mapper import RepoMapper
 
 
 # ── Fixtures ──────────────────────────────────────────────────────────────
@@ -211,7 +211,7 @@ class TestGenerateMap:
     @pytest.mark.asyncio
     async def test_caps_at_max_files(self):
         """Verify that more than MAX_FILES files are capped."""
-        from contribai.analysis.mapper import MAX_FILES
+        from farm_agent.analysis.mapper import MAX_FILES
 
         mapper = RepoMapper()
         # Create 600 fake file nodes

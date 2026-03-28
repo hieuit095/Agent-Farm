@@ -5,19 +5,19 @@
 After scanning `pipeline.py`, `human.py`, and `patrol.py`, the following "robotic" patterns were identified that could flag the agent to maintainers or anti-abuse ML systems:
 
 1.  **Immediate Notification Reaction (The "Always Online" Flaw):**
-    *   **Location:** `contribai/pr/patrol.py` (`_handle_code_fix` and `_handle_question`).
+    *   **Location:** `farm_agent/pr/patrol.py` (`_handle_code_fix` and `_handle_question`).
     *   **Issue:** When the bot detects actionable feedback during a patrol cycle, it immediately transitions into the WPM typing delay (`_calculate_typing_delay`). It lacks a "Notification Lag"—the time it naturally takes a human to see a GitHub email, open the laptop, context-switch, and begin typing.
 
 2.  **Perfectly Formatted Micro-Commits:**
-    *   **Location:** `contribai/pr/patrol.py` (`GITHUB_REPLIES["COMMIT_FIX"]`).
+    *   **Location:** `farm_agent/pr/patrol.py` (`GITHUB_REPLIES["COMMIT_FIX"]`).
     *   **Issue:** Commit messages for review fixes rigorously follow conventional commit standards (e.g., `fix: apply reviewer suggestion — ...`). When humans push quick 1-line typographical fixes to their own open PRs, they often use lazy, imperfect messaging like "oops", "typo", or "addressed comments".
 
 3.  **Synchronous Git Timestamps:**
-    *   **Location:** `contribai/pr/patrol.py` (`_handle_code_fix`) and PR creation logic in `contribai/orchestrator/pipeline.py`.
+    *   **Location:** `farm_agent/pr/patrol.py` (`_handle_code_fix`) and PR creation logic in `farm_agent/orchestrator/pipeline.py`.
     *   **Issue:** Because the files are committed via the GitHub API immediately after the `asyncio.sleep()` delay, the Git `author_date` exactly matches the `committer_date` and the GitHub PR push event timestamp. Real developers usually work locally; there is a natural temporal gap between saving a commit (`author_date`) and pushing it (`committer_date` / push event).
 
 4.  **Always Courteous Surrendering (Zero Ghosting):**
-    *   **Location:** `contribai/pr/patrol.py` (Killswitch logic limiting `MAX_DISCUSSION_REPLIES`).
+    *   **Location:** `farm_agent/pr/patrol.py` (Killswitch logic limiting `MAX_DISCUSSION_REPLIES`).
     *   **Issue:** When the bot reaches its max discussion replies, it politely explains the situation and cleanly closes the PR (`GITHUB_REPLIES["SURRENDER"]`). While polite, humans often abandon complex or overly debated PRs without a word (ghosting), leaving the maintainer or stale-bot to close it eventually.
 
 ## 2. Proposed "Next-Level" Human Behaviors

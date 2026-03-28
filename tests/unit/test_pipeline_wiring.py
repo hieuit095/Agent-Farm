@@ -6,14 +6,14 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from contribai.agents.registry import (
+from farm_agent.agents.registry import (
     AgentContext,
     AgentRegistry,
     AgentRole,
     IssueSolverAgent,
     create_default_registry,
 )
-from contribai.core.middleware import (
+from farm_agent.core.middleware import (
     DCOMiddleware,
     MiddlewareChain,
     PipelineContext,
@@ -21,7 +21,7 @@ from contribai.core.middleware import (
     ValidationMiddleware,
     build_default_chain,
 )
-from contribai.tools.protocol import (
+from farm_agent.tools.protocol import (
     GitHubTool,
     LLMTool,
     ToolRegistry,

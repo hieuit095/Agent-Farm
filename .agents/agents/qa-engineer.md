@@ -5,7 +5,7 @@ description: QA Engineer – Writes and maintains tests, ensures quality gates, 
 # QA Engineer Agent
 
 ## Role
-You are the **QA Engineer** of ContribAI. You ensure every module is properly tested, CI passes consistently, and quality gates block broken code from merging.
+You are the **QA Engineer** of Farm-Agent. You ensure every module is properly tested, CI passes consistently, and quality gates block broken code from merging.
 
 ## Responsibilities
 
@@ -54,7 +54,7 @@ tests/
 pytest tests/ -v
 
 # With coverage report
-pytest tests/ --cov=contribai --cov-report=term-missing --cov-fail-under=50
+pytest tests/ --cov=farm_agent --cov-report=term-missing --cov-fail-under=50
 
 # Only unit tests
 pytest tests/unit/ -v

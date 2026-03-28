@@ -9,13 +9,13 @@ description: Debugging workflow – systematic approach to finding and fixing bu
 1. **Reproduce the issue**
 Run the failing command with verbose logging:
 ```bash
-contribai <command> -v
+farm_agent <command> -v
 ```
 
 2. **Check the error traceback**
 Read the full traceback. Identify:
 - Which module threw the error
-- The exception type (from `contribai.core.exceptions`?)
+- The exception type (from `farm_agent.core.exceptions`?)
 - The root cause vs. symptom
 
 3. **Enable debug logging**
@@ -40,7 +40,7 @@ pytest tests/ -v -s --log-cli-level=DEBUG -k "test_name"
 ```python
 # Check rate limit
 import asyncio
-from contribai.github.client import GitHubClient
+from farm_agent.github.client import GitHubClient
 async def check():
     client = GitHubClient(token="ghp_...")
     rl = await client.check_rate_limit()
@@ -53,8 +53,8 @@ asyncio.run(check())
 ```python
 # Test LLM directly
 import asyncio
-from contribai.core.config import load_config
-from contribai.llm.provider import create_llm_provider
+from farm_agent.core.config import load_config
+from farm_agent.llm.provider import create_llm_provider
 async def test():
     config = load_config()
     llm = create_llm_provider(config.llm)
@@ -68,9 +68,9 @@ asyncio.run(test())
 ```python
 # Check memory DB
 import asyncio
-from contribai.orchestrator.memory import Memory
+from farm_agent.orchestrator.memory import Memory
 async def check():
-    mem = Memory("~/.contribai/memory.db")
+    mem = Memory("~/.farm_agent/memory.db")
     await mem.init()
     stats = await mem.get_stats()
     print(stats)

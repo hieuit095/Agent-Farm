@@ -7,8 +7,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from contribai.core.exceptions import GitHubAPIError
-from contribai.orchestrator.human import (
+from farm_agent.core.exceptions import GitHubAPIError
+from farm_agent.orchestrator.human import (
     ABSOLUTE_MAX_PRS_PER_DAY,
     DRY_HUNT_DELAY_MAX,
     DRY_HUNT_DELAY_MIN,
@@ -60,7 +60,7 @@ def loop(mock_pipeline, mock_memory, mock_notifier):
     # Patch TelegramNotifier at the definition site so SuperHumanLoop.__init__
     # never creates a real httpx.AsyncClient or makes HTTP calls.
     with patch(
-        "contribai.orchestrator.human.TelegramNotifier",
+        "farm_agent.orchestrator.human.TelegramNotifier",
         return_value=mock_notifier,
     ):
         instance = SuperHumanLoop(mock_pipeline, mock_memory, dry_run=True)
@@ -164,7 +164,7 @@ class TestActionSelection:
     @pytest.mark.asyncio
     async def test_controlled_target_uses_single_repo_path(self, mock_pipeline, mock_memory, mock_notifier):
         """Targeted hunts should use run_single instead of discovery hunt."""
-        with patch("contribai.orchestrator.human.TelegramNotifier", return_value=mock_notifier):
+        with patch("farm_agent.orchestrator.human.TelegramNotifier", return_value=mock_notifier):
             controlled_loop = SuperHumanLoop(
                 mock_pipeline,
                 mock_memory,
@@ -190,7 +190,7 @@ class TestActionSelection:
         mock_pipeline.run_single = AsyncMock(
             return_value=MagicMock(repos_analyzed=1, prs_created=0, pr_urls=[])
         )
-        with patch("contribai.orchestrator.human.TelegramNotifier", return_value=mock_notifier):
+        with patch("farm_agent.orchestrator.human.TelegramNotifier", return_value=mock_notifier):
             controlled_loop = SuperHumanLoop(
                 mock_pipeline,
                 mock_memory,

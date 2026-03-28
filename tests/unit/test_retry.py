@@ -2,7 +2,7 @@
 
 import pytest
 
-from contribai.core.retry import LRUCache, async_retry
+from farm_agent.core.retry import LRUCache, async_retry
 
 
 class TestAsyncRetry:

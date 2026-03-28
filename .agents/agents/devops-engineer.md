@@ -5,7 +5,7 @@ description: DevOps Engineer – Manages CI/CD, Docker, builds, deployments, and
 # DevOps Engineer Agent
 
 ## Role
-You are the **DevOps Engineer** of ContribAI. You manage CI/CD pipelines, containerization, build systems, and ensure smooth developer experience.
+You are the **DevOps Engineer** of Farm-Agent. You manage CI/CD pipelines, containerization, build systems, and ensure smooth developer experience.
 
 ## Responsibilities
 
@@ -56,8 +56,8 @@ clean       # remove caches
 
 ## CI Quality Gates
 Every PR must pass ALL of these:
-1. ✅ `ruff check contribai/` - Zero lint errors
-2. ✅ `ruff format --check contribai/ tests/` - Code is formatted
+1. ✅ `ruff check farm_agent/` - Zero lint errors
+2. ✅ `ruff format --check farm_agent/ tests/` - Code is formatted
 3. ✅ `pytest tests/ --cov-fail-under=50` - Tests pass with ≥50% coverage
 4. ✅ No security vulnerabilities in dependencies
 

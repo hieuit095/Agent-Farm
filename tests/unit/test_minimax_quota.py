@@ -2,8 +2,8 @@ import asyncio
 import time
 from pathlib import Path
 import pytest
-from contribai.orchestrator.memory import Memory
-from contribai.core.exceptions import LLMRateLimitError
+from farm_agent.orchestrator.memory import Memory
+from farm_agent.core.exceptions import LLMRateLimitError
 
 @pytest.mark.asyncio
 async def test_minimax_quota_tracking(tmp_path: Path):

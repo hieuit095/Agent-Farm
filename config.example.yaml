@@ -1,4 +1,4 @@
-# ContribAI Configuration
+# Farm-Agent Configuration
 # Copy this file to config.yaml and fill in your values
 
 github:
@@ -61,7 +61,7 @@ discovery:
   topics: []
 
 storage:
-  db_path: "~/.contribai/memory.db"
+  db_path: "~/.farm_agent/memory.db"
   cache_ttl_hours: 24
 
 # ── Phase 4+ Configuration ──────────────────────────

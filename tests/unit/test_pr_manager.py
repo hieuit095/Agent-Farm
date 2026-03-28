@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from contribai.core.models import (
+from farm_agent.core.models import (
     Contribution,
     ContributionType,
     FileChange,
@@ -12,7 +12,7 @@ from contribai.core.models import (
     PRStatus,
     Severity,
 )
-from contribai.pr.manager import PRManager
+from farm_agent.pr.manager import PRManager
 
 
 @pytest.fixture
@@ -58,10 +58,10 @@ class TestPRBody:
         body = pr_manager._generate_pr_body(sample_contribution)
         assert "db.py" in body
 
-    def test_contains_contribai_attribution(self, pr_manager, sample_contribution):
+    def test_stealth_no_attribution(self, pr_manager, sample_contribution):
         body = pr_manager._generate_pr_body(sample_contribution)
-        # Stealth mode: no ContribAI branding in PR body
-        assert "ContribAI" not in body
+        # Stealth mode: no Farm-Agent branding in PR body
+        assert "Farm-Agent" not in body
 
     def test_no_ai_fluff_headers(self, pr_manager, sample_contribution):
         # Tired-dev: no heavy markdown headers ("Problem", "Solution", "Testing")

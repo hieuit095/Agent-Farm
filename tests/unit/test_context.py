@@ -1,7 +1,7 @@
 """Tests for LLM context management."""
 
-from contribai.core.models import FileNode, RepoContext
-from contribai.llm.context import (
+from farm_agent.core.models import FileNode, RepoContext
+from farm_agent.llm.context import (
     ContextBudget,
     build_repo_context_prompt,
     estimate_tokens,
@@ -91,7 +91,7 @@ class TestBuildRepoContextPrompt:
 
 class TestBuildGeneratorSystemPrompt:
     def test_surgical_precision_rules_present(self, sample_repo):
-        from contribai.llm.context import build_generator_system_prompt
+        from farm_agent.llm.context import build_generator_system_prompt
 
         ctx = RepoContext(repo=sample_repo)
         prompt = build_generator_system_prompt(ctx)
@@ -100,7 +100,7 @@ class TestBuildGeneratorSystemPrompt:
         assert "absolute minimum number of lines" in prompt
 
     def test_commit_tone_rules_present(self, sample_repo):
-        from contribai.llm.context import build_generator_system_prompt
+        from farm_agent.llm.context import build_generator_system_prompt
 
         ctx = RepoContext(repo=sample_repo)
         prompt = build_generator_system_prompt(ctx)

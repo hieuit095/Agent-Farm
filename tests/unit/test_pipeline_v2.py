@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from contribai.core.models import (
+from farm_agent.core.models import (
     AnalysisResult,
     Contribution,
     ContributionType,
@@ -23,7 +23,7 @@ from contribai.core.models import (
 @pytest.fixture
 def sample_pipeline(sample_config):
     """Create a pipeline instance for testing."""
-    from contribai.orchestrator.pipeline import ContribPipeline
+    from farm_agent.orchestrator.pipeline import ContribPipeline
 
     return ContribPipeline(sample_config)
 
@@ -160,7 +160,7 @@ class TestPipelineHuntMode:
 
 class TestPipelineResult:
     def test_pipeline_result_defaults(self):
-        from contribai.orchestrator.pipeline import PipelineResult
+        from farm_agent.orchestrator.pipeline import PipelineResult
 
         result = PipelineResult()
         assert result.repos_analyzed == 0
@@ -278,7 +278,7 @@ class TestGenerationContext:
         sample_pipeline._generator = AsyncMock()
 
         monkeypatch.setattr(
-            "contribai.orchestrator.pipeline.fetch_repo_guidelines",
+            "farm_agent.orchestrator.pipeline.fetch_repo_guidelines",
             AsyncMock(return_value=SimpleNamespace(has_guidelines=False)),
         )
         sample_pipeline._check_ai_policy = AsyncMock(return_value=False)
@@ -357,7 +357,7 @@ class TestGenerationContext:
         sample_pipeline._generator = AsyncMock()
 
         monkeypatch.setattr(
-            "contribai.orchestrator.pipeline.fetch_repo_guidelines",
+            "farm_agent.orchestrator.pipeline.fetch_repo_guidelines",
             AsyncMock(return_value=SimpleNamespace(has_guidelines=False)),
         )
         sample_pipeline._check_ai_policy = AsyncMock(return_value=False)
@@ -391,7 +391,7 @@ class TestGenerationContext:
 
 class TestTitlesSimilar:
     def test_similar_titles(self):
-        from contribai.orchestrator.pipeline import _titles_similar
+        from farm_agent.orchestrator.pipeline import _titles_similar
 
         assert _titles_similar(
             "Fix null pointer in login handler",
@@ -399,7 +399,7 @@ class TestTitlesSimilar:
         )
 
     def test_different_titles(self):
-        from contribai.orchestrator.pipeline import _titles_similar
+        from farm_agent.orchestrator.pipeline import _titles_similar
 
         assert not _titles_similar(
             "Update README documentation",
@@ -407,12 +407,12 @@ class TestTitlesSimilar:
         )
 
     def test_empty_titles(self):
-        from contribai.orchestrator.pipeline import _titles_similar
+        from farm_agent.orchestrator.pipeline import _titles_similar
 
         assert not _titles_similar("", "")
 
     def test_short_words_ignored(self):
-        from contribai.orchestrator.pipeline import _titles_similar
+        from farm_agent.orchestrator.pipeline import _titles_similar
 
         assert not _titles_similar("a the in", "b or on")
 
@@ -427,7 +427,7 @@ class TestAntiFarmingFilter:
         sample_repo,
         monkeypatch,
     ):
-        from contribai.core.models import ImpactLevel
+        from farm_agent.core.models import ImpactLevel
 
         trivial_finding = Finding(
             id="triv-1",
@@ -454,7 +454,7 @@ class TestAntiFarmingFilter:
         sample_pipeline._generator = AsyncMock()
 
         monkeypatch.setattr(
-            "contribai.orchestrator.pipeline.fetch_repo_guidelines",
+            "farm_agent.orchestrator.pipeline.fetch_repo_guidelines",
             AsyncMock(return_value=SimpleNamespace(has_guidelines=False)),
         )
         sample_pipeline._check_ai_policy = AsyncMock(return_value=False)
@@ -489,7 +489,7 @@ class TestAntiFarmingFilter:
         sample_repo,
         monkeypatch,
     ):
-        from contribai.core.models import ImpactLevel
+        from farm_agent.core.models import ImpactLevel
 
         farming_finding = Finding(
             id="farm-1",
@@ -516,7 +516,7 @@ class TestAntiFarmingFilter:
         sample_pipeline._generator = AsyncMock()
 
         monkeypatch.setattr(
-            "contribai.orchestrator.pipeline.fetch_repo_guidelines",
+            "farm_agent.orchestrator.pipeline.fetch_repo_guidelines",
             AsyncMock(return_value=SimpleNamespace(has_guidelines=False)),
         )
         sample_pipeline._check_ai_policy = AsyncMock(return_value=False)
@@ -550,7 +550,7 @@ class TestAntiFarmingFilter:
         sample_repo,
         monkeypatch,
     ):
-        from contribai.core.models import ImpactLevel
+        from farm_agent.core.models import ImpactLevel
 
         critical_finding = Finding(
             id="crit-1",
@@ -568,7 +568,7 @@ class TestAntiFarmingFilter:
         sample_pipeline._generator = AsyncMock()
 
         monkeypatch.setattr(
-            "contribai.orchestrator.pipeline.fetch_repo_guidelines",
+            "farm_agent.orchestrator.pipeline.fetch_repo_guidelines",
             AsyncMock(return_value=SimpleNamespace(has_guidelines=False)),
         )
         sample_pipeline._check_ai_policy = AsyncMock(return_value=False)
@@ -601,7 +601,7 @@ class TestIssuesFirstHunt:
 
     @pytest.mark.asyncio
     async def test_issues_run_before_analysis(self, sample_pipeline, sample_repo):
-        from contribai.orchestrator.pipeline import PipelineResult
+        from farm_agent.orchestrator.pipeline import PipelineResult
 
         call_order = []
 
@@ -627,7 +627,7 @@ class TestIssuesFirstHunt:
     async def test_skips_analysis_after_successful_issue_pr(
         self, sample_pipeline, sample_repo
     ):
-        from contribai.orchestrator.pipeline import PipelineResult
+        from farm_agent.orchestrator.pipeline import PipelineResult
 
         call_order = []
 

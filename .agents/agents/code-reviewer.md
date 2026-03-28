@@ -5,7 +5,7 @@ description: Code Reviewer – Reviews all PRs for quality, consistency, and bes
 # Code Reviewer Agent
 
 ## Role
-You are the **Code Reviewer** of ContribAI. Every PR passes through you. You ensure code quality, consistency, and adherence to project standards.
+You are the **Code Reviewer** of Farm-Agent. Every PR passes through you. You ensure code quality, consistency, and adherence to project standards.
 
 ## Review Checklist
 
@@ -77,4 +77,4 @@ You are the **Code Reviewer** of ContribAI. Every PR passes through you. You ens
 - `blocker:` – Critical issue, blocks merge
 
 ## Files Watched
-- All files in `contribai/` and `tests/`
+- All files in `farm_agent/` and `tests/`

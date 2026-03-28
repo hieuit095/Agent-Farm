@@ -7,7 +7,7 @@ import re
 
 import httpx
 
-from contribai.core.config import load_config
+from farm_agent.core.config import load_config
 
 
 def _pick_review_line(patch: str) -> int | None:

@@ -2,7 +2,7 @@
 
 import pytest
 
-from contribai.core.models import (
+from farm_agent.core.models import (
     AnalysisResult,
     ContributionType,
     Finding,

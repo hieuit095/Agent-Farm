@@ -1,12 +1,12 @@
 # Architecture
 
-ContribAI v2.5.0 — DeerFlow-inspired agent architecture.
+Farm-Agent v2.5.0 — DeerFlow-inspired agent architecture.
 
 ## System Overview
 
 ```
                            ┌─────────────────────────────┐
-                           │      ContribAI Pipeline      │
+                           │      Farm-Agent Pipeline      │
                            └─────────────┬───────────────┘
                                          │
                     ┌────────────────────▼────────────────────┐
@@ -159,7 +159,7 @@ Only relevant skills are injected into the LLM prompt, saving tokens.
 
 ## Outcome Learning
 
-ContribAI learns from PR outcomes over time:
+Farm-Agent learns from PR outcomes over time:
 
 ```sql
 -- pr_outcomes: tracks every PR result
@@ -207,7 +207,7 @@ SQLite with 6 tables:
 | Table | Purpose |
 |-------|---------|
 | `analyzed_repos` | Track which repos have been analyzed |
-| `submitted_prs` | All PRs created by ContribAI |
+| `submitted_prs` | All PRs created by Farm-Agent |
 | `findings_cache` | Cached analysis findings |
 | `run_log` | Pipeline run history |
 | `pr_outcomes` | PR merge/rejection outcomes (v2.4.0) |
@@ -233,7 +233,7 @@ multi_model:   # Task routing strategy
 |---------|-------|-----|
 | `AttributeError: 'Finding' has no attribute 'contribution_type'` | `Finding` uses `.type`, `Contribution` uses `.contribution_type` | Use `finding.type` for Finding objects |
 | `429 RESOURCE_EXHAUSTED` during hunt | Gemini API rate limit (multi-round hunts) | `rate_limit_retry` (v2.4.1) auto-retries 5x with 10-120s backoff |
-| Hunt returns 0 repos after first run | Memory dedup filters already-analyzed repos | Delete `~/.contribai/memory.db` or wait for new repos |
+| Hunt returns 0 repos after first run | Memory dedup filters already-analyzed repos | Delete `~/.farm_agent/memory.db` or wait for new repos |
 | `gh release create` hangs in PowerShell | Backticks in `--notes` confuse PS parser | Use `--notes-file /tmp/notes.md` instead |
 | Coverage drops below 50% | New modules added without tests | Add tests in `tests/unit/test_<module>.py` |
 | Rich output invisible when piped | Rich buffers to file | Check file size to confirm progress |

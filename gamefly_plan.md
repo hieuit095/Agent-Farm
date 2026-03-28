@@ -1,12 +1,12 @@
-# ContribAI Gamification / Tamagotchi Layer: Implementation Plan (GameFly)
+# Farm-Agent Gamification / Tamagotchi Layer: Implementation Plan (GameFly)
 
-This document outlines the detailed, step-by-step strategy for building the Gamification/Tamagotchi visual layer onto the existing ContribAI dashboard. The goal is to provide a live, 2D isometric/pixel-art representation of the bot's real-time state, running efficiently on edge devices (like Orange Pi) without hindering the core LLM/GitHub async loop.
+This document outlines the detailed, step-by-step strategy for building the Gamification/Tamagotchi visual layer onto the existing Farm-Agent dashboard. The goal is to provide a live, 2D isometric/pixel-art representation of the bot's real-time state, running efficiently on edge devices (like Orange Pi) without hindering the core LLM/GitHub async loop.
 
 ---
 
 ## Pillar 1: State Management & Emission (Backend)
 
-We need to introduce a lightweight, non-blocking mechanism to track and emit the `current_state` within the `SuperHumanLoop` (`contribai/orchestrator/human.py`), and a bridge to pass this state to the web layer.
+We need to introduce a lightweight, non-blocking mechanism to track and emit the `current_state` within the `SuperHumanLoop` (`farm_agent/orchestrator/human.py`), and a bridge to pass this state to the web layer.
 
 ### 1. State Dictionary & Transitions
 Add a `current_state` property to the `SuperHumanLoop` class. This dictionary will hold the bot's current status and metadata:
@@ -28,7 +28,7 @@ We will insert state update calls inside `SuperHumanLoop` methods (`run_daily_ro
 - **`ERROR_STRESS` -> "frustrated"**: Triggered on `GitHubAPIError` or unhandled exceptions before taking a stress break.
 
 ### 3. IPC (Inter-Process Communication) Strategy
-Since `SuperHumanLoop` is usually started via the CLI (`contribai superhuman`) and the FastAPI server runs in a separate process, they need a simple shared medium.
+Since `SuperHumanLoop` is usually started via the CLI (`farm_agent superhuman`) and the FastAPI server runs in a separate process, they need a simple shared medium.
 - **Approach**: An ephemeral JSON file (e.g., `.contribai_state.json` written to the cache/storage directory) or leveraging the existing SQLite `Memory` instance via a new `bot_state` table.
 - **Recommendation**: Writing to a tiny `.contribai_state.json` file using an async/non-blocking file write provides the lowest overhead and zero database locking contention, keeping the `SuperHumanLoop` completely unblocked.
 
@@ -36,7 +36,7 @@ Since `SuperHumanLoop` is usually started via the CLI (`contribai superhuman`) a
 
 ## Pillar 2: Real-time Communication (API Layer)
 
-The web dashboard needs a way to receive these state updates in real time without refreshing. We will modify `contribai/web/server.py`.
+The web dashboard needs a way to receive these state updates in real time without refreshing. We will modify `farm_agent/web/server.py`.
 
 ### 1. WebSocket Endpoint
 Add a WebSocket route `/ws/bot-state` to `server.py` using `fastapi.WebSocket`.
@@ -46,14 +46,14 @@ Add a WebSocket route `/ws/bot-state` to `server.py` using `fastapi.WebSocket`.
 
 ### 2. Static Files Mounting
 Currently, `server.py` returns a raw `HTMLResponse` from `dashboard.py`. We will refactor this to serve a dedicated frontend directory.
-- Mount actual static files: `app.mount("/static", StaticFiles(directory="contribai/web/static"), name="static")`.
-- Update the root route (`/`) to serve `contribai/web/static/index.html`. 
+- Mount actual static files: `app.mount("/static", StaticFiles(directory="farm_agent/web/static"), name="static")`.
+- Update the root route (`/`) to serve `farm_agent/web/static/index.html`. 
 
 ---
 
 ## Pillar 3: The Pixel Office (Frontend)
 
-We will build the Tamagotchi visualizer in a new directory: `contribai/web/static/`.
+We will build the Tamagotchi visualizer in a new directory: `farm_agent/web/static/`.
 
 ### 1. Frontend Architecture & Edge Rendering
 - **Constraint**: Must be extremely lightweight for the Orange Pi edge device.
@@ -61,7 +61,7 @@ We will build the Tamagotchi visualizer in a new directory: `contribai/web/stati
 
 ### 2. File Structure
 ```text
-contribai/web/static/
+farm_agent/web/static/
 ├── index.html       # The main dashboard combined with the canvas
 ├── style.css        # Layout, Retro/Pixel typography, and HUD styling
 ├── game.js          # WebSocket client, Canvas rendering, and Sprite animation logic
@@ -92,7 +92,7 @@ contribai/web/static/
 ### 3. Implementation Steps Checklist
 1. **[Backend]** Add `websockets` to dependencies.
 2. **[Backend]** Implement the non-blocking state emitter (`.contribai_state.json`) inside `human.py`.
-3. **[API]** Refactor `server.py` to mount `contribai/web/static` and serve `index.html`.
+3. **[API]** Refactor `server.py` to mount `farm_agent/web/static` and serve `index.html`.
 4. **[API]** Add the `/ws/bot-state` WebSocket endpoint using FastAPI.
 5. **[Frontend]** Create `index.html`, `style.css`, and `game.js` in `web/static/`.
 6. **[Frontend]** Implement the HTML5 Canvas loop and the WebSocket listener in `game.js`.

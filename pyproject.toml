@@ -3,13 +3,13 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "contribai"
+name = "farm_agent"
 version = "2.5.0"
 description = "AI Agent that automatically contributes to open source projects on GitHub"
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.11"
-authors = [{ name = "ContribAI Team" }]
+authors = [{ name = "Farm-Agent Team" }]
 keywords = ["ai", "agent", "github", "open-source", "contributions"]
 classifiers = [
     "Development Status :: 4 - Beta",
@@ -28,14 +28,11 @@ dependencies = [
     "click>=8.1,<9.0",
     "rich>=13.0,<14.0",
     "gitpython>=3.1,<4.0",
-    "jinja2>=3.1,<4.0",
     "aiosqlite>=0.19,<1.0",
     "google-genai>=1.0,<2.0",
     "openai>=1.10,<2.0",
     "anthropic>=0.40,<1.0",
-    "fastapi>=0.115,<1.0",
     "docker>=7.1,<8.0",
-    "uvicorn>=0.32,<1.0",
     "apscheduler>=3.10,<4.0",
     "httpx>=0.27,<1.0",
 ]
@@ -53,7 +50,7 @@ local-llm = [
 ]
 
 [project.scripts]
-contribai = "contribai.cli.main:cli"
+farm_agent = "farm_agent.cli.main:cli"
 
 [tool.ruff]
 target-version = "py311"
@@ -72,20 +69,20 @@ filterwarnings = [
 ]
 
 [tool.coverage.run]
-source = ["contribai"]
+source = ["farm_agent"]
 omit = [
-    "contribai/web/*",
-    "contribai/scheduler/*",
-    "contribai/plugins/*",
-    "contribai/templates/*",
-    "contribai/notifications/*",
-    "contribai/cli/tui.py",
-    "contribai/core/leaderboard.py",
-    "contribai/core/profiles.py",
-    "contribai/core/quotas.py",
-    "contribai/llm/agents.py",
-    "contribai/llm/models.py",
-    "contribai/llm/router.py",
+    "farm_agent/web/*",
+    "farm_agent/scheduler/*",
+    "farm_agent/plugins/*",
+    "farm_agent/templates/*",
+    "farm_agent/notifications/*",
+    "farm_agent/cli/tui.py",
+    "farm_agent/core/leaderboard.py",
+    "farm_agent/core/profiles.py",
+    "farm_agent/core/quotas.py",
+    "farm_agent/llm/agents.py",
+    "farm_agent/llm/models.py",
+    "farm_agent/llm/router.py",
 ]
 
 [tool.coverage.report]
@@ -96,4 +93,4 @@ exclude_lines = [
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["contribai"]
+packages = ["farm_agent"]

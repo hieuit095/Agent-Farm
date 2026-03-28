@@ -12,9 +12,9 @@ import httpx
 import pytest
 import respx
 
-from contribai.core.models import RepoContext
-from contribai.github.client import GITHUB_API, GitHubClient
-from contribai.llm.context import build_repo_context_prompt, extract_style_guide
+from farm_agent.core.models import RepoContext
+from farm_agent.github.client import GITHUB_API, GitHubClient
+from farm_agent.llm.context import build_repo_context_prompt, extract_style_guide
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────

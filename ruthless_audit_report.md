@@ -1,4 +1,4 @@
-# 🔪 ContribAI — Ruthless Architectural Audit Report
+# 🔪 Farm-Agent — Ruthless Architectural Audit Report
 **Auditor:** Principal Staff Engineer & Ruthless System Auditor
 **Date:** 2026-03-27
 **Scope:** Super Human Mode, PR Patrol / Self-Healing, Concurrency / API Limits / State
@@ -9,21 +9,21 @@
 ## 1. CRITICAL LOGIC FLAWS (System Crashes / Ban Risks)
 
 ### CRIT-01: Dual Quota System Desync — Ghost PRs Bypass Safety Caps
-**Files:** [human.py](file:///c:/Users/USER/Documents/GitHub/ContribAI/contribai/orchestrator/human.py#L396-L452), [pipeline.py](file:///c:/Users/USER/Documents/GitHub/ContribAI/contribai/orchestrator/pipeline.py#L232-L239), [memory.py](file:///c:/Users/USER/Documents/GitHub/ContribAI/contribai/orchestrator/memory.py#L213-L221)
+**Files:** [human.py](file:///c:/Users/USER/Documents/GitHub/Farm-Agent/farm_agent/orchestrator/human.py#L396-L452), [pipeline.py](file:///c:/Users/USER/Documents/GitHub/Farm-Agent/farm_agent/orchestrator/pipeline.py#L232-L239), [memory.py](file:///c:/Users/USER/Documents/GitHub/Farm-Agent/farm_agent/orchestrator/memory.py#L213-L221)
 
 **Mechanism of failure:** There are **two independent PR counters** that can desync:
 
-1. `SuperHumanLoop._prs_created_today` — an in-memory Python [int](file:///c:/Users/USER/Documents/GitHub/ContribAI/contribai/github/client.py#146-177) (line 182 of [human.py](file:///c:/Users/USER/Documents/GitHub/ContribAI/contribai/orchestrator/human.py)), incremented at line 508.
-2. `Memory.get_today_pr_count()` — a SQLite query counting rows where `created_at LIKE '{today}%'` (line 217 of [memory.py](file:///c:/Users/USER/Documents/GitHub/ContribAI/contribai/orchestrator/memory.py)), used by [pipeline.py](file:///c:/Users/USER/Documents/GitHub/ContribAI/contribai/orchestrator/pipeline.py) line 232.
+1. `SuperHumanLoop._prs_created_today` — an in-memory Python [int](file:///c:/Users/USER/Documents/GitHub/Farm-Agent/farm_agent/github/client.py#146-177) (line 182 of [human.py](file:///c:/Users/USER/Documents/GitHub/Farm-Agent/farm_agent/orchestrator/human.py)), incremented at line 508.
+2. `Memory.get_today_pr_count()` — a SQLite query counting rows where `created_at LIKE '{today}%'` (line 217 of [memory.py](file:///c:/Users/USER/Documents/GitHub/Farm-Agent/farm_agent/orchestrator/memory.py)), used by [pipeline.py](file:///c:/Users/USER/Documents/GitHub/Farm-Agent/farm_agent/orchestrator/pipeline.py) line 232.
 
-The Smart Fallback at `human.py:452` checks `self._prs_created_today >= max_prs_config`, but `max_prs_config` reads from `config.github.max_prs_per_day`. Meanwhile, the pipeline's own middleware at `pipeline.py:232` checks `Memory.get_today_pr_count()` independently. If the process crashes and restarts mid-day, `_prs_created_today` resets to `0` while the DB still has the real count. **The bot will create N duplicate PRs until the DB-based check catches up** — but that check only fires inside `pipeline.run()` / `pipeline.hunt()`, not inside [_do_hunt()](file:///c:/Users/USER/Documents/GitHub/ContribAI/contribai/orchestrator/human.py#245-309) when called from the SuperHuman loop. The SuperHuman loop trusts its own counter blindly.
+The Smart Fallback at `human.py:452` checks `self._prs_created_today >= max_prs_config`, but `max_prs_config` reads from `config.github.max_prs_per_day`. Meanwhile, the pipeline's own middleware at `pipeline.py:232` checks `Memory.get_today_pr_count()` independently. If the process crashes and restarts mid-day, `_prs_created_today` resets to `0` while the DB still has the real count. **The bot will create N duplicate PRs until the DB-based check catches up** — but that check only fires inside `pipeline.run()` / `pipeline.hunt()`, not inside [_do_hunt()](file:///c:/Users/USER/Documents/GitHub/Farm-Agent/farm_agent/orchestrator/human.py#245-309) when called from the SuperHuman loop. The SuperHuman loop trusts its own counter blindly.
 
 **Impact:** After a restart, the bot can exceed daily limits by up to `max_daily_prs` additional PRs before any database-level gate fires. On a busy day, that's 10 extra PRs → immediate spam flag.
 
 ---
 
 ### CRIT-02: Timezone-Naive Lunch Break Creates 1-Hour Infinite Stall or Skip
-**File:** [human.py:399-405](file:///c:/Users/USER/Documents/GitHub/ContribAI/contribai/orchestrator/human.py#L399-L405)
+**File:** [human.py:399-405](file:///c:/Users/USER/Documents/GitHub/Farm-Agent/farm_agent/orchestrator/human.py#L399-L405)
 
 **Mechanism of failure:**
 ```python
@@ -39,7 +39,7 @@ Also: `now.hour == 12` is a **point-in-time check**. If the loop iteration takes
 ---
 
 ### CRIT-03: Minimax Overdrive Concurrency = 100 Parallel Repos → GitHub Instant Ban
-**File:** [pipeline.py:255-257](file:///c:/Users/USER/Documents/GitHub/ContribAI/contribai/orchestrator/pipeline.py#L255-L257), [pipeline.py:416-418](file:///c:/Users/USER/Documents/GitHub/ContribAI/contribai/orchestrator/pipeline.py#L416-L418)
+**File:** [pipeline.py:255-257](file:///c:/Users/USER/Documents/GitHub/Farm-Agent/farm_agent/orchestrator/pipeline.py#L255-L257), [pipeline.py:416-418](file:///c:/Users/USER/Documents/GitHub/Farm-Agent/farm_agent/orchestrator/pipeline.py#L416-L418)
 
 **Mechanism of failure:**
 ```python
@@ -55,7 +55,7 @@ GitHub's secondary rate limit kicks in at roughly 90 requests/minute for content
 ---
 
 ### CRIT-04: `_human_typing_lock` Holds for Up to 1 Hour, Starving All Other PR Creations
-**File:** [pipeline.py:980-992](file:///c:/Users/USER/Documents/GitHub/ContribAI/contribai/orchestrator/pipeline.py#L980-L992)
+**File:** [pipeline.py:980-992](file:///c:/Users/USER/Documents/GitHub/Farm-Agent/farm_agent/orchestrator/pipeline.py#L980-L992)
 
 **Mechanism of failure:**
 ```python
@@ -76,7 +76,7 @@ Combined with CRIT-03, this creates a scenario where 100 repos start processing,
 ## 2. BEHAVIORAL LEAKS (Anti-Abuse Vulnerabilities)
 
 ### BEHV-01: LLM Classification Fallback Treats ALL Feedback as CODE_CHANGE
-**File:** [patrol.py:708-721](file:///c:/Users/USER/Documents/GitHub/ContribAI/contribai/pr/patrol.py#L708-L721)
+**File:** [patrol.py:708-721](file:///c:/Users/USER/Documents/GitHub/Farm-Agent/farm_agent/pr/patrol.py#L708-L721)
 
 **Mechanism:**
 ```python
@@ -100,7 +100,7 @@ This fallback **bypasses the hostile detection system entirely**. A hostile main
 ---
 
 ### BEHV-02: 10% Ghosting Probability on Surrender = Zombie PRs
-**File:** [patrol.py:367-375](file:///c:/Users/USER/Documents/GitHub/ContribAI/contribai/pr/patrol.py#L367-L375)
+**File:** [patrol.py:367-375](file:///c:/Users/USER/Documents/GitHub/Farm-Agent/farm_agent/pr/patrol.py#L367-L375)
 
 **Mechanism:**
 ```python
@@ -118,7 +118,7 @@ When the discussion limit is hit, there's a 10% chance the bot just **silently s
 ---
 
 ### BEHV-03: Contextual Greeting Uses Local Time — "Happy Friday!" on a Wednesday
-**File:** [patrol.py:191-197](file:///c:/Users/USER/Documents/GitHub/ContribAI/contribai/pr/patrol.py#L191-L197)
+**File:** [patrol.py:191-197](file:///c:/Users/USER/Documents/GitHub/Farm-Agent/farm_agent/pr/patrol.py#L191-L197)
 
 **Mechanism:**
 ```python
@@ -132,7 +132,7 @@ Same bug as CRIT-02. If the container runs in UTC and the target maintainer is i
 ---
 
 ### BEHV-04: Notification Read Lag Always 10-120 Minutes — Inhumanly Consistent
-**File:** [patrol.py:850-852](file:///c:/Users/USER/Documents/GitHub/ContribAI/contribai/pr/patrol.py#L850-L852)
+**File:** [patrol.py:850-852](file:///c:/Users/USER/Documents/GitHub/Farm-Agent/farm_agent/pr/patrol.py#L850-L852)
 
 **Mechanism:**
 ```python
@@ -145,7 +145,7 @@ The delay is uniformly distributed between 10 and 120 minutes, **every single ti
 ## 3. TECHNICAL DEBT & RESOURCE LEAKS
 
 ### DEBT-01: Fire-and-Forget Telegram Polling Task — Unhandled Crash
-**File:** [human.py:380](file:///c:/Users/USER/Documents/GitHub/ContribAI/contribai/orchestrator/human.py#L380)
+**File:** [human.py:380](file:///c:/Users/USER/Documents/GitHub/Farm-Agent/farm_agent/orchestrator/human.py#L380)
 
 **Mechanism:**
 ```python
@@ -156,14 +156,14 @@ This task is created but **never stored, awaited, or error-handled**. If the Tel
 ---
 
 ### DEBT-02: `asyncio.create_task` for Telegram Notifications — Silent Failures
-**Files:** [pipeline.py:1009](file:///c:/Users/USER/Documents/GitHub/ContribAI/contribai/orchestrator/pipeline.py#L1009), [pipeline.py:1224](file:///c:/Users/USER/Documents/GitHub/ContribAI/contribai/orchestrator/pipeline.py#L1224)
+**Files:** [pipeline.py:1009](file:///c:/Users/USER/Documents/GitHub/Farm-Agent/farm_agent/orchestrator/pipeline.py#L1009), [pipeline.py:1224](file:///c:/Users/USER/Documents/GitHub/Farm-Agent/farm_agent/orchestrator/pipeline.py#L1224)
 
 **Mechanism:** Same pattern as DEBT-01. Notification sends are fire-and-forget. If the `_notifier.send_message()` raises (e.g., aiohttp session closed after cleanup), the exception is never logged. Over time, this corrupts the operator's mental model of what's happening. They think all PRs are being notified; some silently aren't.
 
 ---
 
 ### DEBT-03: GitHubClient Created Per-Patrol-Cycle — Session Leak
-**File:** [human.py:325-326](file:///c:/Users/USER/Documents/GitHub/ContribAI/contribai/orchestrator/human.py#L325-L326), [human.py:350-352](file:///c:/Users/USER/Documents/GitHub/ContribAI/contribai/orchestrator/human.py#L350-L352)
+**File:** [human.py:325-326](file:///c:/Users/USER/Documents/GitHub/Farm-Agent/farm_agent/orchestrator/human.py#L325-L326), [human.py:350-352](file:///c:/Users/USER/Documents/GitHub/Farm-Agent/farm_agent/orchestrator/human.py#L350-L352)
 
 **Mechanism:**
 ```python
@@ -176,12 +176,12 @@ finally:
     await github.close()
     await llm.close()
 ```
-Every patrol cycle creates a **new** [GitHubClient](file:///c:/Users/USER/Documents/GitHub/ContribAI/contribai/github/client.py#23-931) and `LLMProvider`. The `GitHubClient.__init__` creates a new `httpx.AsyncClient`. These are properly closed in the `finally` block — BUT if [_do_patrol()](file:///c:/Users/USER/Documents/GitHub/ContribAI/contribai/orchestrator/human.py#310-360) is called during the quota-met branch (line 421) and then again 1-3 hours later (line 434 sleep), this happens 12-24 times per day. Each `httpx.AsyncClient` creation involves SSL handshake overhead and potential connection pool warming. Not a leak per se, but significant connection churn that increases latency and network fingerprint.
+Every patrol cycle creates a **new** [GitHubClient](file:///c:/Users/USER/Documents/GitHub/Farm-Agent/farm_agent/github/client.py#23-931) and `LLMProvider`. The `GitHubClient.__init__` creates a new `httpx.AsyncClient`. These are properly closed in the `finally` block — BUT if [_do_patrol()](file:///c:/Users/USER/Documents/GitHub/Farm-Agent/farm_agent/orchestrator/human.py#310-360) is called during the quota-met branch (line 421) and then again 1-3 hours later (line 434 sleep), this happens 12-24 times per day. Each `httpx.AsyncClient` creation involves SSL handshake overhead and potential connection pool warming. Not a leak per se, but significant connection churn that increases latency and network fingerprint.
 
 ---
 
 ### DEBT-04: SQLite Quota Cleanup Counter is a Non-Persisted Instance Attribute
-**File:** [memory.py:555-564](file:///c:/Users/USER/Documents/GitHub/ContribAI/contribai/orchestrator/memory.py#L555-L564)
+**File:** [memory.py:555-564](file:///c:/Users/USER/Documents/GitHub/Farm-Agent/farm_agent/orchestrator/memory.py#L555-L564)
 
 **Mechanism:**
 ```python
@@ -192,19 +192,19 @@ if self._quota_cleanup_counter >= 100:
     await self._db.execute("DELETE FROM api_usage_log WHERE timestamp < ?", ...)
     self._quota_cleanup_counter = 0
 ```
-`_quota_cleanup_counter` resets on every restart. After 30 days of running with Minimax at high concurrency (hundreds of LLM calls/day), the `api_usage_log` table will accumulate **tens of thousands of rows**. The cleanup only fires every 100 calls, and each cleanup purges entries >7 days old. But the `COUNT(1)` queries at lines 516 and 523 scan the entire table (no index on [(provider, timestamp)](file:///c:/Users/USER/Documents/GitHub/ContribAI/contribai/orchestrator/pipeline.py#212-318)). As the table grows, these queries get slower. Over a month, with no restart, this will cause measurable latency on every LLM call.
+`_quota_cleanup_counter` resets on every restart. After 30 days of running with Minimax at high concurrency (hundreds of LLM calls/day), the `api_usage_log` table will accumulate **tens of thousands of rows**. The cleanup only fires every 100 calls, and each cleanup purges entries >7 days old. But the `COUNT(1)` queries at lines 516 and 523 scan the entire table (no index on [(provider, timestamp)](file:///c:/Users/USER/Documents/GitHub/Farm-Agent/farm_agent/orchestrator/pipeline.py#212-318)). As the table grows, these queries get slower. Over a month, with no restart, this will cause measurable latency on every LLM call.
 
 ---
 
-### DEBT-05: Docker Sandbox `auto_remove=True` Races with Manual [force_remove](file:///c:/Users/USER/Documents/GitHub/ContribAI/contribai/core/sandbox.py#278-286)
-**File:** [sandbox.py:165](file:///c:/Users/USER/Documents/GitHub/ContribAI/contribai/core/sandbox.py#L165), [sandbox.py:146](file:///c:/Users/USER/Documents/GitHub/ContribAI/contribai/core/sandbox.py#L146)
+### DEBT-05: Docker Sandbox `auto_remove=True` Races with Manual [force_remove](file:///c:/Users/USER/Documents/GitHub/Farm-Agent/farm_agent/core/sandbox.py#278-286)
+**File:** [sandbox.py:165](file:///c:/Users/USER/Documents/GitHub/Farm-Agent/farm_agent/core/sandbox.py#L165), [sandbox.py:146](file:///c:/Users/USER/Documents/GitHub/Farm-Agent/farm_agent/core/sandbox.py#L146)
 
-**Mechanism:** The container is created with `auto_remove=True` (Docker daemon removes it after exit). The `finally` block also calls [_force_remove_container()](file:///c:/Users/USER/Documents/GitHub/ContribAI/contribai/core/sandbox.py#278-286). If the container exits normally, Docker's `auto_remove` triggers first. The [force_remove](file:///c:/Users/USER/Documents/GitHub/ContribAI/contribai/core/sandbox.py#278-286) then gets a `NotFound` exception (handled). But if the timing is tight — container exits, `auto_remove` starts removing, [force_remove](file:///c:/Users/USER/Documents/GitHub/ContribAI/contribai/core/sandbox.py#278-286) fires before it completes — Docker may return a `409 Conflict` ("removal already in progress"), which is caught by the generic `APIError` handler and logged as a warning. Not a crash, but **every sandbox run** in normal operation produces a warning log line, polluting logs and masking real problems.
+**Mechanism:** The container is created with `auto_remove=True` (Docker daemon removes it after exit). The `finally` block also calls [_force_remove_container()](file:///c:/Users/USER/Documents/GitHub/Farm-Agent/farm_agent/core/sandbox.py#278-286). If the container exits normally, Docker's `auto_remove` triggers first. The [force_remove](file:///c:/Users/USER/Documents/GitHub/Farm-Agent/farm_agent/core/sandbox.py#278-286) then gets a `NotFound` exception (handled). But if the timing is tight — container exits, `auto_remove` starts removing, [force_remove](file:///c:/Users/USER/Documents/GitHub/Farm-Agent/farm_agent/core/sandbox.py#278-286) fires before it completes — Docker may return a `409 Conflict` ("removal already in progress"), which is caught by the generic `APIError` handler and logged as a warning. Not a crash, but **every sandbox run** in normal operation produces a warning log line, polluting logs and masking real problems.
 
 ---
 
 ### DEBT-06: No Index on `api_usage_log(provider, timestamp)` — O(n) Quota Checks
-**File:** [memory.py:96-100](file:///c:/Users/USER/Documents/GitHub/ContribAI/contribai/orchestrator/memory.py#L96-L100)
+**File:** [memory.py:96-100](file:///c:/Users/USER/Documents/GitHub/Farm-Agent/farm_agent/orchestrator/memory.py#L96-L100)
 
 **Mechanism:** The table definition:
 ```sql
@@ -224,7 +224,7 @@ The sliding window queries at lines 516 and 523 filter on `provider = ? AND time
 
 | # | Issue | Fix | Effort |
 |---|-------|-----|--------|
-| CRIT-01 | Dual quota desync | On loop startup, seed `_prs_created_today` from `Memory.get_today_pr_count()`. Add a pre-hunt DB check in [_do_hunt()](file:///c:/Users/USER/Documents/GitHub/ContribAI/contribai/orchestrator/human.py#245-309). | 2h |
+| CRIT-01 | Dual quota desync | On loop startup, seed `_prs_created_today` from `Memory.get_today_pr_count()`. Add a pre-hunt DB check in [_do_hunt()](file:///c:/Users/USER/Documents/GitHub/Farm-Agent/farm_agent/orchestrator/human.py#245-309). | 2h |
 | CRIT-03 | Minimax Overdrive 100x concurrency | Remove the hardcoded `max_conc = 100`. Cap at `min(max_conc, 5)` for GitHub API safety. The LLM concurrency and GitHub API concurrency should be separate semaphores. | 1h |
 | BEHV-01 | LLM fallback treats everything as CODE_CHANGE | Change fallback to `ALREADY_HANDLED` (safe no-op). Log a critical alert that classification failed. | 30m |
 
@@ -241,7 +241,7 @@ The sliding window queries at lines 516 and 523 filter on `provider = ? AND time
 
 | # | Issue | Fix | Effort |
 |---|-------|-----|--------|
-| DEBT-03 | GitHubClient created per-patrol | Reuse the pipeline's `_github` and [_llm](file:///c:/Users/USER/Documents/GitHub/ContribAI/contribai/orchestrator/memory.py#494-567) instances instead of creating new ones. | 30m |
+| DEBT-03 | GitHubClient created per-patrol | Reuse the pipeline's `_github` and [_llm](file:///c:/Users/USER/Documents/GitHub/Farm-Agent/farm_agent/orchestrator/memory.py#494-567) instances instead of creating new ones. | 30m |
 | DEBT-04 + DEBT-06 | Unbounded api_usage_log | Add `CREATE INDEX idx_api_usage ON api_usage_log(provider, timestamp)` to the schema. | 15m |
 | DEBT-05 | auto_remove + force_remove race | Remove `auto_remove=True` and rely solely on the `finally` block cleanup. | 15m |
 | BEHV-03 | Timezone-naive greetings | Use the same timezone solution as CRIT-02. | 15m |

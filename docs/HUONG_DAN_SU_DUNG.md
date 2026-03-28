@@ -1,6 +1,6 @@
-# 🇻🇳 Hướng Dẫn Cài Đặt & Sử Dụng ContribAI
+# 🇻🇳 Hướng Dẫn Cài Đặt & Sử Dụng Farm-Agent
 
-> **ContribAI** là AI Agent tự động đóng góp vào các dự án mã nguồn mở trên GitHub — tìm repo, phân tích lỗi, tạo bản sửa, và gửi Pull Request hoàn toàn tự động.
+> **Farm-Agent** là AI Agent tự động đóng góp vào các dự án mã nguồn mở trên GitHub — tìm repo, phân tích lỗi, tạo bản sửa, và gửi Pull Request hoàn toàn tự động.
 
 ---
 
@@ -40,22 +40,22 @@ python --version
 ### Bước 1: Tải mã nguồn
 
 ```bash
-git clone https://github.com/tang-vu/ContribAI.git
-cd ContribAI
+git clone https://github.com/tang-vu/Farm-Agent.git
+cd Farm-Agent
 ```
 
-### Bước 2: Cài đặt ContribAI
+### Bước 2: Cài đặt Farm-Agent
 
 ```bash
 pip install -e ".[dev]"
 ```
 
-> **Giải thích:** Lệnh này cài đặt ContribAI ở chế độ phát triển (`-e`) cùng với các công cụ kiểm thử (`[dev]`).
+> **Giải thích:** Lệnh này cài đặt Farm-Agent ở chế độ phát triển (`-e`) cùng với các công cụ kiểm thử (`[dev]`).
 
 ### Bước 3: Kiểm tra cài đặt thành công
 
 ```bash
-contribai info
+farm_agent info
 ```
 
 Nếu thấy thông tin hệ thống hiển thị → cài đặt thành công ✅
@@ -64,13 +64,13 @@ Nếu thấy thông tin hệ thống hiển thị → cài đặt thành công �
 
 ## 🔑 3. Lấy API Keys
 
-ContribAI cần **2 API key**: một cho GitHub và một cho LLM (mô hình AI).
+Farm-Agent cần **2 API key**: một cho GitHub và một cho LLM (mô hình AI).
 
 ### 3.1 GitHub Token
 
 1. Truy cập: https://github.com/settings/tokens
 2. Nhấn **"Generate new token (classic)"**
-3. Đặt tên: `ContribAI`
+3. Đặt tên: `Farm-Agent`
 4. Chọn các quyền (scopes):
    - ✅ `repo` (toàn bộ)
    - ✅ `delete_repo` (để dọn fork)
@@ -114,7 +114,7 @@ llm:
 #   provider: "minimax"
 #   model: "MiniMax-M2.7"
 #   api_key: "ey-..."
-#   minimax_group_id: "12345..."    # ← Bắt buộc đối với Minimax, nếu lỗi API, ContribAI sẽ retry với backoff
+#   minimax_group_id: "12345..."    # ← Bắt buộc đối với Minimax, nếu lỗi API, Farm-Agent sẽ retry với backoff
 
 logging:
   level: "INFO"                     # Mức log (DEBUG, INFO, WARNING, ERROR)
@@ -148,18 +148,18 @@ export GEMINI_API_KEY="AIzaxxxxxxxxxxxxxxxx"
 ### 5.1 Chạy thử (Dry Run) — Xem trước, KHÔNG tạo PR
 
 ```bash
-contribai run --dry-run
+farm_agent run --dry-run
 ```
 
-> ⚠️ **Luôn chạy thử trước** để xem ContribAI sẽ làm gì trước khi tạo PR thật.
+> ⚠️ **Luôn chạy thử trước** để xem Farm-Agent sẽ làm gì trước khi tạo PR thật.
 
 ### 5.2 Chạy tự động (Full Run)
 
 ```bash
-contribai run
+farm_agent run
 ```
 
-ContribAI sẽ tự động:
+Farm-Agent sẽ tự động:
 1. 🔍 Tìm repo phù hợp trên GitHub
 2. 📊 Phân tích mã nguồn (bảo mật, chất lượng, tài liệu, UI/UX)
 3. 🔧 Tạo bản sửa lỗi
@@ -169,10 +169,10 @@ ContribAI sẽ tự động:
 
 ```bash
 # Xem trước
-contribai target https://github.com/owner/repo --dry-run
+farm_agent target https://github.com/owner/repo --dry-run
 
 # Chạy thật
-contribai target https://github.com/owner/repo
+farm_agent target https://github.com/owner/repo
 ```
 
 ---
@@ -183,25 +183,25 @@ contribai target https://github.com/owner/repo
 
 ```bash
 # Chạy 1 lần
-contribai hunt
+farm_agent hunt
 
 # Chạy 5 vòng, nghỉ 15 phút giữa mỗi vòng
-contribai hunt --rounds 5 --delay 15
+farm_agent hunt --rounds 5 --delay 15
 
 # Chỉ phân tích code (không giải issue)
-contribai hunt --mode analysis
+farm_agent hunt --mode analysis
 
 # Chỉ giải quyết issue
-contribai hunt --mode issues
+farm_agent hunt --mode issues
 
 # Cả hai (mặc định)
-contribai hunt --mode both
+farm_agent hunt --mode both
 ```
 
 ### 6.2 PR Patrol — Theo dõi & phản hồi review
 
 ```bash
-contribai patrol
+farm_agent patrol
 ```
 
 Tự động:
@@ -213,26 +213,26 @@ Tự động:
 ### 6.3 Giải quyết Issue
 
 ```bash
-contribai solve https://github.com/owner/repo
+farm_agent solve https://github.com/owner/repo
 ```
 
 ### 6.4 Lọc theo ngôn ngữ
 
 ```bash
-contribai run --language python
-contribai run --language javascript
+farm_agent run --language python
+farm_agent run --language javascript
 ```
 
 ### 6.5 CI Auto-Healing (Tự Động Sửa Lỗi CI)
 
-Trong chế độ `patrol`, ContribAI tự động giám sát các GitHub Action / CI checks của PR:
-- Nếu một CI/Check Run bị lỗi (Failed), ContribAI tự động tải nguyên văn file log gốc từ GitHub (trích xuất chính xác Traceback mã lỗi, xử lý an toàn redirect hoặc 404/410).
+Trong chế độ `patrol`, Farm-Agent tự động giám sát các GitHub Action / CI checks của PR:
+- Nếu một CI/Check Run bị lỗi (Failed), Farm-Agent tự động tải nguyên văn file log gốc từ GitHub (trích xuất chính xác Traceback mã lỗi, xử lý an toàn redirect hoặc 404/410).
 - Sau khi có lỗi, AI chạy vòng lặp Agentic Loop (ReAct) tự chẩn đoán nguyên nhân và push thêm commit nhằm fix lỗi đè lên branch đó.
-- **Cơ chế dự phòng (Zero-Tolerance Safe Fallback):** ContribAI cho phép fix lặp lại tối đa 2 lần (`MAX_CI_FIX_ATTEMPTS=2`). Đến lần thất bại thứ 3, hệ thống sẽ thay mặt bạn tự động đóng (Close) PR để tránh spam repo của maintainer.
+- **Cơ chế dự phòng (Zero-Tolerance Safe Fallback):** Farm-Agent cho phép fix lặp lại tối đa 2 lần (`MAX_CI_FIX_ATTEMPTS=2`). Đến lần thất bại thứ 3, hệ thống sẽ thay mặt bạn tự động đóng (Close) PR để tránh spam repo của maintainer.
 
 ### 6.6 Style Mimicry & Architectural Awareness (Nhận Thức Cấu Trúc Toàn Diện)
 
-Bạn có thể tin tưởng ContribAI không bao giờ sinh ra những file mã nguồn bị thiếu hụt Context (Hallucinations) là nhờ:
+Bạn có thể tin tưởng Farm-Agent không bao giờ sinh ra những file mã nguồn bị thiếu hụt Context (Hallucinations) là nhờ:
 1. **RepoMapper (Project Map):** Bất cứ khi làm việc, Tool `mapper.py` trước tiên sẽ quét toàn bộ kho dự án, đọc cú pháp (AST/Regex) và cấp cho LLM một bảng sơ đồ toàn diện cực nhỏ gọn các danh sách đường dẫn, Class và function signatures.
 2. **Khớp Chữ Ký Hàm (Signature Match) & Bắt Chước:** Dựa trên Map này, System Prompt ép AI phải cross-reference (kiểm tra chéo) gọi đúng các hàm có thật từ hệ thống thay vì tự tưởng tượng thêm hàm mới. Phong cách code được bắt chước 100%.
 3. **LLM Tool Calling Loop (Đọc File Động):** Trong quá trình sinh mã, nếu LLM nhận ra một function class chưa nhìn thấy Body (nội dung), LLM sẽ báo lệnh công cụ `read_file` đến server. Hệ thống tự quét GitHub lấy code nguyên vẹn đẩy vào Context (giới hạn tối đa 3 lần loop: `MAX_TOOL_CALLS = 3`) trước khi AI hoàn thiện file PR cuối cùng.
@@ -259,13 +259,13 @@ GitHub có hệ thống phát hiện spam dựa trên hành vi bất thường: 
 
 ```bash
 # Chạy 24/7 (production) — nhấn Ctrl+C để dừng
-contribai superhuman
+farm_agent superhuman
 
 # Chạy thử nhanh (10 iterations, delays 1-3 giây)
-contribai superhuman --time-warp
+farm_agent superhuman --time-warp
 
 # Chạy thử KHÔNG tạo PR thật
-contribai superhuman --time-warp --dry-run
+farm_agent superhuman --time-warp --dry-run
 ```
 
 **Hoặc qua Command Center** (`start.bat`):
@@ -292,23 +292,23 @@ Terminal sẽ hiển thị log bằng tiếng Việt tự nhiên, ngẫu nhiên 
 ## 📊 7. Quản Lý & Theo Dõi
 
 ```bash
-contribai status     # Xem trạng thái PR đã gửi
-contribai stats      # Thống kê tổng quan
-contribai info       # Thông tin hệ thống
-contribai cleanup    # Xóa fork cũ không còn PR mở
+farm_agent status     # Xem trạng thái PR đã gửi
+farm_agent stats      # Thống kê tổng quan
+farm_agent info       # Thông tin hệ thống
+farm_agent cleanup    # Xóa fork cũ không còn PR mở
 ```
 
 ### Web Dashboard (Bảng điều khiển web)
 
 ```bash
-contribai serve                  # Mở dashboard tại http://localhost:8787
-contribai serve --port 9000      # Đổi cổng
+farm_agent serve                  # Mở dashboard tại http://localhost:8787
+farm_agent serve --port 9000      # Đổi cổng
 ```
 
 ### Lên lịch chạy tự động
 
 ```bash
-contribai schedule --cron "0 */6 * * *"    # Chạy mỗi 6 giờ
+farm_agent schedule --cron "0 */6 * * *"    # Chạy mỗi 6 giờ
 ```
 
 ---
@@ -338,8 +338,8 @@ docker compose up -d dashboard scheduler
 
 - Luôn chạy `--dry-run` trước
 - Giới hạn PR/ngày trong `config.yaml`: `max_prs_per_day: 10`
-- ContribAI đã có hệ thống chống trùng lặp và kiểm tra chất lượng tự động
-- **Khuyến nghị:** Dùng `contribai superhuman` — tự động giới hạn 2–5 PRs/ngày với delays ngẫu nhiên, mô phỏng hành vi con người để tránh bị GitHub flag
+- Farm-Agent đã có hệ thống chống trùng lặp và kiểm tra chất lượng tự động
+- **Khuyến nghị:** Dùng `farm_agent superhuman` — tự động giới hạn 2–5 PRs/ngày với delays ngẫu nhiên, mô phỏng hành vi con người để tránh bị GitHub flag
 
 ### Q: Làm sao để dùng model local (Ollama)?
 
@@ -355,7 +355,7 @@ Cài Ollama trước: https://ollama.com
 ### Q: Lệnh nào an toàn nhất để chạy lần đầu?
 
 ```bash
-contribai run --dry-run
+farm_agent run --dry-run
 ```
 
 Lệnh này chỉ **xem trước** kết quả, không tạo bất kỳ PR nào.
@@ -364,9 +364,9 @@ Lệnh này chỉ **xem trước** kết quả, không tạo bất kỳ PR nào.
 
 ```bash
 pytest tests/ -v                    # Chạy toàn bộ test
-pytest tests/ -v --cov=contribai    # Chạy test + đo coverage
+pytest tests/ -v --cov=farm_agent    # Chạy test + đo coverage
 ```
 
 ---
 
-> 💡 **Mẹo:** Bắt đầu với `contribai target <repo-url> --dry-run` để hiểu cách ContribAI hoạt động trước khi chạy hunt mode.
+> 💡 **Mẹo:** Bắt đầu với `farm_agent target <repo-url> --dry-run` để hiểu cách Farm-Agent hoạt động trước khi chạy hunt mode.

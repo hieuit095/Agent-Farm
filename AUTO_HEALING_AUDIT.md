@@ -12,7 +12,7 @@ As of **March 26, 2026**, the live target repository had:
 
 Because of that, there was no real GitHub Actions failure log for `PRPatrol` to download with `download_check_run_log()`.
 
-I still executed multiple live targeted runs, fixed several real `ContribAI` core bugs exposed by those runs, and captured the exact blockers below.
+I still executed multiple live targeted runs, fixed several real `Farm-Agent` core bugs exposed by those runs, and captured the exact blockers below.
 
 ## Exact Commands Executed
 
@@ -23,7 +23,7 @@ I still executed multiple live targeted runs, fixed several real `ContribAI` cor
 ```
 
 ```powershell
-.\venv\Scripts\python.exe -m contribai.cli.main -c logs/config.auto_healing.yaml superhuman --target-repo https://github.com/hieuit095/gitvisualizer-ai --time-warp
+.\venv\Scripts\python.exe -m farm_agent.cli.main -c logs/config.auto_healing.yaml superhuman --target-repo https://github.com/hieuit095/gitvisualizer-ai --time-warp
 ```
 
 I executed that live `superhuman` command repeatedly with isolated state, capturing stdout/stderr into:
@@ -111,11 +111,11 @@ Raw terminal excerpts from `logs/auto_healing_run1.out`:
 
 ### Fixes applied after Run 1
 
-- `contribai/orchestrator/pipeline.py`
+- `farm_agent/orchestrator/pipeline.py`
   - added `allow_duplicate_prs` to `run_single()` / `_process_repo()`
   - changed failed-CI handling to leave PRs open for Patrol instead of auto-closing
   - return immediately when GitHub reports `total == 0` check runs
-- `contribai/orchestrator/human.py`
+- `farm_agent/orchestrator/human.py`
   - targeted crucible hunts now call `run_single(..., allow_duplicate_prs=True)`
 
 ### Run 2: duplicate bypass worked, but generation could not apply a multi-file fix
@@ -140,7 +140,7 @@ Raw terminal excerpts from `logs/auto_healing_run2.out`:
 
 ### Fix applied after Run 2
 
-- `contribai/orchestrator/pipeline.py`
+- `farm_agent/orchestrator/pipeline.py`
   - passed `github_client=self._github` into `ContributionGenerator.generate()` so live generation could use repo reads
 
 ### Run 3: generator could read more files, but parser still dropped multi-file edits
@@ -172,7 +172,7 @@ Raw terminal excerpts from `logs/auto_healing_run3.out`:
 
 ### Fix applied after Run 3
 
-- `contribai/generator/engine.py`
+- `farm_agent/generator/engine.py`
   - cached project-map file fetches back into `context.relevant_files`
   - cached successful `read_file` tool results back into `context.relevant_files`
 
@@ -223,14 +223,14 @@ None of those were created by this CI auto-healing crucible, and none provided a
 
 ## Core Files Fixed During This Crucible
 
-- `contribai/orchestrator/human.py`
+- `farm_agent/orchestrator/human.py`
   - targeted hunt now explicitly bypasses duplicate-history filtering for controlled repo tests
-- `contribai/orchestrator/pipeline.py`
+- `farm_agent/orchestrator/pipeline.py`
   - added `allow_duplicate_prs`
   - passed `github_client` into generation
   - changed failed-CI handling to leave PRs open for Patrol
   - short-circuits immediately when a PR has zero check runs
-- `contribai/generator/engine.py`
+- `farm_agent/generator/engine.py`
   - caches project-map and tool-read file contents into `context.relevant_files`
 - `tests/unit/test_superhuman.py`
   - updated targeted-hunt expectations

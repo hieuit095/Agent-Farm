@@ -6,7 +6,7 @@ Repository target: `https://github.com/hieuit095/gitvisualizer-ai`
 ## Exact Terminal Command Executed
 
 ```powershell
-python -m contribai.cli.main target https://github.com/hieuit095/gitvisualizer-ai
+python -m farm_agent.cli.main target https://github.com/hieuit095/gitvisualizer-ai
 ```
 
 Exit code: `0`
@@ -42,7 +42,7 @@ INFO     🛠️ Generating fix for: Interactive graph nodes lack keyboard navig
 INFO     Edits for src/components/nodes/FolderNode.tsx: 1/1 applied
 INFO     Generated contribution: 🎨 UI/UX: Interactive graph nodes lack keyboard navigation and accessibility attributes (1 files changed)
 INFO     📤 Creating PR...
-INFO     Created branch contribai/fix/ui/interactive-graph-nodes-lack-keyboard-na on hieuit095/gitvisualizer-ai
+INFO     Created branch farm_agent/fix/ui/interactive-graph-nodes-lack-keyboard-na on hieuit095/gitvisualizer-ai
 INFO     Created PR #10 on hieuit095/gitvisualizer-ai: 🎨 UI/UX: Interactive graph nodes lack keyboard navigation and accessibility attributes
 INFO     ✅ PR #10 created: https://github.com/hieuit095/gitvisualizer-ai/pull/10
 INFO     ✅ PR #10 passed compliance checks
@@ -51,7 +51,7 @@ INFO     🛠️ Generating fix for: App-level loading state is a plain spinner 
 INFO     Edits for src/App.tsx: 1/1 applied
 INFO     Generated contribution: 🎨 UI/UX: App-level loading state is a plain spinner with no context (1 files changed)
 INFO     📤 Creating PR...
-INFO     Created branch contribai/fix/ui/app-level-loading-state-is-a-plain-spinn on hieuit095/gitvisualizer-ai
+INFO     Created branch farm_agent/fix/ui/app-level-loading-state-is-a-plain-spinn on hieuit095/gitvisualizer-ai
 INFO     Created PR #11 on hieuit095/gitvisualizer-ai: 🎨 UI/UX: App-level loading state is a plain spinner with no context
 INFO     ✅ PR #11 created: https://github.com/hieuit095/gitvisualizer-ai/pull/11
 INFO     ✅ PR #11 passed compliance checks

@@ -4,8 +4,8 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from contribai.core.config import AnalysisConfig, ContribAIConfig, ContributionConfig, GitHubConfig, LLMConfig, StorageConfig
-from contribai.core.models import (
+from farm_agent.core.config import AnalysisConfig, FarmAgentConfig, ContributionConfig, GitHubConfig, LLMConfig, StorageConfig
+from farm_agent.core.models import (
     AnalysisResult,
     Contribution,
     ContributionType,
@@ -20,7 +20,7 @@ from contribai.core.models import (
 
 @pytest.fixture
 def pipeline_config(tmp_path):
-    config = ContribAIConfig(
+    config = FarmAgentConfig(
         github=GitHubConfig(token="test_token", max_prs_per_day=1),
         llm=LLMConfig(provider="minimax", api_key="test_key"),
         analysis=AnalysisConfig(enabled_analyzers=["security"]),
@@ -66,7 +66,7 @@ def sample_contribution(sample_finding):
         description="Removed unused import",
         changes=[FileChange(path="main.py", new_content="# clean code")],
         commit_message="fix: remove unused import",
-        branch_name="contribai/fix/dead-code",
+        branch_name="farm_agent/fix/dead-code",
     )
 
 
@@ -76,7 +76,7 @@ class TestPipelineDryRun:
         self, pipeline_config, mock_repo, sample_finding, sample_contribution
     ):
         """Dry run should analyze and generate but NOT create PRs."""
-        from contribai.orchestrator.pipeline import ContribPipeline
+        from farm_agent.orchestrator.pipeline import ContribPipeline
 
         pipeline = ContribPipeline(pipeline_config)
 
@@ -114,7 +114,7 @@ class TestPipelineDryRun:
         )
 
         # Use real Memory with tmp_path
-        from contribai.orchestrator.memory import Memory
+        from farm_agent.orchestrator.memory import Memory
 
         pipeline._memory = Memory(pipeline_config.storage.resolved_db_path)
         await pipeline._memory.init()
@@ -139,7 +139,7 @@ class TestPipelineDryRun:
     @pytest.mark.asyncio
     async def test_analyze_only_mode(self, pipeline_config, mock_repo):
         """Analyze-only should return analysis without generating contributions."""
-        from contribai.orchestrator.pipeline import ContribPipeline
+        from farm_agent.orchestrator.pipeline import ContribPipeline
 
         pipeline = ContribPipeline(pipeline_config)
 
@@ -166,7 +166,7 @@ class TestPipelineDryRun:
             )
         )
 
-        from contribai.orchestrator.memory import Memory
+        from farm_agent.orchestrator.memory import Memory
 
         pipeline._memory = Memory(pipeline_config.storage.resolved_db_path)
         await pipeline._memory.init()

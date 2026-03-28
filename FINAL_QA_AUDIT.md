@@ -1,7 +1,7 @@
 # FINAL QA AUDIT
 
 Date: 2026-03-26  
-Workspace: `C:\Users\USER\Documents\GitHub\ContribAI`
+Workspace: `C:\Users\USER\Documents\GitHub\Farm-Agent`
 
 ## Scope
 
@@ -39,7 +39,7 @@ Python 3.14.2
 Command:
 
 ```powershell
-python -m contribai.cli.main system-status
+python -m farm_agent.cli.main system-status
 ```
 
 Exit code: `0`
@@ -47,7 +47,7 @@ Exit code: `0`
 Raw output excerpt:
 
 ```text
-INFO     Memory initialized at C:\Users\USER\.contribai\memory.db
+INFO     Memory initialized at C:\Users\USER\.farm_agent\memory.db
 INFO     HTTP Request: GET https://api.github.com/rate_limit "HTTP/1.1 200 OK"
 INFO     Rate limit: 5000/5000 remaining (resets at 1774508804)
 🔑 GitHub API rate limit remaining: {'limit': 5000, 'used': 0, 'remaining': 5000, 'reset': 1774508804}
@@ -60,7 +60,7 @@ INFO     Rate limit: 5000/5000 remaining (resets at 1774508804)
 Command:
 
 ```powershell
-python -m contribai.cli.main analyze https://github.com/pallets/itsdangerous
+python -m farm_agent.cli.main analyze https://github.com/pallets/itsdangerous
 ```
 
 Exit code: `0`
@@ -79,18 +79,18 @@ INFO     Analysis of pallets/itsdangerous complete — 0 findings. Summary: No i
 
 ### Root Cause
 
-- `contribai/llm/provider.py` `MinimaxProvider.__init__` + `MinimaxProvider.chat`
+- `farm_agent/llm/provider.py` `MinimaxProvider.__init__` + `MinimaxProvider.chat`
   The client posted to `https://api.minimax.io/v1/text/chatcompletion_v2/` with a trailing slash because it used `AsyncClient(base_url=full_endpoint)` and then `.post("")`.
-- `contribai/analysis/analyzer.py` `CodeAnalyzer.analyze` + `CodeAnalyzer._run_analyzer`
+- `farm_agent/analysis/analyzer.py` `CodeAnalyzer.analyze` + `CodeAnalyzer._run_analyzer`
   Analyzer exceptions were swallowed and converted into a fake-success `0 findings` result.
 
 ### Source Fixes Applied
 
-- `contribai/llm/provider.py`
+- `farm_agent/llm/provider.py`
   - store `self._chat_url = (config.base_url or self.API_URL).rstrip("/")`
   - post directly to `self._chat_url`
   - enable `follow_redirects=True`
-- `contribai/analysis/analyzer.py`
+- `farm_agent/analysis/analyzer.py`
   - raise `AnalysisError` when individual analyzers fail
   - raise `AnalysisError` when all analyzers fail instead of reporting success
   - harden finding parsing so messy Minimax output does not get silently dropped
@@ -100,9 +100,9 @@ INFO     Analysis of pallets/itsdangerous complete — 0 findings. Summary: No i
 Command:
 
 ```powershell
-python -m ruff check contribai/llm/provider.py contribai/analysis/analyzer.py
-python -m compileall contribai/llm/provider.py contribai/analysis/analyzer.py
-python -m contribai.cli.main analyze https://github.com/pallets/itsdangerous
+python -m ruff check farm_agent/llm/provider.py farm_agent/analysis/analyzer.py
+python -m compileall farm_agent/llm/provider.py farm_agent/analysis/analyzer.py
+python -m farm_agent.cli.main analyze https://github.com/pallets/itsdangerous
 ```
 
 Exit codes: `0`, `0`, `0`
@@ -111,8 +111,8 @@ Raw output excerpt:
 
 ```text
 All checks passed!
-Compiling 'contribai/llm/provider.py'...
-Compiling 'contribai/analysis/analyzer.py'...
+Compiling 'farm_agent/llm/provider.py'...
+Compiling 'farm_agent/analysis/analyzer.py'...
 INFO     HTTP Request: POST https://api.minimax.io/v1/text/chatcompletion_v2 "HTTP/1.1 200 OK"
 INFO     HTTP Request: POST https://api.minimax.io/v1/text/chatcompletion_v2 "HTTP/1.1 200 OK"
 INFO     HTTP Request: POST https://api.minimax.io/v1/text/chatcompletion_v2 "HTTP/1.1 200 OK"
@@ -129,7 +129,7 @@ INFO     Analysis of pallets/itsdangerous complete — 0 findings. Summary: No i
 Command:
 
 ```powershell
-python -m contribai.cli.main target https://github.com/pallets/itsdangerous --dry-run
+python -m farm_agent.cli.main target https://github.com/pallets/itsdangerous --dry-run
 ```
 
 Exit code: `0`
@@ -139,18 +139,18 @@ Raw output excerpt:
 ```text
 INFO     📋 Repo guidelines: commit=default, 0 template sections
 INFO     🔬 Analyzing code...
-ERROR    ❌ Single-repo run failed for pallets/itsdangerous: cannot import name 'MultiModelProvider' from 'contribai.llm.provider' (C:\Users\USER\Documents\GitHub\ContribAI\contribai\llm\provider.py)
+ERROR    ❌ Single-repo run failed for pallets/itsdangerous: cannot import name 'MultiModelProvider' from 'farm_agent.llm.provider' (C:\Users\USER\Documents\GitHub\Farm-Agent\farm_agent\llm\provider.py)
 ❌ Errors: 1
 ```
 
 ### Root Cause
 
-- `contribai/orchestrator/pipeline.py` `ContribPipeline._set_task`
+- `farm_agent/orchestrator/pipeline.py` `ContribPipeline._set_task`
   The pipeline still hard-imported `MultiModelProvider` even though only the Minimax provider remains.
 
 ### Source Fix Applied
 
-- `contribai/orchestrator/pipeline.py`
+- `farm_agent/orchestrator/pipeline.py`
   - removed the stale import
   - switched `_set_task` to capability detection: `hasattr(self._llm, "set_task")`
 
@@ -159,9 +159,9 @@ ERROR    ❌ Single-repo run failed for pallets/itsdangerous: cannot import name
 Command:
 
 ```powershell
-python -m ruff check contribai/orchestrator/pipeline.py contribai/analysis/analyzer.py contribai/llm/provider.py
-python -m compileall contribai/orchestrator/pipeline.py contribai/analysis/analyzer.py contribai/llm/provider.py
-python -m contribai.cli.main target https://github.com/pallets/itsdangerous --dry-run
+python -m ruff check farm_agent/orchestrator/pipeline.py farm_agent/analysis/analyzer.py farm_agent/llm/provider.py
+python -m compileall farm_agent/orchestrator/pipeline.py farm_agent/analysis/analyzer.py farm_agent/llm/provider.py
+python -m farm_agent.cli.main target https://github.com/pallets/itsdangerous --dry-run
 ```
 
 Exit codes: `0`, `0`, `0`
@@ -170,7 +170,7 @@ Raw output excerpt:
 
 ```text
 All checks passed!
-Compiling 'contribai/orchestrator/pipeline.py'...
+Compiling 'farm_agent/orchestrator/pipeline.py'...
 INFO     ▶ Starting single-repo run: pallets/itsdangerous (dry_run=True)
 INFO     📦 Processing: pallets/itsdangerous
 INFO     Repo guidelines: commit=default, pr_title=default, scopes=any, sections=0
@@ -197,8 +197,8 @@ Command executed: live inline Python calling `ContributionGenerator.generate(...
 Raw output excerpt:
 
 ```text
-DEBUG:contribai.generator.engine:Could not fetch repo preferences: 'RepoContext' object has no attribute 'full_name'
-WARNING:contribai.generator.engine:No valid changes parsed for finding: Clarify BadPayload error propagation
+DEBUG:farm_agent.generator.engine:Could not fetch repo preferences: 'RepoContext' object has no attribute 'full_name'
+WARNING:farm_agent.generator.engine:No valid changes parsed for finding: Clarify BadPayload error propagation
 GENERATOR_RESULT=None
 ```
 
@@ -220,26 +220,26 @@ The diff appears incomplete or missing the relevant `BadPayload` changes.
 
 ### Root Causes
 
-- `contribai/generator/engine.py` `ContributionGenerator._get_repo_preferences`
+- `farm_agent/generator/engine.py` `ContributionGenerator._get_repo_preferences`
   used `context.full_name` instead of `context.repo.full_name`.
-- `contribai/generator/engine.py` `ContributionGenerator._parse_changes`
+- `farm_agent/generator/engine.py` `ContributionGenerator._parse_changes`
   was too brittle for live Minimax responses that contain reasoning text, fences, or YAML-ish payloads.
-- `contribai/generator/engine.py` `ContributionGenerator._self_review`
+- `farm_agent/generator/engine.py` `ContributionGenerator._self_review`
   reviewed `change.new_content[:2000]`, which hid late-file edits like `BadPayload` in `exc.py` and created false rejections.
-- `contribai/llm/context.py` `build_generator_system_prompt` and `contribai/generator/engine.py` `_build_generation_prompt`
+- `farm_agent/llm/context.py` `build_generator_system_prompt` and `farm_agent/generator/engine.py` `_build_generation_prompt`
   did not strongly forbid prose / `<think>` output for machine-readable generation.
 
 ### Source Fixes Applied
 
-- `contribai/generator/engine.py`
+- `farm_agent/generator/engine.py`
   - `_get_repo_preferences`: use `context.repo.full_name`
   - `_parse_changes`: strip `<think>...</think>`, accept JSON or YAML-ish payloads, normalize paths
   - `_parse_changes`: preserve `original_content` on modified files
   - `_self_review`: include finding description and review a unified diff instead of the first 2,000 file characters
   - `_build_review_snippet`: added diff-focused review context
-- `contribai/llm/context.py`
+- `farm_agent/llm/context.py`
   - generator system prompt now explicitly requires only machine-readable output, with no prose / markdown / `<think>` tags
-- `contribai/generator/engine.py`
+- `farm_agent/generator/engine.py`
   - generation prompt now explicitly requires only JSON, no prose or markdown fences
 
 ### Retest A: parser can now extract a real change
@@ -272,7 +272,7 @@ COMMIT_MESSAGE=refactor(itsdangerous): clarify badpayload error propagation
 Improve exception context while preserving existing behavior.
 
 Affected files: exc.py
-BRANCH=contribai/improve/quality/clarify-badpayload-error-propagation
+BRANCH=farm_agent/improve/quality/clarify-badpayload-error-propagation
 ```
 
 ## Additional Live Runtime Verification
@@ -282,7 +282,7 @@ BRANCH=contribai/improve/quality/clarify-badpayload-error-propagation
 Command:
 
 ```powershell
-python -m contribai.cli.main solve https://github.com/pallets/itsdangerous --dry-run --max-issues 3
+python -m farm_agent.cli.main solve https://github.com/pallets/itsdangerous --dry-run --max-issues 3
 ```
 
 Exit code: `0`
@@ -302,7 +302,7 @@ Found 1 open issues
 Command:
 
 ```powershell
-python -m contribai.cli.main patrol --dry-run
+python -m farm_agent.cli.main patrol --dry-run
 ```
 
 Exit code: `0`
@@ -310,7 +310,7 @@ Exit code: `0`
 Raw output:
 
 ```text
-INFO     Memory initialized at C:\Users\USER\.contribai\memory.db
+INFO     Memory initialized at C:\Users\USER\.farm_agent\memory.db
 INFO     Using LLM provider: minimax (model: MiniMax-M2.7)
 No open PRs found in database.
 ```
@@ -320,7 +320,7 @@ No open PRs found in database.
 Command:
 
 ```powershell
-$job = Start-Process -FilePath python -ArgumentList '-m','contribai.cli.main','serve','--host','127.0.0.1','--port','8791' -PassThru -WindowStyle Hidden; Start-Sleep -Seconds 6; try { $health = Invoke-WebRequest -UseBasicParsing 'http://127.0.0.1:8791/api/health'; $stats = Invoke-WebRequest -UseBasicParsing 'http://127.0.0.1:8791/api/stats'; $logs = Invoke-WebRequest -UseBasicParsing 'http://127.0.0.1:8791/api/logs/today?lines=5'; Write-Output "HEALTH_STATUS=$($health.StatusCode)"; Write-Output $health.Content; Write-Output "STATS_STATUS=$($stats.StatusCode)"; Write-Output $stats.Content; Write-Output "LOGS_STATUS=$($logs.StatusCode)"; Write-Output $logs.Content } finally { if ($job -and !$job.HasExited) { Stop-Process -Id $job.Id -Force }; Start-Sleep -Seconds 1 }
+$job = Start-Process -FilePath python -ArgumentList '-m','farm_agent.cli.main','serve','--host','127.0.0.1','--port','8791' -PassThru -WindowStyle Hidden; Start-Sleep -Seconds 6; try { $health = Invoke-WebRequest -UseBasicParsing 'http://127.0.0.1:8791/api/health'; $stats = Invoke-WebRequest -UseBasicParsing 'http://127.0.0.1:8791/api/stats'; $logs = Invoke-WebRequest -UseBasicParsing 'http://127.0.0.1:8791/api/logs/today?lines=5'; Write-Output "HEALTH_STATUS=$($health.StatusCode)"; Write-Output $health.Content; Write-Output "STATS_STATUS=$($stats.StatusCode)"; Write-Output $stats.Content; Write-Output "LOGS_STATUS=$($logs.StatusCode)"; Write-Output $logs.Content } finally { if ($job -and !$job.HasExited) { Stop-Process -Id $job.Id -Force }; Start-Sleep -Seconds 1 }
 ```
 
 Exit code: `0`
@@ -333,7 +333,7 @@ HEALTH_STATUS=200
 STATS_STATUS=200
 {"total_repos_analyzed":1,"total_prs_submitted":0,"prs_merged":0,"total_runs":2}
 LOGS_STATUS=200
-{"lines":["2026-03-26 13:22:25 | INFO     | provider | Using LLM provider: minimax (model: MiniMax-M2.7)","2026-03-26 13:22:47 | INFO     | logger | Daily rolling logger initialized → logs\\contribai_2026-03-26.log (level=INFO, keep=30 days)","2026-03-26 13:22:48 | INFO     | memory | Memory initialized at C:\\Users\\USER\\.contribai\\memory.db","2026-03-26 13:22:48 | INFO     | auth | API key auth disabled (no keys configured)","2026-03-26 13:22:48 | INFO     | server | Dashboard API started"],"total_lines":1657,"showing":5,"file":"logs\\contribai_2026-03-26.log"}
+{"lines":["2026-03-26 13:22:25 | INFO     | provider | Using LLM provider: minimax (model: MiniMax-M2.7)","2026-03-26 13:22:47 | INFO     | logger | Daily rolling logger initialized → logs\\contribai_2026-03-26.log (level=INFO, keep=30 days)","2026-03-26 13:22:48 | INFO     | memory | Memory initialized at C:\\Users\\USER\\.farm_agent\\memory.db","2026-03-26 13:22:48 | INFO     | auth | API key auth disabled (no keys configured)","2026-03-26 13:22:48 | INFO     | server | Dashboard API started"],"total_lines":1657,"showing":5,"file":"logs\\contribai_2026-03-26.log"}
 ```
 
 ### User-Facing Stats / Status Commands
@@ -341,8 +341,8 @@ LOGS_STATUS=200
 Commands:
 
 ```powershell
-python -m contribai.cli.main stats
-python -m contribai.cli.main status
+python -m farm_agent.cli.main stats
+python -m farm_agent.cli.main status
 ```
 
 Exit codes: `0`, `0`
@@ -350,7 +350,7 @@ Exit codes: `0`, `0`
 Raw output:
 
 ```text
-┌─────────────────────────── ContribAI Statistics ────────────────────────────┐
+┌─────────────────────────── Farm-Agent Statistics ────────────────────────────┐
 │ 📊 Total Runs: 2                                                            │
 │ 🔬 Repos Analyzed: 1                                                        │
 │ 📤 PRs Submitted: 0                                                         │
@@ -361,11 +361,11 @@ No PRs found.
 
 ## Final Modified Source Files
 
-- `contribai/llm/provider.py`
-- `contribai/analysis/analyzer.py`
-- `contribai/orchestrator/pipeline.py`
-- `contribai/generator/engine.py`
-- `contribai/llm/context.py`
+- `farm_agent/llm/provider.py`
+- `farm_agent/analysis/analyzer.py`
+- `farm_agent/orchestrator/pipeline.py`
+- `farm_agent/generator/engine.py`
+- `farm_agent/llm/context.py`
 
 ## Final State
 

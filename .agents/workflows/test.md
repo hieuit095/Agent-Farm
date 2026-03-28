@@ -15,7 +15,7 @@ pytest tests/ -v --tb=short
 2. **Check coverage**
 // turbo
 ```bash
-pytest tests/ --cov=contribai --cov-report=term-missing --cov-fail-under=50
+pytest tests/ --cov=farm_agent --cov-report=term-missing --cov-fail-under=50
 ```
 
 3. **Identify untested code**
@@ -72,7 +72,7 @@ pytest tests/ -v --lf
 8. **Generate HTML coverage report**
 // turbo
 ```bash
-pytest tests/ --cov=contribai --cov-report=html
+pytest tests/ --cov=farm_agent --cov-report=html
 ```
 Open `htmlcov/index.html` to browse coverage visually.
 

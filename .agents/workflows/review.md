@@ -32,7 +32,7 @@ pytest tests/ -v --tb=short
 5. **Run lint check**
 // turbo
 ```bash
-ruff check contribai/
+ruff check farm_agent/
 ```
 
 6. **Review code changes**
@@ -46,7 +46,7 @@ Go through the Code Reviewer checklist:
 - [ ] Performance: no N+1, async for I/O
 
 7. **Check for breaking changes**
-Review `contribai/core/models.py` and `contribai/core/config.py` for any model changes that could break existing configs or data.
+Review `farm_agent/core/models.py` and `farm_agent/core/config.py` for any model changes that could break existing configs or data.
 
 8. **Leave review comments**
 Use severity labels:

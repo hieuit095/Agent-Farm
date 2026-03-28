@@ -4,8 +4,8 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from contribai.core.exceptions import GitHubAPIError
-from contribai.github.client import GitHubClient
+from farm_agent.core.exceptions import GitHubAPIError
+from farm_agent.github.client import GitHubClient
 
 
 @pytest.fixture

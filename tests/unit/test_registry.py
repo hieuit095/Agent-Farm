@@ -1,10 +1,10 @@
-"""Tests for contribai.agents.registry — Sub-agent registry system."""
+"""Tests for farm_agent.agents.registry — Sub-agent registry system."""
 
 from __future__ import annotations
 
 import pytest
 
-from contribai.agents.registry import (
+from farm_agent.agents.registry import (
     AgentContext,
     AgentRegistry,
     AgentRole,

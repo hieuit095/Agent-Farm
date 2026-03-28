@@ -5,7 +5,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.superhuman
-    container_name: contribai_agent
+    container_name: farm_agent_core
     restart: unless-stopped
     environment:
       - TZ=Asia/Ho_Chi_Minh

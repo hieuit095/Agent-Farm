@@ -4,9 +4,9 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from contribai.core.config import LLMConfig
-from contribai.core.exceptions import LLMError
-from contribai.llm.provider import (
+from farm_agent.core.config import LLMConfig
+from farm_agent.core.exceptions import LLMError
+from farm_agent.llm.provider import (
     MinimaxProvider,
     create_llm_provider,
 )
@@ -15,7 +15,7 @@ from contribai.llm.provider import (
 class TestCreateProvider:
     def test_create_minimax(self):
         config = LLMConfig(provider="minimax", api_key="test")
-        with patch("contribai.llm.provider.MinimaxProvider.__init__", return_value=None):
+        with patch("farm_agent.llm.provider.MinimaxProvider.__init__", return_value=None):
             provider = create_llm_provider(config)
             assert isinstance(provider, MinimaxProvider)
 

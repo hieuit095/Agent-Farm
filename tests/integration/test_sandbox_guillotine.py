@@ -4,15 +4,15 @@ import asyncio
 from unittest.mock import AsyncMock, patch
 import pytest
 
-from contribai.core.config import ContribAIConfig, GitHubConfig, LLMConfig, AnalysisConfig, ContributionConfig, StorageConfig
-from contribai.core.models import (
+from farm_agent.core.config import FarmAgentConfig, GitHubConfig, LLMConfig, AnalysisConfig, ContributionConfig, StorageConfig
+from farm_agent.core.models import (
     Repository, Finding, Contribution, ContributionType, Severity, FileChange
 )
-from contribai.orchestrator.pipeline import ContribPipeline
+from farm_agent.orchestrator.pipeline import ContribPipeline
 
 @pytest.fixture
 def pipeline_config(tmp_path):
-    return ContribAIConfig(
+    return FarmAgentConfig(
         github=GitHubConfig(token="test_token", max_prs_per_day=1),
         llm=LLMConfig(provider="minimax", api_key="test_key"),
         analysis=AnalysisConfig(enabled_analyzers=["security"]),
@@ -54,7 +54,7 @@ def bad_contribution(mock_finding):
         description="Did not fix syntax",
         changes=[FileChange(path="main.py", new_content="import syntax error")],
         commit_message="fix: bad syntax",
-        branch_name="contribai/fix/syntax-error",
+        branch_name="farm_agent/fix/syntax-error",
     )
 
 @pytest.fixture
@@ -114,11 +114,11 @@ async def test_pipeline_aborts_pr_on_sandbox_failure(pipeline_config, mock_repo,
     guidelines = MagicMock()
     guidelines.has_guidelines = False
     
-    with patch("contribai.orchestrator.pipeline.fetch_repo_guidelines", new=AsyncMock(return_value=guidelines)):
+    with patch("farm_agent.orchestrator.pipeline.fetch_repo_guidelines", new=AsyncMock(return_value=guidelines)):
         with patch.object(pipeline, "_init_components", new=AsyncMock()):
             with patch("asyncio.sleep", new=AsyncMock()):
                 # Mock analyzer to return our finding directly
-                from contribai.core.models import AnalysisResult
+                from farm_agent.core.models import AnalysisResult
                 pipeline._analyzer.analyze = AsyncMock(return_value=AnalysisResult(
                     repo=mock_repo,
                     findings=[mock_finding],

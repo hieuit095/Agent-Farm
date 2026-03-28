@@ -1,22 +1,22 @@
 ---
-description: ContribAI development workflow - code, patrol, hunt, and release
+description: Farm-Agent development workflow - code, patrol, hunt, and release
 ---
 
-# ContribAI Development Workflow
+# Farm-Agent Development Workflow
 
 // turbo-all
 
 ## Code Changes
 
-1. Make changes to the relevant files in `contribai/`
+1. Make changes to the relevant files in `farm_agent/`
 2. Run formatting and linting:
    ```bash
-   ruff format contribai/ tests/
-   ruff check contribai/ tests/ --fix
+   ruff format farm_agent/ tests/
+   ruff check farm_agent/ tests/ --fix
    ```
 3. Run tests:
    ```bash
-   pytest tests/ -q --tb=short --cov=contribai --cov-fail-under=50
+   pytest tests/ -q --tb=short --cov=farm_agent --cov-fail-under=50
    ```
 4. Commit with conventional commits + DCO signoff:
    ```bash
@@ -46,20 +46,20 @@ Run patrol to monitor and respond to PR review feedback:
 
 ```bash
 # Dry run (no changes)
-contribai patrol --dry-run
+farm_agent patrol --dry-run
 
 # Target specific PR
-contribai patrol --pr <PR_NUMBER>
+farm_agent patrol --pr <PR_NUMBER>
 
 # Live run (responds to feedback)
-contribai patrol
+farm_agent patrol
 ```
 
 ### Key files:
-- `contribai/pr/patrol.py` - Patrol engine
-- `contribai/core/models.py` - FeedbackItem, PatrolResult, FeedbackAction
-- `contribai/github/client.py` - GitHub API (create_or_update_file, get_assigned_issues)
-- `contribai/cli/main.py` - CLI patrol command
+- `farm_agent/pr/patrol.py` - Patrol engine
+- `farm_agent/core/models.py` - FeedbackItem, PatrolResult, FeedbackAction
+- `farm_agent/github/client.py` - GitHub API (create_or_update_file, get_assigned_issues)
+- `farm_agent/cli/main.py` - CLI patrol command
 
 ### DCO Signoff
 All commits via GitHub API automatically include `Signed-off-by:` trailer.
@@ -85,21 +85,21 @@ generating accurate code fixes.
 
 ```bash
 # Hunt for repos and generate PRs
-contribai hunt --rounds 1
+farm_agent hunt --rounds 1
 
 # Hunt with multiple languages
-contribai hunt --rounds 3 -l python -l javascript
+farm_agent hunt --rounds 3 -l python -l javascript
 
 # Dry run
-contribai hunt --rounds 1 --dry-run
+farm_agent hunt --rounds 1 --dry-run
 
 # Single repo test
-contribai run owner/repo --dry-run
+farm_agent run owner/repo --dry-run
 ```
 
 ## Release
 
-1. Bump version in `contribai/__init__.py` and `pyproject.toml`
+1. Bump version in `farm_agent/__init__.py` and `pyproject.toml`
 2. Update `CHANGELOG.md` with new version section
 3. Update `README.md` badges (version, test count)
 4. Update `AGENTS.md` if architecture changed
@@ -110,7 +110,7 @@ contribai run owner/repo --dry-run
    ```
 6. Create release:
    ```bash
-   gh release create v<VERSION> --repo tang-vu/ContribAI --title "v<VERSION> - Title" --generate-notes
+   gh release create v<VERSION> --repo tang-vu/Farm-Agent --title "v<VERSION> - Title" --generate-notes
    ```
 7. Verify all CI checks pass
 

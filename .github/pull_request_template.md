@@ -27,7 +27,7 @@
 ## Testing
 - [ ] Tests added/updated
 - [ ] All 247 tests pass locally (`pytest tests/ -v`)
-- [ ] Lint passes (`ruff check contribai/`)
+- [ ] Lint passes (`ruff check farm_agent/`)
 
 ## Checklist
 - [ ] Code follows project conventions (async, type hints, Google docstrings)

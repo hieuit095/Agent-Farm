@@ -1,6 +1,6 @@
-# ContribAI Deployment Guide
+# Farm-Agent Deployment Guide
 
-ContribAI is designed to run 24/7 as an autonomous background agent. It has been specifically optimized for low-power edge devices (like Raspberry Pi, Orange Pi, or cheap VPS instances) with a hard memory cap of 512MB and support for both ARM64 and AMD64 architectures.
+Farm-Agent is designed to run 24/7 as an autonomous background agent. It has been specifically optimized for low-power edge devices (like Raspberry Pi, Orange Pi, or cheap VPS instances) with a hard memory cap of 512MB and support for both ARM64 and AMD64 architectures.
 
 This guide covers deploying the `superhuman` mode via Docker Compose, which includes the agent, the SQLite tracking database, and the web dashboard.
 
@@ -91,7 +91,7 @@ docker compose -f docker-compose.superhuman.yml logs -f
 
 ## 4. Understanding the Super Human Loop
 
-When running via this deployment, ContribAI executes `contribai superhuman`, which behaves as follows:
+When running via this deployment, Farm-Agent executes `farm_agent superhuman`, which behaves as follows:
 
 1. **Wake Up:** Generates a random daily PR target (e.g., 3 PRs).
 2. **Hunt:** Automatically discovers repositories matching your criteria and runs the CodeAnalyzer.
@@ -104,7 +104,7 @@ When running via this deployment, ContribAI executes `contribai superhuman`, whi
 
 ## 5. Exposing the Web Dashboard
 
-The Docker network exposes port `8787` for the ContribAI status dashboard.
+The Docker network exposes port `8787` for the Farm-Agent status dashboard.
 
 If you are running this on a VPS or Edge device, you can access the dashboard by navigating to:
 `http://<SERVER_IP>:8787`
@@ -115,7 +115,7 @@ The dashboard provides real-time visibility into the agent's current state, PR s
 
 ## 6. Updating the Agent
 
-To upgrade to the latest version of ContribAI:
+To upgrade to the latest version of Farm-Agent:
 
 ```shell
 git pull

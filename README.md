@@ -1,6 +1,6 @@
 <div align="center">
 
-# 🤖 ContribAI
+# 🤖 Farm-Agent
 
 **Autonomous AI Agent That Contributes to Open Source — Without Looking Like One.**
 
@@ -20,7 +20,7 @@
 
 Most "AI contribution" bots spam repositories with trivial changes — adding docstrings nobody asked for, reformatting whitespace, or making subjective style changes. They get flagged, banned, and give AI-assisted development a bad name.
 
-**ContribAI takes the opposite approach.** It operates under a strict **Anti-Farming** filter that blocks trivial changes at the pipeline level, focuses exclusively on bugs, security flaws, and performance issues, and disguises its operational patterns behind realistic human behavioral simulation.
+**Farm-Agent takes the opposite approach.** It operates under a strict **Anti-Farming** filter that blocks trivial changes at the pipeline level, focuses exclusively on bugs, security flaws, and performance issues, and disguises its operational patterns behind realistic human behavioral simulation.
 
 ---
 
@@ -99,8 +99,8 @@ Most "AI contribution" bots spam repositories with trivial changes — adding do
 ### 1. Clone & Install
 
 ```sh
-git clone https://github.com/hieuit095/ContribAI.git
-cd ContribAI
+git clone https://github.com/hieuit095/Farm-Agent.git
+cd Farm-Agent
 pip install -e ".[dev]"
 ```
 
@@ -129,13 +129,13 @@ notifications:
 
 ```sh
 # Single hunt round (discover repos, analyze, create PRs)
-contribai hunt --rounds 1 --dry-run
+farm_agent hunt --rounds 1 --dry-run
 
 # Target a specific repo
-contribai target https://github.com/owner/repo --dry-run
+farm_agent target https://github.com/owner/repo --dry-run
 
 # 24/7 autonomous mode (Super Human)
-contribai superhuman
+farm_agent superhuman
 ```
 
 ### 4. Deploy (Edge Device)
@@ -160,21 +160,21 @@ See [DEPLOYMENT.md](DEPLOYMENT.md) for full edge deployment guide.
 
 | Command | Description |
 |---------|-------------|
-| `contribai run` | Auto-discover repos and contribute |
-| `contribai hunt` | Aggressive multi-round discovery + contribution |
-| `contribai patrol` | Monitor open PRs and respond to feedback |
-| `contribai superhuman` | 24/7 autonomous loop with human-like behavior |
-| `contribai target <url>` | Target a specific repository |
-| `contribai analyze <url>` | Analyze without creating PRs |
-| `contribai solve <url>` | Solve open issues in a repo |
-| `contribai status` | Show submitted PR statuses |
-| `contribai stats` | Overall contribution statistics |
-| `contribai leaderboard` | Success rates per repository |
-| `contribai cleanup` | Delete forks with all PRs merged/closed |
-| `contribai sysinfo` | System health, memory, rate limits |
-| `contribai notify-test` | Send a test notification |
-| `contribai serve` | Start web dashboard (port 8787) |
-| `contribai config` | Show current configuration |
+| `farm_agent run` | Auto-discover repos and contribute |
+| `farm_agent hunt` | Aggressive multi-round discovery + contribution |
+| `farm_agent patrol` | Monitor open PRs and respond to feedback |
+| `farm_agent superhuman` | 24/7 autonomous loop with human-like behavior |
+| `farm_agent target <url>` | Target a specific repository |
+| `farm_agent analyze <url>` | Analyze without creating PRs |
+| `farm_agent solve <url>` | Solve open issues in a repo |
+| `farm_agent status` | Show submitted PR statuses |
+| `farm_agent stats` | Overall contribution statistics |
+| `farm_agent leaderboard` | Success rates per repository |
+| `farm_agent cleanup` | Delete forks with all PRs merged/closed |
+| `farm_agent sysinfo` | System health, memory, rate limits |
+| `farm_agent notify-test` | Send a test notification |
+| `farm_agent serve` | Start web dashboard (port 8787) |
+| `farm_agent config` | Show current configuration |
 
 ---
 
@@ -197,7 +197,7 @@ Finding → Gate 1: Impact Filter → Gate 2: Keyword Filter → PR
 ## Project Structure
 
 ```
-contribai/
+farm_agent/
 ├── analysis/       # CodeAnalyzer, skills, multi-strategy scan
 ├── cli/            # Click CLI + Rich TUI
 ├── core/           # Pydantic models, config, exceptions
@@ -217,7 +217,7 @@ contribai/
 
 ## Configuration Reference
 
-ContribAI uses a YAML-based config system with Pydantic validation. See [`config.example.yaml`](config.example.yaml) for a complete reference with all 13 sections:
+Farm-Agent uses a YAML-based config system with Pydantic validation. See [`config.example.yaml`](config.example.yaml) for a complete reference with all 13 sections:
 
 `github` · `llm` · `analysis` · `contribution` · `discovery` · `storage` · `pipeline` · `scheduler` · `web` · `quota` · `notifications` · `logging` · `multi_model`
 

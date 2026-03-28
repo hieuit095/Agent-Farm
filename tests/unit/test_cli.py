@@ -4,7 +4,7 @@ import pytest
 from click.testing import CliRunner
 from unittest.mock import patch
 
-from contribai.cli.main import cli
+from farm_agent.cli.main import cli
 
 
 @pytest.fixture
@@ -16,7 +16,7 @@ class TestCLIHelp:
     def test_main_help(self, runner):
         result = runner.invoke(cli, ["--help"])
         assert result.exit_code == 0
-        assert "ContribAI" in result.output
+        assert "Farm-Agent" in result.output
 
     def test_run_help(self, runner):
         result = runner.invoke(cli, ["run", "--help"])
@@ -57,9 +57,9 @@ class TestCLINoToken:
     def test_run_without_token_fails(self, runner, monkeypatch):
         """Run without any token source should fail gracefully."""
         # Use an empty config to ensure it doesn't load a local user config containing a token
-        with patch("contribai.cli.main.load_config") as mock_load:
-            from contribai.core.config import ContribAIConfig
-            mock_load.return_value = ContribAIConfig()
+        with patch("farm_agent.cli.main.load_config") as mock_load:
+            from farm_agent.core.config import FarmAgentConfig
+            mock_load.return_value = FarmAgentConfig()
             
             monkeypatch.delenv("GITHUB_TOKEN", raising=False)
             monkeypatch.setattr(

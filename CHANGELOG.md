@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to ContribAI will be documented in this file.
+All notable changes to Farm-Agent will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
@@ -26,13 +26,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [2.4.0] - 2026-03-25
 
 ### Added
-- **Middleware chain** (`contribai/core/middleware.py`): Pipeline processing with 5 built-in middlewares — RateLimit, Validation, Retry, DCO, QualityGate
-- **Progressive skill loading** (`contribai/analysis/skills.py`): 17 analysis skills loaded on-demand by language/framework instead of all at once — saves tokens and improves quality
+- **Middleware chain** (`farm_agent/core/middleware.py`): Pipeline processing with 5 built-in middlewares — RateLimit, Validation, Retry, DCO, QualityGate
+- **Progressive skill loading** (`farm_agent/analysis/skills.py`): 17 analysis skills loaded on-demand by language/framework instead of all at once — saves tokens and improves quality
 - **Framework detection**: Auto-detect Django, Flask, FastAPI, React, Express, Spring, Rails, etc. from file tree
 - **Outcome learning** (`memory.py`): New `pr_outcomes` + `repo_preferences` tables — tracks PR merge/rejection to learn which contribution types work per repo
 - **Context summarization** (`analyzer.py`): `summarize_findings()` compresses analysis results for downstream LLM prompts
-- **Sub-agent registry** (`contribai/agents/registry.py`): 4 agent stubs (Analyzer, Generator, Patrol, Compliance) with parallel execution (max 3 concurrent)
-- **Tool protocol** (`contribai/tools/protocol.py`): MCP-inspired tool system with ToolRegistry, GitHubTool, and LLMTool wrappers
+- **Sub-agent registry** (`farm_agent/agents/registry.py`): 4 agent stubs (Analyzer, Generator, Patrol, Compliance) with parallel execution (max 3 concurrent)
+- **Tool protocol** (`farm_agent/tools/protocol.py`): MCP-inspired tool system with ToolRegistry, GitHubTool, and LLMTool wrappers
 - **DCO auto-signoff**: All commits via GitHub API auto-append `Signed-off-by` trailer
 
 ### Changed
@@ -55,7 +55,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [2.2.0] - 2026-03-23
 
 ### Added
-- **PR Patrol** (`contribai patrol`): Monitor open PRs for review feedback and auto-respond
+- **PR Patrol** (`farm_agent patrol`): Monitor open PRs for review feedback and auto-respond
   - Reads maintainer review comments (issue comments + inline code reviews)
   - LLM-based feedback classification: CODE_CHANGE, QUESTION, STYLE_FIX, APPROVE, REJECT, ALREADY_HANDLED
   - Generates code fixes from review feedback and pushes to PR branch
@@ -90,7 +90,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - New `_hunt_process_repo()` method extracted as class method
   - Honors `max_concurrent_repos` config (default: 3)
 - **GitHub API retry with backoff**: `_request()` retries 3× on 502/503/504 errors (2s/4s/8s)
-- **Fork cleanup command**: `contribai cleanup` — syncs PR statuses, removes stale forks via `gh repo delete`
+- **Fork cleanup command**: `farm_agent cleanup` — syncs PR statuses, removes stale forks via `gh repo delete`
 - **Code-only file filter**: `SKIP_EXTENSIONS` (.md, .yaml, .json, .toml, .rst, .txt, .cfg, .ini, .lock) and `PROTECTED_META_FILES` (LICENSE, CONTRIBUTING.md, etc.) prevent non-code modifications
 - **Hunt mode flags**: `--mode analysis|issues|both` for fine-grained control
 - **EXE standalone behavior**: Defaults to `info` command when run without arguments, pauses before exit
@@ -110,14 +110,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [1.0.0] - 2026-03-20
 
 ### Added
-- **Stealth Mode**: PRs appear human-written — no ContribAI branding in body, branch names, or comments
+- **Stealth Mode**: PRs appear human-written — no Farm-Agent branding in body, branch names, or comments
 - **CLA Auto-signing**: Detects CLAAssistant/EasyCLA bots and auto-signs CLA agreements
 - **AI Policy Detection**: Checks `AI_POLICY.md` and `CONTRIBUTING.md` for anti-AI contribution policies, skips banned repos
 - **Max 2 findings per repo**: Prevents spamming repos with too many PRs
 - `create_pr_comment()` method in GitHubClient
 
 ### Changed
-- Branch names: `fix/xxx` instead of `contribai/fix-xxx` (stealth)
+- Branch names: `fix/xxx` instead of `farm_agent/fix-xxx` (stealth)
 - PR body: clean `## Problem / ## Solution / ## Changes` format
 - CI auto-close message: no branding or emoji
 - License: AGPL-3.0 + Commons Clause (from MIT)
@@ -129,7 +129,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - **Hunt Mode**: Autonomous multi-round repo discovery and PR creation
-- `contribai hunt --rounds N --delay M` CLI command
+- `farm_agent hunt --rounds N --delay M` CLI command
 - Configurable delay between hunt rounds
 - 5 new tests (total: 287 tests)
 

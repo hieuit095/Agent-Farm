@@ -5,7 +5,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        ⚠️ **For critical vulnerabilities**, please email security@contribai.dev instead of filing a public issue.
+        ⚠️ **For critical vulnerabilities**, please email security@farm_agent.dev instead of filing a public issue.
 
   - type: textarea
     id: description

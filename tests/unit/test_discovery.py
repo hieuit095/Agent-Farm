@@ -4,9 +4,9 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from contribai.core.config import DiscoveryConfig
-from contribai.core.models import DiscoveryCriteria, Repository
-from contribai.github.discovery import RepoDiscovery
+from farm_agent.core.config import DiscoveryConfig
+from farm_agent.core.models import DiscoveryCriteria, Repository
+from farm_agent.github.discovery import RepoDiscovery
 
 
 def make_repo(name: str, stars: int = 500, open_issues: int = 5, **kwargs) -> Repository:

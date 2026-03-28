@@ -1,4 +1,4 @@
-"""Tests for contribai.core.middleware — Middleware chain system."""
+"""Tests for farm_agent.core.middleware — Middleware chain system."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from contribai.core.middleware import (
+from farm_agent.core.middleware import (
     DCOMiddleware,
     MiddlewareChain,
     PipelineContext,

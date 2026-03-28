@@ -1,8 +1,8 @@
-# ContribAI Source Code Map
+# Farm-Agent Source Code Map
 
-This document outlines the directory structure and core architectural components of the ContribAI project map.
+This document outlines the directory structure and core architectural components of the Farm-Agent project map.
 
-## 📂 `contribai/` (Core Application)
+## 📂 `farm_agent/` (Core Application)
 
 ### `/analysis/`
 The brain of the agent's static code analysis.

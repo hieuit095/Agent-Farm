@@ -6,9 +6,9 @@ import httpx
 import pytest
 import respx
 
-from contribai.core.config import LLMConfig
-from contribai.core.exceptions import LLMError, LLMRateLimitError
-from contribai.llm.provider import MinimaxProvider, create_llm_provider
+from farm_agent.core.config import LLMConfig
+from farm_agent.core.exceptions import LLMError, LLMRateLimitError
+from farm_agent.llm.provider import MinimaxProvider, create_llm_provider
 
 # Minimax API URL used by the provider
 _MINIMAX_URL = "https://api.minimax.io/v1/text/chatcompletion_v2"
@@ -247,13 +247,13 @@ class TestMinimaxModelRegistry:
     """Test Minimax models are properly registered."""
 
     def test_models_in_registry(self):
-        from contribai.llm.models import MODELS_BY_NAME
+        from farm_agent.llm.models import MODELS_BY_NAME
 
         assert "MiniMax-M2.7" in MODELS_BY_NAME
         assert "abab6.5s-chat" in MODELS_BY_NAME
 
     def test_model_specs_correct(self):
-        from contribai.llm.models import MINIMAX_M27, MINIMAX_ABAB65S_CHAT, ModelTier
+        from farm_agent.llm.models import MINIMAX_M27, MINIMAX_ABAB65S_CHAT, ModelTier
 
         assert MINIMAX_M27.tier == ModelTier.FLASH
         assert MINIMAX_ABAB65S_CHAT.tier == ModelTier.LITE
@@ -261,7 +261,7 @@ class TestMinimaxModelRegistry:
         assert MINIMAX_ABAB65S_CHAT.speed > MINIMAX_M27.speed
 
     def test_models_found_by_task_type(self):
-        from contribai.llm.models import TaskType, get_models_for_task
+        from farm_agent.llm.models import TaskType, get_models_for_task
 
         code_gen_models = get_models_for_task(TaskType.CODE_GEN)
         model_names = [m.name for m in code_gen_models]
