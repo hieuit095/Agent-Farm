@@ -187,9 +187,9 @@ class PRPatrol:
         return int(min(base_delay + typing_time, 1800))
 
     def _get_contextual_greeting(self) -> str:
-        """Contextual Small Talk: Day-of-the-week greetings."""
-        from datetime import datetime
-        now = datetime.now()
+        """Contextual Small Talk: Day-of-the-week greetings in UTC."""
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc)
         if now.hour >= 12 and now.weekday() == 4:
             return random.choice(["Happy Friday! ", "Hope you have a great weekend ahead. "])
         elif now.hour < 12 and now.weekday() == 0:
@@ -245,6 +245,24 @@ class PRPatrol:
                 )
                 if pr_data.get("state") != "open":
                     result.prs_skipped += 1
+                    continue
+
+                # Detect merged PRs
+                if pr_data.get("merged") is True:
+                    logger.info(
+                        "  🎉 PR #%d on %s is MERGED — updating status",
+                        pr["pr_number"],
+                        pr["repo"],
+                    )
+                    result.prs_merged.append({
+                        "repo": pr["repo"],
+                        "pr_number": pr["pr_number"],
+                        "url": pr_data.get("html_url", pr.get("pr_url", "")),
+                    })
+                    if self._memory:
+                        await self._memory.update_pr_status(
+                            pr["repo"], pr["pr_number"], "merged",
+                        )
                     continue
 
                 result.prs_checked += 1
@@ -365,10 +383,22 @@ class PRPatrol:
                     )
                     if not dry_run:
                         if random.random() < 0.10:
+                            # BEHV-02 fix: actively close the PR instead of ghosting
                             logger.warning(
                                 "  👻 Chán cãi nhau rồi, bơ luôn PR #%d. (Ghosting the maintainer)",
                                 pr["pr_number"],
                             )
+                            try:
+                                await self._github.close_pull_request(
+                                    owner,
+                                    repo_name,
+                                    pr["pr_number"],
+                                    comment="Closing this PR for now as I won't have time to address the remaining feedback. Thanks for the review!",
+                                )
+                            except GitHubAPIError as exc:
+                                logger.warning(
+                                    "  ⚠️ Could not close PR #%d: %s", pr["pr_number"], exc,
+                                )
                             if self._memory:
                                 await self._memory.update_pr_status(pr["repo"], pr["pr_number"], "ghosted")
                             result.prs_closed_hostile += 1
@@ -705,13 +735,19 @@ class PRPatrol:
                 logger.warning("Failed to classify feedback: %s", e)
                 break
 
-        # Fall back: treat all as potential code changes
+        # Fall back: do NOT blindly treat as CODE_CHANGE — that triggers
+        # unwanted automated commits. Mark as ALREADY_HANDLED and log error.
+        logger.error(
+            "  ⚠️ LLM classification failed after %d retries — marking %d feedback items as ALREADY_HANDLED",
+            max_retries,
+            len(feedback),
+        )
         return [
             FeedbackItem(
                 comment_id=f["id"],
                 author=f["author"],
                 body=f["body"],
-                action=FeedbackAction.CODE_CHANGE,
+                action=FeedbackAction.ALREADY_HANDLED,
                 file_path=f.get("file_path"),
                 line=f.get("line"),
                 diff_hunk=f.get("diff_hunk"),
@@ -847,7 +883,11 @@ class PRPatrol:
                 sha = None
 
             if not dry_run:
-                read_delay = random.randint(600, 7200)
+                # BEHV-04 fix: bimodal distribution to simulate human work patterns
+                if random.random() < 0.80:
+                    read_delay = random.randint(30, 300)  # Quick response (active coding)
+                else:
+                    read_delay = random.randint(3600, 28800)  # Long delay (meeting/sleep)
                 logger.info("  Mới check mail thấy có notification từ Maintainer. Bắt đầu đọc... (Simulating notification lag: %ds)", read_delay)
                 await asyncio.sleep(read_delay)
 
@@ -993,7 +1033,11 @@ class PRPatrol:
             reply_body = f"{greeting}{opener}\n\n{raw_answer}\n\n{closer}\n\n<!-- contribai-patrol -->"
 
             if not dry_run:
-                read_delay = random.randint(600, 7200)
+                # BEHV-04 fix: bimodal distribution to simulate human work patterns
+                if random.random() < 0.80:
+                    read_delay = random.randint(30, 300)  # Quick response (active coding)
+                else:
+                    read_delay = random.randint(3600, 28800)  # Long delay (meeting/sleep)
                 logger.info("  Mới check mail thấy có notification từ Maintainer. Bắt đầu đọc... (Simulating notification lag: %ds)", read_delay)
                 await asyncio.sleep(read_delay)
 

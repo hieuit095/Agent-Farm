@@ -286,3 +286,4 @@ class PatrolResult(BaseModel):
     issues_found: int = 0
     assigned_issues: list[dict] = Field(default_factory=list)
     errors: list[str] = Field(default_factory=list)
+    prs_merged: list[dict] = Field(default_factory=list)

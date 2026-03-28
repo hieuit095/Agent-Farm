@@ -162,7 +162,9 @@ class DockerSandbox:
                 image,
                 ["/bin/sh", "-lc", command],
                 detach=True,
-                auto_remove=True,
+                # DEBT-05: Removed auto_remove=True — rely on explicit finally cleanup
+                # block for deterministic container removal and to avoid 409 Conflict
+                # warnings when the daemon races with container exit.
                 working_dir=self._WORKSPACE_PATH,
                 volumes={
                     str(repo_dir): {

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -96,6 +96,7 @@ def sample_file_tree():
 # ── Mock Fixtures ──────────────────────────────────────────────────────────
 
 
+
 @pytest.fixture
 def mock_llm():
     """Mock LLM provider."""
@@ -133,3 +134,12 @@ def mock_github():
     client.check_interaction_limits = AsyncMock(return_value=False)
     client.close = AsyncMock()
     return client
+
+
+@pytest.fixture
+def mock_notifier():
+    """Mock TelegramNotifier to avoid HTTP calls."""
+    notifier = AsyncMock()
+    notifier.send = AsyncMock()
+    notifier.close = AsyncMock()
+    return notifier

@@ -115,6 +115,10 @@ class Memory:
         # Enable Write-Ahead Logging for concurrent read/write safety
         await self._db.execute("PRAGMA journal_mode=WAL;")
         await self._db.executescript(SCHEMA)
+        # DEBT-04: Add index for sliding-window quota queries on (provider, timestamp)
+        await self._db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_api_usage ON api_usage_log(provider, timestamp)"
+        )
         await self._db.commit()
 
         # ── Migrations ────────────────────────────────────────────────────
@@ -551,16 +555,16 @@ class Memory:
             (now, provider),
         )
 
-        # ── Periodic cleanup: purge entries older than 7 days ──────────
-        if not hasattr(self, "_quota_cleanup_counter"):
-            self._quota_cleanup_counter = 0
-        self._quota_cleanup_counter += 1
+        # ── Time-based periodic cleanup: purge entries older than 7 days ──
+        # DEBT-06: Replace volatile counter with time-based trigger (hourly cleanup)
+        if not hasattr(self, "_last_quota_cleanup"):
+            self._last_quota_cleanup = 0.0
 
-        if self._quota_cleanup_counter >= 100:
+        if now - self._last_quota_cleanup >= 3600:  # 1 hour
             await self._db.execute(
                 "DELETE FROM api_usage_log WHERE timestamp < ?",
                 (seven_days_ago,),
             )
-            self._quota_cleanup_counter = 0
+            self._last_quota_cleanup = now
 
         await self._db.commit()

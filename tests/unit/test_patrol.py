@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -1068,7 +1068,8 @@ class TestAutoReaction:
     """Test the auto-like reaction feature."""
 
     @pytest.mark.asyncio
-    async def test_reaction_called_for_code_change(self):
+    @patch("asyncio.sleep")
+    async def test_reaction_called_for_code_change(self, mock_sleep):
         """Reaction API is called before handling a code fix."""
         github = MagicMock()
         github.get_authenticated_user = AsyncMock(return_value={"login": "bot", "name": "Bot", "email": "bot@test.com"})
@@ -1111,7 +1112,8 @@ class TestAutoReaction:
         )
 
     @pytest.mark.asyncio
-    async def test_reaction_routes_inline_to_pulls_endpoint(self):
+    @patch("asyncio.sleep")
+    async def test_reaction_routes_inline_to_pulls_endpoint(self, mock_sleep):
         """Inline (review) comments route to /pulls/comments/{id}/reactions."""
         github = MagicMock()
         github.get_authenticated_user = AsyncMock(return_value={"login": "bot"})
@@ -1153,7 +1155,8 @@ class TestAutoReaction:
         )
 
     @pytest.mark.asyncio
-    async def test_reaction_failure_does_not_crash_patrol(self):
+    @patch("asyncio.sleep")
+    async def test_reaction_failure_does_not_crash_patrol(self, mock_sleep):
         """If reaction API fails, patrol continues processing normally."""
         github = MagicMock()
         github.get_authenticated_user = AsyncMock(return_value={"login": "bot"})

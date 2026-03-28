@@ -253,9 +253,10 @@ class ContribPipeline:
             # 2. Process repos in parallel with semaphore
             max_conc = self.config.pipeline.max_concurrent_repos
             if self.config.llm.provider == "minimax":
-                max_conc = 100
-                logger.info("Minimax Overdrive: Unleashing concurrency to %d", max_conc)
-                
+                # CRIT-03 FIX: Cap parallel repos to 5 to prevent GitHub
+                # secondary rate limit thundering herd.
+                max_conc = min(max_conc, 5)
+                logger.info("Minimax mode: capped concurrency to %d", max_conc)
             sem = asyncio.Semaphore(max_conc)
             logger.info(
                 "Processing %d repos (max %d concurrent)",
@@ -414,9 +415,10 @@ class ContribPipeline:
                 max_targets = self.config.github.max_repos_per_run
                 max_conc = self.config.pipeline.max_concurrent_repos
                 if self.config.llm.provider == "minimax":
-                    max_conc = 100
-                    logger.info("Minimax Overdrive: Unleashing concurrency to %d", max_conc)
-                    
+                    # CRIT-03 FIX: Cap parallel repos to 5 to prevent GitHub
+                    # secondary rate limit thundering herd.
+                    max_conc = min(max_conc, 5)
+                    logger.info("Minimax mode: capped concurrency to %d", max_conc)
                 sem = asyncio.Semaphore(max_conc)
                 selected = targets[:max_targets]
 
@@ -976,15 +978,20 @@ class ContribPipeline:
                 typing_time = int(patch_length / 3.75)
                 total_coding_delay = min(base_coding_time + typing_time, 3600)
 
+                # CRIT-04 FIX: Move long coding delay OUTSIDE the lock.
+                # Parallel repos can "think" simultaneously — only the
+                # actual PR push is serialized.
                 if not dry_run:
                     logger.info(f"⏳ Bắt đầu code cho {repo.full_name}... (Simulating {total_coding_delay}s of heavy coding)")
                     await asyncio.sleep(total_coding_delay)
 
+                # INSIDE THE LOCK: Sequential PR pushing only
                 async with self._human_typing_lock:
                     if not dry_run:
+                        logger.info("⏳ Chuẩn bị push code... (Taking a deep breath)")
                         await asyncio.sleep(random.randint(15, 45))
-                        
-                    logger.info("📤 Creating PR...")
+
+                    logger.info(f"📤 Creating PR for {repo.full_name}...")
                     pr_result = await self._pr_manager.create_pr(
                         contribution, repo, guidelines=guidelines
                     )
@@ -1005,7 +1012,7 @@ class ContribPipeline:
 
                 if not dry_run and getattr(self, "_notifier", None):
                     asyncio.create_task(
-                        self._notifier.send_message(
+                        self._safe_send_notification(
                             f"🚀 <b>[HUNT]</b> New PR Created!\nRepo: <code>{repo.full_name}</code>\nURL: {pr_result.pr_url}"
                         )
                     )
@@ -1188,15 +1195,18 @@ class ContribPipeline:
                 typing_time = int(patch_length / 3.75)
                 total_coding_delay = min(base_coding_time + typing_time, 3600)
 
+                # CRIT-04 FIX: Move long coding delay OUTSIDE the lock.
                 if not dry_run:
                     logger.info(f"⏳ Bắt đầu code cho {repo.full_name}... (Simulating {total_coding_delay}s of heavy coding)")
                     await asyncio.sleep(total_coding_delay)
 
+                # INSIDE THE LOCK: Sequential PR pushing only
                 async with self._human_typing_lock:
                     if not dry_run:
+                        logger.info("⏳ Chuẩn bị push code... (Taking a deep breath)")
                         await asyncio.sleep(random.randint(15, 45))
-                        
-                    logger.info("📤 Creating PR for issue #%d...", issue.number)
+
+                    logger.info("📤 Creating PR for issue #%d in %s...", issue.number, repo.full_name)
                     pr_result = await self._pr_manager.create_pr(
                         contribution,
                         repo,
@@ -1218,7 +1228,7 @@ class ContribPipeline:
 
                 if not dry_run and getattr(self, "_notifier", None):
                     asyncio.create_task(
-                        self._notifier.send_message(
+                        self._safe_send_notification(
                             f"🚀 <b>[HUNT]</b> New PR Created!\nRepo: <code>{repo.full_name}</code>\nURL: {pr_result.pr_url}"
                         )
                     )
@@ -1534,6 +1544,13 @@ class ContribPipeline:
             max_wait_sec,
             pr_result.pr_number,
         )
+
+    async def _safe_send_notification(self, message: str) -> None:
+        """Send a notification without crashing the main loop."""
+        try:
+            await self._notifier.send_message(message)
+        except Exception as exc:
+            logger.warning("Notification send failed (non-fatal): %s", exc)
 
     def _set_task(self, task_name: str) -> None:
         """Set the current task context for multi-model routing."""

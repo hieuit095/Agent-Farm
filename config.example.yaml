@@ -5,6 +5,8 @@ github:
   token: "ghp_your_github_personal_access_token"
   max_repos_per_run: 5
   max_prs_per_day: 10
+  min_daily_prs: 3
+  max_daily_prs: 10
   rate_limit_buffer: 100
 
 llm:

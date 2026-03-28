@@ -19,6 +19,8 @@ class GitHubConfig(BaseModel):
     token: str = ""
     max_repos_per_run: int = 5
     max_prs_per_day: int = 10
+    min_daily_prs: int = 3
+    max_daily_prs: int = 10
     rate_limit_buffer: int = 100
     dco_signoff: bool = True  # Auto-append Signed-off-by to commit messages
 

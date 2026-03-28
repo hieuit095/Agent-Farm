@@ -18,11 +18,12 @@ import random
 from datetime import UTC, date, datetime
 
 from contribai.core.exceptions import ContribAIError, GitHubAPIError, LLMRateLimitError
+from contribai.core.notifier import TelegramNotifier
 
 logger = logging.getLogger(__name__)
 
 # Absolute safety cap — never exceed this regardless of random generation
-ABSOLUTE_MAX_PRS_PER_DAY = 6
+ABSOLUTE_MAX_PRS_PER_DAY = 12
 
 # Delay ranges (seconds) for real operation
 HUNT_DELAY_MIN = 1800   # 30 minutes
@@ -171,7 +172,6 @@ class SuperHumanLoop:
             target_repo_max_prs: Maximum PRs to create per targeted hunt.
         """
         from contribai.core.daily_log import DailyMarkdownLogger
-        from contribai.core.notifier import TelegramNotifier
 
         self._pipeline = pipeline
         self._memory = memory
@@ -183,6 +183,7 @@ class SuperHumanLoop:
         self._current_day: date | None = None
         self._iteration = 0
         self._quota_logged_today = False
+        self._took_lunch_today = False
         self._daily_log = DailyMarkdownLogger()
         self._notifier = TelegramNotifier(
             token=self._pipeline.config.notifications.telegram_token,
@@ -195,10 +196,14 @@ class SuperHumanLoop:
         if self._current_day != today:
             self._current_day = today
             self._daily_pr_target = min(
-                random.randint(1, 5),
+                random.randint(
+                    self._pipeline.config.github.min_daily_prs,
+                    self._pipeline.config.github.max_daily_prs,
+                ),
                 ABSOLUTE_MAX_PRS_PER_DAY,
             )
             self._prs_created_today = 0
+            self._took_lunch_today = False
             logger.info(_thought("WAKE_UP", limit=self._daily_pr_target))
             self._daily_log.log_new_day(self._daily_pr_target)
             self._quota_logged_today = False  # reset for new day
@@ -248,6 +253,17 @@ class SuperHumanLoop:
         Returns:
             Tuple of (prs_created, repos_analyzed).
         """
+        # ── CRIT-01 FIX: DB-level quota guard ──────────────────────────
+        # Prevents post-restart over-creation by checking the actual DB
+        # count, not just the in-memory counter.
+        actual_db_count = await self._memory.get_today_pr_count()
+        if actual_db_count >= self._daily_pr_target:
+            logger.warning(
+                "🛑 DB check caught quota limit inside _do_hunt "
+                "(DB=%d >= target=%d). Aborting hunt.",
+                actual_db_count, self._daily_pr_target,
+            )
+            return 0, 0
         logger.info(_thought("START_HUNT"))
         try:
             if self._target_repo_url:
@@ -306,47 +322,56 @@ class SuperHumanLoop:
 
     async def _do_patrol(self) -> None:
         """Execute a single PR Patrol action."""
-        from contribai.github.client import GitHubClient
-        from contribai.llm.provider import create_llm_provider
         from contribai.pr.patrol import PRPatrol
 
         logger.info(_thought("START_PATROL"))
         try:
-            pr_records = await self._memory.get_prs(status="open", limit=100)
+            # Fetch both open and pending PRs (idempotency: merged PRs are filtered in patrol())
+            open_prs = await self._memory.get_prs(status="open", limit=100)
+            pending_prs = await self._memory.get_prs(status="pending", limit=100)
+            pr_records = open_prs + pending_prs
             if not pr_records:
                 logger.info(_thought("PATROL_EMPTY"))
                 return
 
             logger.info("📬 Tìm thấy %d PR(s) đang mở, bắt đầu review...", len(pr_records))
 
-            github = GitHubClient(token=self._pipeline.config.github.token)
-            llm = create_llm_provider(self._pipeline.config.llm)
+            # Reuse persistent clients from pipeline — no connection churn
+            github = self._pipeline._github
+            llm = self._pipeline._llm
 
-            try:
-                patrol_engine = PRPatrol(github=github, llm=llm, memory=self._memory, notifier=self._notifier)
-                result = await patrol_engine.patrol(
-                    pr_records,
-                    dry_run=self._dry_run,
+            patrol_engine = PRPatrol(github=github, llm=llm, memory=self._memory, notifier=self._notifier)
+            result = await patrol_engine.patrol(
+                pr_records,
+                dry_run=self._dry_run,
+            )
+
+            # Notify merged PRs
+            for merged in result.prs_merged:
+                repo_name = merged["repo"]
+                pr_num = merged["pr_number"]
+                message = (
+                    f"🎉 [MERGED] Your PR #{pr_num} in {repo_name} has been "
+                    f"accepted and merged by the maintainers! 🚀"
                 )
-                logger.info(_thought(
-                    "PATROL_DONE",
-                    checked=result.prs_checked,
-                    fixes=result.fixes_pushed,
-                    replies=result.replies_sent,
-                ))
-                # ── Daily log: record patrol outcome ──
-                if result.prs_checked > 0:
-                    self._daily_log.log_patrol_result(
-                        prs_checked=result.prs_checked,
-                        fixes_pushed=result.fixes_pushed,
-                        replies_sent=result.replies_sent,
-                        ci_fixes=getattr(result, "ci_fixes_pushed", 0),
-                    )
-                else:
-                    self._daily_log.log_patrol_empty()
-            finally:
-                await github.close()
-                await llm.close()
+                await self._pipeline._safe_send_notification(message)
+
+            logger.info(_thought(
+                "PATROL_DONE",
+                checked=result.prs_checked,
+                fixes=result.fixes_pushed,
+                replies=result.replies_sent,
+            ))
+            # ── Daily log: record patrol outcome ──
+            if result.prs_checked > 0:
+                self._daily_log.log_patrol_result(
+                    prs_checked=result.prs_checked,
+                    fixes_pushed=result.fixes_pushed,
+                    replies_sent=result.replies_sent,
+                    ci_fixes=getattr(result, "ci_fixes_pushed", 0),
+                )
+            else:
+                self._daily_log.log_patrol_empty()
 
         except GitHubAPIError as exc:
             logger.error("🛡️ Patrol lỗi (GitHubAPIError): %s", exc)
@@ -372,9 +397,23 @@ class SuperHumanLoop:
         logger.info("🧠 Super Human Mode initialized — starting daily loop...")
         self._iteration = 0
 
-        # Start telegram listener in the background
+        # ── CRIT-01 FIX: Sync RAM counter from DB on startup ──────────
+        # After a restart, the in-memory counter is 0 but the DB knows
+        # how many PRs were already created today.  Seed from DB.
+        try:
+            self._prs_created_today = await self._memory.get_today_pr_count()
+            if self._prs_created_today > 0:
+                logger.info(
+                    "🔄 Synced PR counter from DB: %d PRs already created today",
+                    self._prs_created_today,
+                )
+        except Exception:
+            pass  # DB not yet initialized — counter stays 0
+
+        # Start telegram listener in the background with crash recovery
         if getattr(self, "_notifier", None):
-            asyncio.create_task(self._notifier.start_polling(self._memory))
+            self._poller_task = asyncio.create_task(self._notifier.start_polling(self._memory))
+            self._poller_task.add_done_callback(self._poller_done_callback)
 
         while True:
             self._iteration += 1
@@ -393,9 +432,12 @@ class SuperHumanLoop:
             remaining = max(0, self._daily_pr_target - self._prs_created_today)
 
             # ── Mandatory Lunch Break ───────────────────────────────────
-            now = datetime.now()
-            if not time_warp and now.hour == 12:
-                target_lunch_end = now.replace(hour=13, minute=0, second=0, microsecond=0)
+            # CRIT-02 FIX: Use UTC consistently, add _took_lunch_today
+            # guard to prevent re-trigger, sleep past 13:01 for safety.
+            now = datetime.now(UTC)
+            if not time_warp and now.hour == 12 and not self._took_lunch_today:
+                self._took_lunch_today = True
+                target_lunch_end = now.replace(hour=13, minute=1, second=0, microsecond=0)
                 seconds_until_1pm = (target_lunch_end - now).total_seconds()
                 if seconds_until_1pm > 0:
                     logger.info("Đến giờ nghỉ trưa rồi! Gấp máy đi ăn cơm, chiều 1h cày tiếp. 🍱")
@@ -559,3 +601,27 @@ class SuperHumanLoop:
         # Clean up persistent HTTP connections
         if self._notifier:
             await self._notifier.close()
+
+    def _poller_done_callback(self, task: asyncio.Task) -> None:
+        """Handle unexpected Telegram poller crashes with restart."""
+        if task.cancelled():
+            return
+        exc = task.exception()
+        if exc:
+            logger.error(
+                "Telegram poller crashed unexpectedly: %s. Restarting in 10s...",
+                exc,
+            )
+            # Schedule restart without blocking
+            asyncio.create_task(self._restart_poller())
+
+    async def _restart_poller(self) -> None:
+        """Restart the Telegram poller after an unexpected crash."""
+        await asyncio.sleep(10)
+        if getattr(self, "_notifier", None):
+            try:
+                self._poller_task = asyncio.create_task(self._notifier.start_polling(self._memory))
+                self._poller_task.add_done_callback(self._poller_done_callback)
+                logger.info("Telegram poller restarted successfully")
+            except Exception as exc:
+                logger.error("Failed to restart Telegram poller: %s", exc)

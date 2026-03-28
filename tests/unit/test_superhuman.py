@@ -36,40 +36,57 @@ def mock_pipeline():
     pipeline = MagicMock()
     pipeline.config = MagicMock()
     pipeline.config.github.token = "fake-token"
+    pipeline.config.github.max_prs_per_day = 10
+    pipeline.config.github.min_daily_prs = 3
+    pipeline.config.github.max_daily_prs = 10
     pipeline.config.llm = MagicMock()
+    pipeline.config.notifications.telegram_token = "fake-token"
+    pipeline.config.notifications.telegram_chat_id = "fake-chat"
     pipeline.hunt = AsyncMock(
         return_value=MagicMock(repos_analyzed=1, prs_created=0, pr_urls=[])
     )
     pipeline.run_single = AsyncMock(
-        return_value=MagicMock(repos_analyzed=1, prs_created=1, pr_urls=[])
+        return_value=MagicMock(repos_analyzed=1, prs_created=0, pr_urls=[])
     )
+    # DEBT-03 fix: _do_patrol now reuses persistent pipeline clients
+    pipeline._github = MagicMock()
+    pipeline._llm = MagicMock()
     return pipeline
 
 
 @pytest.fixture
-def loop(mock_pipeline, mock_memory):
-    """Create a SuperHumanLoop instance for testing."""
-    return SuperHumanLoop(mock_pipeline, mock_memory, dry_run=True)
+def loop(mock_pipeline, mock_memory, mock_notifier):
+    """Create a SuperHumanLoop instance for testing with a mocked notifier."""
+    # Patch TelegramNotifier at the definition site so SuperHumanLoop.__init__
+    # never creates a real httpx.AsyncClient or makes HTTP calls.
+    with patch(
+        "contribai.orchestrator.human.TelegramNotifier",
+        return_value=mock_notifier,
+    ):
+        instance = SuperHumanLoop(mock_pipeline, mock_memory, dry_run=True)
+    # Ensure the injected mock notifier is used (covers any late binding)
+    instance._notifier = mock_notifier
+    return instance
 
 
 class TestDailyTarget:
     """Tests for daily PR target generation."""
 
     def test_daily_target_within_bounds(self, loop):
-        """Daily target must always be between 1 and 5 (inclusive)."""
+        """Daily target must always be between 3 and 10 (inclusive)."""
         seen = set()
         for _ in range(200):
             loop._current_day = None  # force new-day check
             loop._new_day_check()
             seen.add(loop._daily_pr_target)
-            assert 1 <= loop._daily_pr_target <= 5
+            assert 3 <= loop._daily_pr_target <= 10
             assert loop._daily_pr_target <= ABSOLUTE_MAX_PRS_PER_DAY
 
         # With 200 rounds, we should see at least 2 distinct values
         assert len(seen) >= 2, f"Only saw targets: {seen}"
 
     def test_safety_cap_respected(self, loop):
-        """Daily target must never exceed ABSOLUTE_MAX_PRS_PER_DAY (6)."""
+        """Daily target must never exceed ABSOLUTE_MAX_PRS_PER_DAY (12)."""
         for _ in range(500):
             loop._current_day = None
             loop._new_day_check()
@@ -94,6 +111,10 @@ class TestActionSelection:
         loop._daily_pr_target = 3
         loop._prs_created_today = 5  # already exceeded target
 
+        # CRIT-01 FIX: The DB sync at startup reads get_today_pr_count.
+        # Return 5 so the RAM counter stays at 5 (matching the scenario).
+        mock_memory.get_today_pr_count = AsyncMock(return_value=5)
+
         hunt_called = False
         patrol_called = False
 
@@ -114,7 +135,8 @@ class TestActionSelection:
         assert not hunt_called, "Hunt should NOT be called when target is reached"
 
     @pytest.mark.asyncio
-    async def test_only_hunts_when_under_target(self, loop, mock_memory):
+    @patch("random.random", return_value=0.1)
+    async def test_only_hunts_when_under_target(self, mock_random, loop, mock_memory):
         """When under target, ONLY Hunt should run (no stochastic patrol)."""
         loop._daily_pr_target = 99  # will never be reached in 10 iterations
 
@@ -140,14 +162,18 @@ class TestActionSelection:
             "Patrol should NOT be called when under target"
 
     @pytest.mark.asyncio
-    async def test_controlled_target_uses_single_repo_path(self, mock_pipeline, mock_memory):
+    async def test_controlled_target_uses_single_repo_path(self, mock_pipeline, mock_memory, mock_notifier):
         """Targeted hunts should use run_single instead of discovery hunt."""
-        controlled_loop = SuperHumanLoop(
-            mock_pipeline,
-            mock_memory,
-            dry_run=True,
-            target_repo_url="https://github.com/hieuit095/gitvisualizer-ai",
-        )
+        with patch("contribai.orchestrator.human.TelegramNotifier", return_value=mock_notifier):
+            controlled_loop = SuperHumanLoop(
+                mock_pipeline,
+                mock_memory,
+                dry_run=True,
+                target_repo_url="https://github.com/hieuit095/gitvisualizer-ai",
+            )
+        # CRIT-01 FIX: DB guard checks target. Set a non-zero target
+        # so the guard doesn't abort before reaching run_single.
+        controlled_loop._daily_pr_target = 99
 
         await controlled_loop._do_hunt()
 
@@ -159,17 +185,21 @@ class TestActionSelection:
         mock_pipeline.hunt.assert_not_awaited()
 
     @pytest.mark.asyncio
-    async def test_controlled_hunt_calls_run_single_once(self, mock_pipeline, mock_memory):
+    async def test_controlled_hunt_calls_run_single_once(self, mock_pipeline, mock_memory, mock_notifier):
         """Targeted hunts call run_single exactly once (no retry logic)."""
         mock_pipeline.run_single = AsyncMock(
             return_value=MagicMock(repos_analyzed=1, prs_created=0, pr_urls=[])
         )
-        controlled_loop = SuperHumanLoop(
-            mock_pipeline,
-            mock_memory,
-            dry_run=True,
-            target_repo_url="https://github.com/hieuit095/gitvisualizer-ai",
-        )
+        with patch("contribai.orchestrator.human.TelegramNotifier", return_value=mock_notifier):
+            controlled_loop = SuperHumanLoop(
+                mock_pipeline,
+                mock_memory,
+                dry_run=True,
+                target_repo_url="https://github.com/hieuit095/gitvisualizer-ai",
+            )
+        # CRIT-01 FIX: DB guard checks target. Set a non-zero target
+        # so the guard doesn't abort before reaching run_single.
+        controlled_loop._daily_pr_target = 99
 
         await controlled_loop._do_hunt()
 
@@ -180,7 +210,8 @@ class TestPRCounter:
     """Tests for the strict PR counter logic."""
 
     @pytest.mark.asyncio
-    async def test_counter_increments_only_on_success(self, loop, mock_pipeline):
+    @patch("random.random", return_value=0.1)
+    async def test_counter_increments_only_on_success(self, mock_random, loop, mock_pipeline):
         """_prs_created_today should ONLY increment when _do_hunt returns > 0."""
         # Initialize the day first so _new_day_check() won't reset counter
         loop._new_day_check()
@@ -202,7 +233,8 @@ class TestPRCounter:
             f"Expected {expected_prs} PRs, got {loop._prs_created_today}"
 
     @pytest.mark.asyncio
-    async def test_counter_does_not_increment_on_error(self, loop, mock_pipeline):
+    @patch("random.random", return_value=0.1)
+    async def test_counter_does_not_increment_on_error(self, mock_random, loop, mock_pipeline):
         """Errors in _do_hunt should NOT increment _prs_created_today."""
         loop._daily_pr_target = 99
 
@@ -216,7 +248,8 @@ class TestPRCounter:
             "Counter should be 0 after all errors"
 
     @pytest.mark.asyncio
-    async def test_counter_does_not_increment_on_zero_prs(self, loop, mock_pipeline):
+    @patch("random.random", return_value=0.1)
+    async def test_counter_does_not_increment_on_zero_prs(self, mock_random, loop, mock_pipeline):
         """Scanning 50 repos without a PR means counter stays at 0."""
         loop._daily_pr_target = 99
 
@@ -230,7 +263,8 @@ class TestPRCounter:
             "Counter should be 0 when no PRs are created"
 
     @pytest.mark.asyncio
-    async def test_switches_to_patrol_after_target_met(self, loop, mock_pipeline):
+    @patch("random.random", return_value=0.1)
+    async def test_switches_to_patrol_after_target_met(self, mock_random, loop, mock_pipeline):
         """After reaching target, loop should switch to patrol-only."""
         # Initialize the day first so _new_day_check() won't reset counter
         loop._new_day_check()
@@ -357,7 +391,8 @@ class TestDynamicSleep:
             assert 1 <= delay <= 3, f"Time-warp hunt_dry delay was {delay}"
 
     @pytest.mark.asyncio
-    async def test_dry_hunt_uses_short_delay(self, loop, mock_pipeline):
+    @patch("random.random", return_value=0.1)
+    async def test_dry_hunt_uses_short_delay(self, mock_random, loop, mock_pipeline):
         """When _do_hunt returns (0, 0), delay should use hunt_dry."""
         loop._new_day_check()
         loop._daily_pr_target = 99
@@ -381,7 +416,8 @@ class TestDynamicSleep:
             f"Expected all hunt_dry delays, got {delays_used}"
 
     @pytest.mark.asyncio
-    async def test_productive_hunt_uses_normal_delay(self, loop, mock_pipeline):
+    @patch("random.random", return_value=0.1)
+    async def test_productive_hunt_uses_normal_delay(self, mock_random, loop, mock_pipeline):
         """When _do_hunt returns repos scanned, delay should use normal hunt."""
         loop._new_day_check()
         loop._daily_pr_target = 99
