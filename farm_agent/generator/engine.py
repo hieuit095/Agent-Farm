@@ -823,7 +823,7 @@ class ContributionGenerator:
         prefix = prefix_map.get(finding.type, "fix")
         # Clean title for branch name
         slug = re.sub(r"[^a-zA-Z0-9]+", "-", finding.title.lower()).strip("-")[:40]
-        return f"farm_agent/{prefix}/{slug}"
+        return f"{prefix}/{slug}"
 
     def _generate_pr_title(self, finding: Finding, *, guidelines=None) -> str:
         """Generate a PR title adapted to repo conventions."""

@@ -37,7 +37,7 @@ def good_contribution():
             )
         ],
         commit_message="fix(security): parameterize sql queries to prevent injection",
-        branch_name="farm_agent/fix/sql-injection",
+        branch_name="fix/sql-injection",
     )
 
 

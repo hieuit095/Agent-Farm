@@ -55,7 +55,7 @@ def bad_contribution(mock_finding):
         description="Did not fix syntax",
         changes=[FileChange(path="main.py", new_content="import syntax error")],
         commit_message="fix: bad syntax",
-        branch_name="farm_agent/fix/syntax-error",
+        branch_name="fix/syntax-error",
     )
 
 @pytest.fixture
