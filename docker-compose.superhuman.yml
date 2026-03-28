@@ -1,5 +1,3 @@
-version: "3.8"
-
 services:
   agent:
     build:
@@ -12,6 +10,6 @@ services:
     env_file: .env
     volumes:
       - ./config.yaml:/app/config.yaml:ro
-      - ./memory.db:/root/.farm_agent/memory.db:rw
+      - ./farm_agent_data:/root/.farm_agent:rw
       - ./logs:/app/logs:rw
       - /var/run/docker.sock:/var/run/docker.sock:rw

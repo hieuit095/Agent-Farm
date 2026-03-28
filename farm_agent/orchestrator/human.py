@@ -434,7 +434,7 @@ class SuperHumanLoop:
             # ── Mandatory Lunch Break ───────────────────────────────────
             # CRIT-02 FIX: Use UTC consistently, add _took_lunch_today
             # guard to prevent re-trigger, sleep past 13:01 for safety.
-            now = datetime.now(UTC)
+            now = datetime.now()  # LOCAL time — UTC+7 19:00 was incorrectly triggering lunch (UTC hour=12)
             if not time_warp and now.hour == 12 and not self._took_lunch_today:
                 self._took_lunch_today = True
                 target_lunch_end = now.replace(hour=13, minute=1, second=0, microsecond=0)
