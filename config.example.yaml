@@ -55,7 +55,7 @@ discovery:
     - python
     - javascript
     - typescript
-  stars_range: [50, 10000]
+  stars_range: [1000, 20000]
   min_last_activity_days: 30
   require_contributing_guide: false
   topics: []
