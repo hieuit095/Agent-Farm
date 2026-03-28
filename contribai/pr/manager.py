@@ -233,37 +233,38 @@ class PRManager:
         return f"{prefix}/{slug}"
 
     def _generate_pr_body(self, contribution: Contribution) -> str:
-        """Generate a natural-looking PR description (no tool branding)."""
+        """Generate a PR description that sounds like a tired senior developer.
+
+        Rules:
+        - NO AI fluff: no "This PR aims to", "In this pull request", etc.
+        - BE LAZY BUT ACCURATE: 2-4 sentences max
+        - FOCUS ON THE WHY: explain why the bug happened and impact, not how code works
+        - TONE: casual, direct, lowercase OK for minor things
+        - FORMATTING: no heavy markdown, minimal bullets
+        """
         finding = contribution.finding
 
-        # Files changed summary
-        files_list = "\n".join(
-            f"- `{c.path}` {'(new)' if c.is_new_file else '(modified)'}"
-            for c in contribution.changes
+        # Files changed summary (compact, no heavy formatting)
+        files_list = ", ".join(
+            c.path.split("/")[-1] for c in contribution.changes
         )
 
-        body = f"""## Problem
+        # Build a tired-dev style body: short, direct, no fluff
+        body_lines = [
+            finding.description,
+        ]
 
-{finding.description}
+        # Add impact/root cause if we have it in the suggestion
+        if finding.suggestion:
+            body_lines.append(f"Fix: {finding.suggestion}")
 
-**Severity**: `{finding.severity.value}`
-**File**: `{finding.file_path}`
+        # Minimal file list
+        body_lines.append(f"Affected: {files_list}")
 
-## Solution
+        # Resolves placeholder (caller will substitute)
+        body_lines.append("Closes N/A")
 
-{finding.suggestion or contribution.description}
-
-## Changes
-
-{files_list}
-
-## Testing
-
-- [x] Existing tests pass
-- [x] Manual review completed
-- [x] No new warnings/errors introduced
-"""
-        return body
+        return "\n\n".join(body_lines)
 
     async def get_pr_status(self, owner: str, repo: str, pr_number: int) -> PRStatus:
         """Check the current status of a PR."""

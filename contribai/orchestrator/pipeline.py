@@ -718,11 +718,14 @@ class ContribPipeline:
         pre_farming_count = len(analysis.findings)
         high_impact_findings = []
         for finding in analysis.findings:
-            # Gate 1: Drop TRIVIAL / LOW impact
-            if finding.impact_level in (ImpactLevel.TRIVIAL, ImpactLevel.LOW):
+            # Gate 1: Drop TRIVIAL / LOW / MEDIUM impact — Only HIGH or CRITICAL allowed
+            if finding.impact_level in (
+                ImpactLevel.TRIVIAL,
+                ImpactLevel.LOW,
+                ImpactLevel.MEDIUM,
+            ):
                 logger.info(
-                    "🗑️ Bỏ qua lỗi '%s' vì mức độ tác động quá thấp (%s). "
-                    "Tránh spam repo.",
+                    "Only HIGH or CRITICAL allowed: '%s' has impact_level=%s",
                     finding.title,
                     finding.impact_level.value,
                 )

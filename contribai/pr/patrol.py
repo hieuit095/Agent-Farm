@@ -44,57 +44,52 @@ OUR_REPLY_MARKERS = [
 GITHUB_REPLIES: dict[str, list[str]] = {
     # After pushing a code fix in response to review feedback
     "FIX_APPLIED": [
-        "Good catch! I just pushed a commit to address this. Let me know if it looks better now.",
-        "Updated in the latest commit. Thanks for pointing it out!",
-        "Done — I've adjusted the logic as you suggested.",
-        "Makes sense, I've fixed this in the newest push.",
-        "Great feedback, just pushed the update. Happy to iterate further if needed.",
-        "Agreed, that's cleaner. Pushed the change just now.",
+        "Good catch, updated.",
+        "Fixed in latest commit.",
+        "Done, pushed the fix.",
+        "Addressed — pushed.",
+        "Updated.",
+        "Pushed. Let me know.",
     ],
     # Commit messages for code fixes
     "COMMIT_FIX": [
         "fix: {summary}",
-        "fix: update based on review — {summary}",
-        "fix: apply reviewer suggestion — {summary}",
-        "fix: adjust logic per feedback — {summary}",
+        "fix: review feedback — {summary}",
+        "fix: address reviewer comment",
     ],
     # Prepended to LLM-generated question answers
     "QUESTION_OPENER": [
-        "Great question!",
-        "Good question, happy to clarify.",
-        "Sure thing, let me explain.",
-        "Thanks for asking!",
-        "Yeah, fair point — here's the reasoning:",
+        "Yeah,",
+        "Sure,",
+        "Fair point,",
     ],
     # Appended to LLM-generated question answers
     "QUESTION_CLOSER": [
-        "Let me know if that clears things up!",
-        "Happy to discuss further if anything's unclear.",
-        "Hope that helps — feel free to follow up.",
+        "lmk if that works.",
+        "hope that makes sense.",
+        "let me know if you need more detail.",
     ],
     # When closing a PR due to hostile rejection
     "HOSTILE_CLOSE": [
-        "Understood, closing this PR. Apologies for the noise — this repo won't be targeted again.",
-        "Fair enough, I'll close this out. Sorry for the trouble, and this repo is noted.",
-        "Got it, closing now. Apologies for any inconvenience.",
+        "Understood, closing this PR. Won't target this repo again.",
+        "Fair enough, closing now.",
+        "Got it, closing.",
     ],
     # Comment after pushing a CI fix
     "CI_FIX_APPLIED": [
-        "Looks like `{check_name}` was failing — I pushed a fix for `{file_path}`. Hopefully that resolves it.",  # noqa: E501
-        "Spotted the `{check_name}` failure and pushed a fix in `{file_path}`. Let me know if CI goes green now.",  # noqa: E501
-        "Just pushed a fix for the `{check_name}` failure (updated `{file_path}`). Fingers crossed!",  # noqa: E501
-        "CI was unhappy with `{check_name}` — I've patched `{file_path}` in the latest commit.",
+        "`{check_name}` was failing — pushed a fix for `{file_path}`.",  # noqa: E501
+        "Spotted the `{check_name}` failure and patched `{file_path}`.",  # noqa: E501
+        "Fixed `{check_name}` failure in `{file_path}`.",  # noqa: E501
     ],
     # When closing PR after exhausting CI fix attempts
     "CI_LIMIT_CLOSE": [
-        "CI keeps failing after {attempts} fix attempts on my end. Closing this to avoid further noise — sorry about that!",  # noqa: E501
-        "I've tried to fix CI {attempts} times but it's still failing. Going to close this PR to keep things clean. Apologies!",  # noqa: E501
-        "After {attempts} attempts I haven't been able to get CI green. Closing this out — sorry for the churn.",  # noqa: E501
+        "CI still failing after {attempts} attempts. Closing to avoid noise.",  # noqa: E501
+        "Couldn't get CI green after {attempts} tries. Closing.",  # noqa: E501
     ],
     # Surrender: max discussion retries reached
     "SURRENDER": [
-        "I've tried a few different approaches but I seem to be missing the mark, and I don't want to waste your time with more automated commits. I'll close this PR for now so you can keep your queue clean. Thanks for the reviews!",  # noqa: E501
-        "Looks like I'm having trouble getting this exactly right after a few attempts. I'll go ahead and close this PR so I don't create unnecessary noise. Thanks for your patience! 🙏",
+        "Can't seem to get this right after a few tries. Closing so I don't pile on. Thanks for the reviews.",  # noqa: E501
+        "Taking this as a signal I'm off base here. Closing — thanks for the feedback.",
     ],
     # Commit messages for CI fixes
     "COMMIT_CI_FIX": [
@@ -263,6 +258,19 @@ class PRPatrol:
                         await self._memory.update_pr_status(
                             pr["repo"], pr["pr_number"], "merged",
                         )
+                    # Clean up the branch from the fork
+                    head_node = pr_data.get("head", {})
+                    branch_name = head_node.get("ref")
+                    fork_owner = head_node.get("repo", {}).get("owner", {}).get("login")
+                    fork_repo = head_node.get("repo", {}).get("name")
+                    if branch_name and fork_owner and fork_repo:
+                        try:
+                            await self._github.delete_branch(fork_owner, fork_repo, branch_name)
+                        except Exception as exc:
+                            logger.warning(
+                                "  ⚠️ Could not delete branch %s on %s/%s: %s",
+                                branch_name, fork_owner, fork_repo, exc,
+                            )
                     continue
 
                 result.prs_checked += 1
@@ -1009,15 +1017,14 @@ class PRPatrol:
                 f"PR title: {pr_title}\n"
                 f"PR description:\n{pr_body[:2000]}\n\n"
                 f"Question from @{feedback.author}:\n> {feedback.body}\n\n"
-                f"Write a concise, helpful reply (2-4 sentences). "
-                f"Be polite and professional. Explain the reasoning behind our change."
+                f"Write a concise reply (1-3 sentences). Be direct. No apologies, no excessive politeness."
             )
 
             response = await self._llm.complete(
                 prompt,
                 system=(
-                    "You are a developer responding to a code review question. "
-                    "Be concise, professional, and helpful."
+                    "You are a tired senior developer answering a code review question. "
+                    "Be brief and direct. No fluff, no apologies."
                 ),
                 temperature=0.3,
             )

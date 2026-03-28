@@ -638,7 +638,8 @@ classifications:
         call_args = github.close_pull_request.call_args
         assert call_args.args == ("hostile-owner", "hostile-repo", 42)
         comment_lower = call_args.kwargs["comment"].lower()
-        assert "apolog" in comment_lower or "sorry" in comment_lower
+        # Tired-dev tone: direct, no excessive apologies
+        assert "closing" in comment_lower
 
         # Verify result counter
         assert result.prs_closed_hostile == 1

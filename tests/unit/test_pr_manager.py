@@ -44,14 +44,15 @@ def sample_contribution():
 
 
 class TestPRBody:
-    def test_contains_problem(self, pr_manager, sample_contribution):
+    def test_contains_description(self, pr_manager, sample_contribution):
+        # Tired-dev: direct description, no "Problem" header fluff
         body = pr_manager._generate_pr_body(sample_contribution)
-        assert "Problem" in body
         assert "Parameterize queries" in body
 
-    def test_contains_severity(self, pr_manager, sample_contribution):
+    def test_contains_affected_files(self, pr_manager, sample_contribution):
+        # Tired-dev: compact "Affected: files" instead of bullet list
         body = pr_manager._generate_pr_body(sample_contribution)
-        assert "high" in body
+        assert "Affected:" in body
 
     def test_contains_files(self, pr_manager, sample_contribution):
         body = pr_manager._generate_pr_body(sample_contribution)
@@ -62,13 +63,12 @@ class TestPRBody:
         # Stealth mode: no ContribAI branding in PR body
         assert "ContribAI" not in body
 
-    def test_contains_testing_checklist(self, pr_manager, sample_contribution):
+    def test_no_ai_fluff_headers(self, pr_manager, sample_contribution):
+        # Tired-dev: no heavy markdown headers ("Problem", "Solution", "Testing")
         body = pr_manager._generate_pr_body(sample_contribution)
-        assert "Testing" in body
-
-    def test_contains_solution(self, pr_manager, sample_contribution):
-        body = pr_manager._generate_pr_body(sample_contribution)
-        assert "Solution" in body
+        assert "Problem" not in body
+        assert "Solution" not in body
+        assert "Testing" not in body
 
     def test_docs_emoji(self, pr_manager):
         finding = Finding(

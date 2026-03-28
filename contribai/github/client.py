@@ -704,6 +704,21 @@ class GitHubClient:
             logger.warning("Failed to download CI log for job %d: %s", check_run_id, exc)
             return ""
 
+    async def delete_branch(self, owner: str, repo: str, branch_name: str) -> None:
+        """Delete a branch by deleting its Git ref.
+
+        Gracefully handles 404 and 422 errors (branch already deleted or not found)
+        by logging and returning without raising.
+        """
+        try:
+            await self._delete(f"/repos/{owner}/{repo}/git/refs/heads/{branch_name}")
+            logger.info("Deleted branch %s on %s/%s", branch_name, owner, repo)
+        except GitHubAPIError as exc:
+            if exc.status_code in (404, 422):
+                logger.debug("Branch already deleted or not found: %s/%s/%s", owner, repo, branch_name)
+            else:
+                raise
+
     async def close_pull_request(
         self,
         owner: str,

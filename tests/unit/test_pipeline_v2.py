@@ -348,7 +348,7 @@ class TestGenerationContext:
             description="Improve node affordance",
             file_path="src/components/nodes/FolderNode.tsx",
             confidence=0.8,
-            impact_level=ImpactLevel.MEDIUM,
+            impact_level=ImpactLevel.HIGH,
         )
 
         sample_pipeline._github = AsyncMock()
