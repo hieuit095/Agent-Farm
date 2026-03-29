@@ -511,6 +511,109 @@ class GitHubClient:
         """Get the authenticated user's profile."""
         return await self._get("/user")
 
+    async def fetch_user_merged_prs(self, username: str, per_page: int = 100) -> list[dict]:
+        """Fetch all merged PRs authored by a given user via GitHub search API.
+
+        Uses GET /search/issues?q=author:{username}+is:pr+is:merged
+        which returns merged PRs across all repos (up to GitHub's search limit).
+
+        Returns a list of dicts with keys: repo, pr_number, title, html_url,
+        merged_at, state.
+        """
+        results: list[dict] = []
+        page = 1
+        while True:
+            params = {
+                "q": f"author:{username}+is:pr+is:merged",
+                "per_page": per_page,
+                "page": page,
+                "sort": "updated",
+                "order": "desc",
+            }
+            data = await self._get("/search/issues", params=params)
+            items: list[dict] = data.get("items", [])
+            if not items:
+                break
+
+            for item in items:
+                # Extract repo from 'repository_url'
+                repo_url: str = item.get("repository_url", "")
+                # Format: https://api.github.com/repos/owner/name
+                parts = repo_url.rstrip("/").split("/")
+                repo = "/".join(parts[-2:]) if len(parts) >= 2 else ""
+
+                results.append({
+                    "repo": repo,
+                    "pr_number": item.get("number"),
+                    "title": item.get("title", ""),
+                    "html_url": item.get("html_url", ""),
+                    "merged_at": item.get("pull_request", {}).get("merged_at"),
+                    "state": item.get("state", "closed"),
+                })
+
+            # GitHub search caps at 1000 results (10 pages of 100)
+            if len(items) < per_page or page >= 10:
+                break
+            page += 1
+
+        logger.info(
+            "fetch_user_merged_prs(%s): found %d merged PRs across %d repos",
+            username,
+            len(results),
+            len({r["repo"] for r in results}),
+        )
+        return results
+
+    async def fetch_user_open_prs(self, username: str, per_page: int = 100) -> list[dict]:
+        """Fetch all OPEN PRs authored by a given user via GitHub search API.
+
+        Uses GET /search/issues?q=author:{username}+is:pr+is:open
+        which returns open PRs across all repos (up to GitHub's search limit).
+
+        Returns a list of dicts with keys:
+        repo, pr_number, title, body, html_url, head_branch, state.
+        """
+        results: list[dict] = []
+        page = 1
+        while True:
+            params = {
+                "q": f"author:{username} is:pr is:open",
+                "per_page": per_page,
+                "page": page,
+                "sort": "updated",
+                "order": "desc",
+            }
+            data = await self._get("/search/issues", params=params)
+            items: list[dict] = data.get("items", [])
+            if not items:
+                break
+
+            for item in items:
+                repo_url: str = item.get("repository_url", "")
+                parts = repo_url.rstrip("/").split("/")
+                repo = "/".join(parts[-2:]) if len(parts) >= 2 else ""
+
+                results.append({
+                    "repo": repo,
+                    "pr_number": item.get("number"),
+                    "title": item.get("title", ""),
+                    "body": item.get("body", "") or "",
+                    "html_url": item.get("html_url", ""),
+                    "head_branch": item.get("pull_request", {}).get("head", {}).get("ref", ""),
+                    "state": item.get("state", "open"),
+                })
+
+            if len(items) < per_page or page >= 10:
+                break
+            page += 1
+
+        logger.info(
+            "fetch_user_open_prs(%s): found %d open PRs",
+            username,
+            len(results),
+        )
+        return results
+
     # ── Helpers ────────────────────────────────────────────────────────────
 
     async def list_pull_requests(

@@ -25,6 +25,8 @@ from farm_agent.core.models import (
 from farm_agent.llm.context import build_generator_system_prompt
 from farm_agent.llm.provider import LLMProvider
 from farm_agent.tools.protocol import READ_FILE_TOOL_SCHEMA, GitHubTool
+from farm_agent.core.rag import RepoIndexer
+from farm_agent.generator.reviewer import ReviewerAgent
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +43,8 @@ class ContributionGenerator:
         self._memory = memory  # Optional Memory for repo_preferences
         # Configurable patch retry limit (from PipelineConfig or default)
         self._max_patch_retries = getattr(pipeline_config, "max_patch_retries", 2) if pipeline_config else 2
+        # Adversarial Reviewer — completely independent entity with its own LLM
+        self._reviewer = ReviewerAgent(llm, max_review_tokens=800)
 
     async def generate(
         self,
@@ -153,6 +157,24 @@ class ContributionGenerator:
                 logger.warning("No valid changes parsed for finding: %s", finding.title)
                 return None
 
+            # ── Sanity Check: Abort if patch is a no-op ──────────────────────
+            for change in changes:
+                if change.is_new_file:
+                    continue  # new files are OK
+                # Check if the change only touches comments/whitespace (replace === search)
+                if hasattr(change, "edits") and change.edits:
+                    for edit in change.edits:
+                        search = getattr(edit, "search", "") or ""
+                        replace = getattr(edit, "replace", "") or ""
+                        # Both empty → no-op; Both identical → no functional change
+                        if search == replace:
+                            logger.warning(
+                                "🗑️ Sanity check FAILED for '%s' — patch is a no-op "
+                                "(search == replace). Aborting PR.",
+                                finding.title,
+                            )
+                            return None
+            # ──────────────────────────────────────────────────────────────────
 
             # 4: Generate commit message
             commit_msg = await self._generate_commit_message(finding, changes, context)
@@ -172,11 +194,79 @@ class ContributionGenerator:
                 generated_at=datetime.now(UTC),
             )
 
-            # 6: Self-review
-            review_passed = await self._self_review(contribution, context)
-            if not review_passed:
-                logger.warning("Self-review failed for: %s", finding.title)
-                return None
+            # 6: Adversarial review loop — paranoid Senior Security Auditor
+            # If the reviewer REJECTs, the Generator rewrites with the critique.
+            # This is a completely SEPARATE entity from the Generator — no shared history.
+            review_attempt = 0
+            max_review_retries = self._config.max_review_retries
+            latest_contribution = contribution
+            latest_changes = changes
+
+            while review_attempt <= max_review_retries:
+                verdict = await self._reviewer.review(latest_contribution, context)
+                if verdict["decision"] == "APPROVE":
+                    logger.info(
+                        "Adversarial review PASSED for: %s (attempt %d)",
+                        finding.title,
+                        review_attempt + 1,
+                    )
+                    break
+
+                critique = verdict["critique"]
+                logger.warning(
+                    "🔴 Adversarial review REJECTED for: %s — attempt %d/%d",
+                    finding.title,
+                    review_attempt + 1,
+                    max_review_retries + 1,
+                )
+                if critique:
+                    logger.info("Critique: %s", critique[:300])
+
+                if review_attempt >= max_review_retries:
+                    # All retries exhausted — discard this finding to protect the repo
+                    logger.error(
+                        "🛑 Adversarial Review Failed for '%s' — discarding finding after %d attempts. "
+                        "The patch was not good enough to pass our security audit.",
+                        finding.title,
+                        max_review_retries + 1,
+                    )
+                    return None
+
+                # Rewrite with critique appended to the prompt
+                review_attempt += 1
+                logger.info("Rewriting patch with critique (attempt %d)...", review_attempt)
+
+                # Build rewrite prompt: append critique to original generation prompt
+                rewrite_prompt = self._build_generation_prompt(
+                    finding, context,
+                    repo_prefs=repo_prefs,
+                    adversarial_critique=critique,
+                )
+                response = await self._agentic_generate(
+                    rewrite_prompt,
+                    system=system,
+                    github_client=github_client,
+                    context=context,
+                )
+                latest_changes = self._parse_changes(response, context)
+                if not latest_changes:
+                    logger.warning("Rewrite attempt produced no valid changes for: %s", finding.title)
+                    return None
+
+                # Regenerate commit message and branch name for the rewritten patch
+                new_commit_msg = await self._generate_commit_message(finding, latest_changes, context)
+                new_branch_name = self._generate_branch_name(finding)
+
+                latest_contribution = Contribution(
+                    finding=finding,
+                    contribution_type=finding.type,
+                    title=self._generate_pr_title(finding, guidelines=guidelines),
+                    description=finding.description,
+                    changes=latest_changes,
+                    commit_message=new_commit_msg,
+                    branch_name=new_branch_name,
+                    generated_at=datetime.now(UTC),
+                )
 
             logger.info(
                 "Generated contribution: %s (%d files changed)",
@@ -320,7 +410,8 @@ class ContributionGenerator:
         )
 
     def _build_generation_prompt(
-        self, finding: Finding, context: RepoContext, *, repo_prefs: dict | None = None
+        self, finding: Finding, context: RepoContext, *, repo_prefs: dict | None = None,
+        adversarial_critique: str | None = None,
     ) -> str:
         """Build the generation prompt based on finding type."""
         # Get the current file content if available
@@ -406,6 +497,17 @@ class ContributionGenerator:
             for fpath, fcontent in other_affected_files.items():
                 prompt += f"### {fpath}\n```\n{fcontent[:3000]}\n```\n\n"
 
+        # Adversarial critique injection — append to rewrite prompts
+        if adversarial_critique:
+            prompt += (
+                f"\n\n"
+                f"## 🔴 ADVERSARIAL REVIEWER CRITIQUE (Must Fix Before Submitting)\n\n"
+                f"The Senior Security Auditor REJECTED your previous patch with this feedback:\n\n"
+                f"> {adversarial_critique}\n\n"
+                f"Fix ALL issues raised above. Rewrite the patch to address each point exactly.\n"
+                f"Do NOT repeat the same mistakes. Be thorough and precise.\n\n"
+            )
+
         prompt += (
             "\n## Output Format\n"
             "Return ONLY a JSON object matching the requested schema.\n"
@@ -475,39 +577,83 @@ class ContributionGenerator:
         return prompt
 
     def _find_cross_file_instances(self, finding: Finding, context: RepoContext) -> dict[str, str]:
-        """Find other files in the repo with the same issue pattern.
+        """Find other files in the repo with the same issue pattern (X-Ray Vision via RAG).
 
-        Searches relevant_files for code patterns similar to the primary
-        finding's issue (e.g., same non-null assertion, same unsafe pattern).
-        Returns {path: content} for files that likely have the same issue.
+        Uses ChromaDB semantic search to find code chunks related to the finding.
+        Falls back to the old regex approach if ChromaDB is unavailable.
         """
         if not finding.file_path or not context.relevant_files:
             return {}
 
-        # Extract key terms from the finding to search for
-        keywords = self._extract_search_patterns(finding)
-        if not keywords:
-            return {}
+        # Build a semantic query from the finding
+        query_parts = [finding.title]
+        if finding.description:
+            query_parts.append(finding.description[:200])
+        if finding.suggestion:
+            query_parts.append(finding.suggestion[:200])
+        query_text = " ".join(query_parts)
 
-        other_files: dict[str, str] = {}
-        for fpath, content in context.relevant_files.items():
-            if fpath == finding.file_path:
-                continue
-            # Check if any keyword pattern appears in this file
-            content_lower = content.lower()
-            matches = sum(1 for kw in keywords if kw.lower() in content_lower)
-            if matches >= 2:  # At least 2 pattern matches = likely same issue
-                other_files[fpath] = content
-                if len(other_files) >= 3:  # Cap at 3 extra files to limit prompt size
+        indexer = RepoIndexer()
+
+        try:
+            # Index all relevant files for semantic search
+            chunk_count = indexer.index_repo(context.repo.full_name, context.relevant_files)
+            if chunk_count == 0:
+                return {}
+
+            # Query for semantically related code chunks
+            results = indexer.query_context(query_text, n_results=8)
+
+            if not results:
+                return {}
+
+            # Group by file and deduplicate
+            other_files: dict[str, str] = {}
+            seen_files: set[str] = set()
+            for r in results:
+                fpath = r["file_path"]
+                if fpath == finding.file_path or fpath in seen_files:
+                    continue
+                if len(other_files) >= 3:
                     break
+                other_files[fpath] = r["content"]
+                seen_files.add(fpath)
 
-        if other_files:
-            logger.info(
-                "🔗 Found same pattern in %d other file(s): %s",
-                len(other_files),
-                ", ".join(other_files.keys()),
-            )
-        return other_files
+            if other_files:
+                logger.info(
+                    "🔗 [RAG X-Ray] Found related context in %d other file(s): %s",
+                    len(other_files),
+                    ", ".join(other_files.keys()),
+                )
+            return other_files
+
+        except Exception as exc:
+            logger.debug("RAG cross-file search failed, falling back to regex: %s", exc)
+            # Fallback to old regex-based approach
+            keywords = self._extract_search_patterns(finding)
+            if not keywords:
+                return {}
+
+            other_files: dict[str, str] = {}
+            for fpath, content in context.relevant_files.items():
+                if fpath == finding.file_path:
+                    continue
+                content_lower = content.lower()
+                matches = sum(1 for kw in keywords if kw.lower() in content_lower)
+                if matches >= 2:
+                    other_files[fpath] = content
+                    if len(other_files) >= 3:
+                        break
+
+            if other_files:
+                logger.info(
+                    "🔗 [RAG fallback] Found same pattern in %d other file(s): %s",
+                    len(other_files),
+                    ", ".join(other_files.keys()),
+                )
+            return other_files
+        finally:
+            indexer.destroy()
 
     @staticmethod
     def _extract_search_patterns(finding: Finding) -> list[str]:

@@ -2,7 +2,7 @@
 
 import asyncio
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -377,6 +377,16 @@ class TestGenerationContext:
             )
         )
         sample_pipeline._generator.generate = AsyncMock(return_value=None)
+        sample_pipeline._pr_manager = MagicMock()
+        sample_pipeline._pr_manager._generate_issue_body = MagicMock(
+            return_value="If the team thinks this is worth addressing, I can put together a PR."
+        )
+        # Route B (issue-first): mock create_issue so no real GitHub API call
+        sample_pipeline._github.create_issue = AsyncMock(
+            return_value={"number": 42, "html_url": "https://github.com/testowner/testrepo/issues/42"}
+        )
+        # Mock record_issue_proposal to avoid DB calls
+        sample_pipeline._memory.record_issue_proposal = AsyncMock()
 
         await sample_pipeline._process_repo(
             sample_repo,

@@ -320,6 +320,121 @@ class SuperHumanLoop:
             logger.error("🦅 HUNT failed (unexpected error): %s", exc)
             raise
 
+    # ── Familiar Grounds Sync ───────────────────────────────────────────────
+
+    async def _sync_historical_friendly_repos(self) -> int:
+        """Sync historically merged PRs from GitHub into the local friendly-repos DB.
+
+        Fetches all merged PRs from the authenticated GitHub account,
+        filters by the configured star range (config.discovery.stars_range),
+        and inserts them into submitted_prs with status='merged'.
+
+        Uses INSERT OR IGNORE so re-running is idempotent — no duplicates.
+
+        Returns the number of new repos inserted.
+        """
+        import time as time_module
+
+        min_stars, max_stars = self.config.discovery.stars_range
+
+        # Get the authenticated username
+        try:
+            user: dict = await self._github.get_authenticated_user()
+            username: str = user.get("login", "")
+        except Exception as exc:
+            logger.warning("Cannot sync friendly repos — could not get authenticated user: %s", exc)
+            return 0
+
+        if not username:
+            logger.warning("Cannot sync friendly repos — empty username")
+            return 0
+
+        logger.info("🏠 Familiar Grounds sync: fetching merged PRs for @%s ...", username)
+        start = time_module.time()
+
+        try:
+            merged_prs = await self._github.fetch_user_merged_prs(username)
+        except Exception as exc:
+            logger.warning("GitHub search API failed during friendly-repos sync: %s", exc)
+            return 0
+
+        logger.info("🏠 Familiar Grounds sync: fetched %d merged PRs, filtering by ★ %d-%d ...", len(merged_prs), min_stars, max_stars)
+
+        # Deduplicate by repo (one entry per repo, take the most recent merged PR)
+        repo_map: dict[str, dict] = {}
+        for pr in merged_prs:
+            repo = pr.get("repo", "")
+            if not repo:
+                continue
+            merged_at = pr.get("merged_at") or ""
+            if repo not in repo_map or merged_at > repo_map[repo].get("merged_at", ""):
+                repo_map[repo] = pr
+
+        new_count = 0
+        now_utc = datetime.now(UTC).isoformat()
+
+        for repo_full_name, pr in repo_map.items():
+            owner = repo_full_name.split("/")[0]
+            stars = 0
+
+            # Check repo stars to respect the configured star range
+            try:
+                repo_details = await self._github.get_repo_details(owner, repo_full_name.split("/")[1])
+                stars = getattr(repo_details, "stars", 0) or 0
+            except Exception:
+                # If we can't get stars, skip the repo
+                logger.debug("Could not fetch stars for %s — skipping", repo_full_name)
+                continue
+
+            if not (min_stars <= stars <= max_stars):
+                logger.debug(
+                    "🏠 Skipping %s (stars=%d outside range %d-%d)",
+                    repo_full_name,
+                    stars,
+                    min_stars,
+                    max_stars,
+                )
+                continue
+
+            # Insert or ignore (idempotent)
+            try:
+                await self._memory._db.execute(
+                    """INSERT OR IGNORE INTO submitted_prs
+                       (repo, pr_number, pr_url, title, type, status, created_at, updated_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (
+                        repo_full_name,
+                        pr.get("pr_number", 0),
+                        pr.get("html_url", ""),
+                        pr.get("title", ""),
+                        "code_quality",  # default type for historical merged PRs
+                        "merged",
+                        pr.get("merged_at") or now_utc,
+                        now_utc,
+                    ),
+                )
+                # Check if actually inserted (row_count > 0 means new)
+                cursor = await self._memory._db.execute(
+                    "SELECT changes() AS c FROM submitted_prs WHERE repo = ? AND pr_number = ?",
+                    (repo_full_name, pr.get("pr_number", 0)),
+                )
+                row = await cursor.fetchone()
+                if row and row[0] > 0:
+                    new_count += 1
+                    logger.info("🏠 Friendly repo added: %s (★ %d)", repo_full_name, stars)
+            except Exception as exc:
+                logger.debug("Failed to insert %s into submitted_prs: %s", repo_full_name, exc)
+
+        await self._memory._db.commit()
+        elapsed = time_module.time() - start
+        logger.info(
+            "🏠 Familiar Grounds sync complete: %d new repos inserted (%d total scanned) in %.1fs",
+            new_count,
+            len(repo_map),
+            elapsed,
+        )
+        return new_count
+
     async def _do_patrol(self) -> None:
         """Execute a single PR Patrol action."""
         from farm_agent.pr.patrol import PRPatrol
@@ -415,8 +530,27 @@ class SuperHumanLoop:
             self._poller_task = asyncio.create_task(self._notifier.start_polling(self._memory))
             self._poller_task.add_done_callback(self._poller_done_callback)
 
+        # ── Familiar Grounds: sync historical merged PRs on startup ─────────
+        # Runs on startup and then every 24 hours to populate friendly repos
+        # from the GitHub account's merged PR history.
+        self._last_sync_time: float = 0.0
+        try:
+            await self._sync_historical_friendly_repos()
+        except Exception as exc:
+            logger.debug("Startup friendly-repos sync failed (non-critical): %s", exc)
+        self._last_sync_time = __import__("time").time()
+
         while True:
             self._iteration += 1
+
+            # ── 24-hour friendly-repos sync ─────────────────────────────
+            elapsed = __import__("time").time() - self._last_sync_time
+            if elapsed > 86400:
+                try:
+                    await self._sync_historical_friendly_repos()
+                except Exception as exc:
+                    logger.debug("24h friendly-repos sync failed (non-critical): %s", exc)
+                self._last_sync_time = __import__("time").time()
 
             # ── Time-warp exit gate ─────────────────────────────────────
             if time_warp and self._iteration > WARP_MAX_ITERATIONS:

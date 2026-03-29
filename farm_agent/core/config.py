@@ -101,6 +101,7 @@ class ContributionConfig(BaseModel):
     run_tests_before_pr: bool = True
     commit_convention: Literal["conventional", "angular", "none"] = "conventional"
     pr_description_style: Literal["minimal", "detailed"] = "detailed"
+    max_review_retries: int = 2
 
 
 class DiscoveryConfig(BaseModel):
@@ -116,7 +117,7 @@ class DiscoveryConfig(BaseModel):
 class StorageConfig(BaseModel):
     """Storage / memory configuration."""
 
-    db_path: str = "~/.farm_agent/memory.db"
+    db_path: str = "data/memory.db"
     cache_ttl_hours: int = 24
 
     @property
@@ -152,6 +153,7 @@ class PipelineConfig(BaseModel):
     max_ci_retries: int = 3
     max_discussion_replies: int = 3
     max_patch_retries: int = 2
+    max_review_retries: int = 2
 
 
 class QuotaConfig(BaseModel):

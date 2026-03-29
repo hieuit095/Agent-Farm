@@ -266,6 +266,35 @@ class PRManager:
 
         return "\n\n".join(body_lines)
 
+    def _generate_issue_body(self, contribution: Contribution) -> str:
+        """Generate a human-like Issue-First body — lazy senior dev style.
+
+        Route B (Issue-First Protocol):
+        - BE BRIEF: 2-3 sentences max
+        - POINT OUT THE ISSUE: describe the problem, not the solution
+        - OFFER HELP conditionally: "if the team agrees, I can put together a PR"
+        - NO code generation here — this is just a polite heads-up
+        - TONE: casual, direct, not pushy
+        """
+        finding = contribution.finding
+        file_hint = f" in `{finding.file_path}`" if finding.file_path else ""
+
+        # Build a brief, natural issue description
+        lines = [
+            finding.description or f"Spotted a potential issue{file_hint}.",
+        ]
+
+        # Add root cause or impact if known
+        if finding.suggestion:
+            lines.append(f"\nThis could cause: {finding.suggestion[:150]}")
+
+        # Conditional offer — not pushy
+        lines.append(
+            "\nIf the team thinks this is worth addressing, I can put together a PR. Happy to help."
+        )
+
+        return "".join(lines)
+
     async def get_pr_status(self, owner: str, repo: str, pr_number: int) -> PRStatus:
         """Check the current status of a PR."""
         try:

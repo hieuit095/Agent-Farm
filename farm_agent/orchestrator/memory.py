@@ -7,7 +7,7 @@ to avoid duplicate work and improve over time.
 from __future__ import annotations
 
 import logging
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import aiosqlite
@@ -191,6 +191,45 @@ class Memory:
         )
         await self._db.commit()
 
+    async def record_issue_proposal(
+        self,
+        repo: str,
+        issue_number: int,
+        issue_url: str,
+        title: str,
+        finding_type: str,
+        finding_title: str,
+        file_path: str = "",
+    ):
+        """Record an Issue-First proposal (Route B — waiting for maintainer approval)."""
+        now = datetime.now(UTC).isoformat()
+        # Re-use submitted_prs table with type='issue_proposal' and pr_number=issue_number
+        await self._db.execute(
+            """INSERT OR REPLACE INTO submitted_prs
+               (repo, pr_number, pr_url, title, type, branch, fork, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                repo,
+                issue_number,
+                issue_url,
+                title,
+                "issue_proposal",
+                "",  # branch — no branch for issues
+                finding_title[:100],  # re-purpose 'fork' field as finding_title cache
+                now,
+                now,
+            ),
+        )
+        await self._db.commit()
+        logger.info(
+            "📝 Issue-First proposal recorded: %s/#%d — '%s' (type=%s, file=%s)",
+            repo,
+            issue_number,
+            title,
+            finding_type,
+            file_path,
+        )
+
     async def update_pr_status(self, repo: str, pr_number: int, status: str):
         """Update PR status."""
         await self._db.execute(
@@ -239,6 +278,50 @@ class Memory:
         rows = await cursor.fetchall()
         cols = [d[0] for d in cursor.description]
         return [dict(zip(cols, row, strict=False)) for row in rows]
+
+    async def get_friendly_repos_for_hunting(
+        self,
+        limit: int = 3,
+        cooldown_days: int = 7,
+    ) -> list[dict]:
+        """Return merged repos that are off cooldown for re-hunting.
+
+        Friendly repos = repos where we have at least one merged PR.
+        Cooldown = repo must NOT have been analyzed in the last cooldown_days
+        to avoid spamming maintainers who trusted us.
+        """
+        cutoff = (
+            datetime.now(UTC) - timedelta(days=cooldown_days)
+        ).isoformat()
+
+        cursor = await self._db.execute(
+            """
+            SELECT DISTINCT
+                sr.repo                         AS full_name,
+                ar.language,
+                ar.stars,
+                ar.analyzed_at,
+                sr.created_at                   AS merged_at,
+                sr.title                        AS merged_pr_title
+            FROM submitted_prs AS sr
+            LEFT JOIN analyzed_repos AS ar ON sr.repo = ar.full_name
+            WHERE sr.status = 'merged'
+              AND (ar.analyzed_at IS NULL OR ar.analyzed_at < ?)
+            ORDER BY sr.created_at DESC
+            LIMIT ?
+            """,
+            (cutoff, limit),
+        )
+        rows = await cursor.fetchall()
+        cols = [d[0] for d in cursor.description]
+        result = [dict(zip(cols, row, strict=False)) for row in rows]
+        logger.info(
+            "🏠 Familiar Grounds: found %d friendly repos off cooldown (limit=%d, cooldown=%dd)",
+            len(result),
+            limit,
+            cooldown_days,
+        )
+        return result
 
     # ── CI Fix Attempts ───────────────────────────────────────────────────
 

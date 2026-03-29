@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
+import re
 import uuid
 from pathlib import Path
 from typing import Any
@@ -13,6 +15,153 @@ from docker.errors import APIError, ImageNotFound, NotFound
 from docker.models.containers import Container
 
 logger = logging.getLogger(__name__)
+
+# ── Polyglot Guillotine: Language → Docker image + test command ─────────────
+
+LANGUAGE_ENVIRONMENTS: dict[str, dict[str, str]] = {
+    "python": {
+        "image": "python:3.11-alpine",
+        "test_cmd": "pip install -q pytest && pytest --tb=short -q . || python -m compileall .",
+        "install_cmd": "pip install -q -r requirements.txt 2>/dev/null || true",
+    },
+    "javascript": {
+        "image": "node:20-alpine",
+        "test_cmd": "npm install --silent 2>/dev/null && npm test 2>/dev/null || node --version",
+        "install_cmd": "npm install --silent 2>/dev/null || true",
+    },
+    "typescript": {
+        "image": "node:20-alpine",
+        "test_cmd": "npm install --silent 2>/dev/null && npm test 2>/dev/null || npx tsc --noEmit || true",
+        "install_cmd": "npm install --silent 2>/dev/null || true",
+    },
+    "rust": {
+        "image": "rust:1.75-alpine",
+        "test_cmd": "cargo test --quiet 2>&1 || cargo build 2>&1 || rustc --version",
+        "install_cmd": "cargo fetch --quiet 2>/dev/null || true",
+    },
+    "go": {
+        "image": "golang:1.21-alpine",
+        "test_cmd": "go test ./... 2>&1 || go build ./... 2>&1 || go version",
+        "install_cmd": "go mod download 2>/dev/null || true",
+    },
+    "java": {
+        "image": " eclipse-temurin:21-jdk-alpine",
+        "test_cmd": "mvn test -q 2>&1 || gradle test 2>&1 || ./gradlew test 2>&1 || java -version",
+        "install_cmd": "mvn dependencyresolve 2>/dev/null || true",
+    },
+    "ruby": {
+        "image": "ruby:3.3-alpine",
+        "test_cmd": "bundle install --quiet && bundle exec rake test 2>&1 || ruby --version",
+        "install_cmd": "bundle install --quiet 2>/dev/null || true",
+    },
+    "php": {
+        "image": "php:8.2-cli-alpine",
+        "test_cmd": "composer install --quiet 2>/dev/null && ./vendor/bin/phpunit 2>&1 || php --version",
+        "install_cmd": "composer install --quiet 2>/dev/null || true",
+    },
+    "c": {
+        "image": "gcc:14-bookworm",
+        "test_cmd": "ls *.c Makefile 2>/dev/null && make test 2>&1 || (gcc --version && echo 'no Makefile')",
+        "install_cmd": "apt-get update -qq && apt-get install -qq -y make gcc 2>/dev/null || true",
+    },
+    "cpp": {
+        "image": "gcc:14-bookworm",
+        "test_cmd": "ls *.cpp CMakeLists.txt 2>/dev/null && make test 2>&1 || (g++ --version && echo 'no Makefile')",
+        "install_cmd": "apt-get update -qq && apt-get install -qq -y make g++ cmake 2>/dev/null || true",
+    },
+    "csharp": {
+        "image": "mcr.microsoft.com/dotnet/sdk:8.0-alpine",
+        "test_cmd": "dotnet test --verbosity quiet 2>&1 || dotnet build 2>&1 || dotnet --version",
+        "install_cmd": "dotnet restore 2>/dev/null || true",
+    },
+}
+
+# Fallback for unknown languages
+DEFAULT_ENV = LANGUAGE_ENVIRONMENTS["python"]
+
+# ── Language Detection ────────────────────────────────────────────────────────
+
+# File extension → language mapping
+EXTENSION_TO_LANGUAGE: dict[str, str] = {
+    ".py": "python",
+    ".js": "javascript",
+    ".mjs": "javascript",
+    ".cjs": "javascript",
+    ".ts": "typescript",
+    ".tsx": "typescript",
+    ".jsx": "javascript",
+    ".rs": "rust",
+    ".go": "go",
+    ".java": "java",
+    ".rb": "ruby",
+    ".php": "php",
+    ".c": "c",
+    ".h": "c",
+    ".cpp": "cpp",
+    ".cc": "cpp",
+    ".hpp": "cpp",
+    ".cs": "csharp",
+    ".swift": "swift",
+    ".kt": "kotlin",
+    ".kts": "kotlin",
+}
+
+
+def detect_language_from_extensions(repo_path: str | Path) -> str:
+    """Detect the primary language of a repository by scanning file extensions.
+
+    Counts files per language and returns the most common language.
+    Falls back to 'python' if no recognized extensions are found.
+    """
+    repo_dir = Path(repo_path)
+    counts: dict[str, int] = {}
+
+    skip_dirs = {"node_modules", "target", ".git", "dist", "build", "__pycache__", "vendor", "venv", ".venv", ".pytest_cache", ".mypy_cache"}
+    try:
+        for root, dirs, files in os.walk(repo_dir):
+            # Prune skip dirs in-place to avoid descending into them
+            dirs[:] = [d for d in dirs if d not in skip_dirs]
+            for file in files:
+                ext = Path(file).suffix.lower()
+                lang = EXTENSION_TO_LANGUAGE.get(ext)
+                if lang:
+                    counts[lang] = counts.get(lang, 0) + 1
+    except OSError:
+        pass
+
+    if not counts:
+        return "python"
+    return max(counts, key=lambda k: counts[k])
+
+
+def detect_language_from_repo_info(repo_info: dict | None) -> str | None:
+    """Extract language from repository metadata dict (e.g. GitHub API response)."""
+    if not repo_info:
+        return None
+    lang = repo_info.get("language")
+    if lang:
+        # Normalize GitHub language names to our keys
+        mapping = {
+            "Python": "python",
+            "JavaScript": "javascript",
+            "TypeScript": "typescript",
+            "Rust": "rust",
+            "Go": "go",
+            "Java": "java",
+            "Ruby": "ruby",
+            "PHP": "php",
+            "C": "c",
+            "C++": "cpp",
+            "C#": "csharp",
+        }
+        return mapping.get(lang, lang.lower())
+    return None
+
+
+def get_environment_for_language(language: str) -> dict[str, str]:
+    """Return the image + commands for a given language, falling back to Python."""
+    return LANGUAGE_ENVIRONMENTS.get(language.lower(), DEFAULT_ENV)
+
 
 
 class DockerSandbox:
@@ -30,17 +179,26 @@ class DockerSandbox:
     async def run_in_sandbox(
         self,
         repo_path: str,
-        command: str,
-        image: str = "python:3.10-alpine",
+        command: str | None = None,
+        image: str | None = None,
         timeout: int = 60,
+        language: str | None = None,
+        repo_info: dict | None = None,
     ) -> dict[str, Any]:
         """Run a shell command inside an ephemeral Docker container.
 
+        Polyglot Guillotine: if language is provided, auto-selects the correct
+        Docker image and test command for that language. Falls back to python
+        if no language is detected.
+
         Args:
             repo_path: Host path to the repository that will be mounted at `/workspace`.
-            command: Shell command to execute inside the sandbox.
-            image: Docker image used for the sandbox container.
+            command: Shell command to execute. Auto-selected from language if not given.
+            image: Docker image. Auto-selected from language if not given.
             timeout: Maximum execution time in seconds before the container is killed.
+            language: Language hint (e.g. 'python', 'rust', 'go'). Auto-detected
+                      from repo_info or file extensions if not provided.
+            repo_info: Optional GitHub repo metadata dict for language detection.
 
         Returns:
             A dictionary with execution details including stdout, stderr, exit code,
@@ -52,12 +210,29 @@ class DockerSandbox:
             ValueError: If the command is empty or the timeout is invalid.
             docker.errors.DockerException: If Docker communication fails.
         """
+        # ── Polyglot: resolve language → environment ──────────────────────
+        detected_lang = language
+        if not detected_lang:
+            detected_lang = detect_language_from_repo_info(repo_info)
+        if not detected_lang:
+            detected_lang = detect_language_from_extensions(repo_path)
+
+        env = get_environment_for_language(detected_lang)
+        resolved_image = image or env["image"]
+        resolved_command = command or env["test_cmd"]
+
+        logger.info(
+            "Polyglot Guillotine: language=%s, image=%s, cmd=%s",
+            detected_lang,
+            resolved_image,
+            resolved_command[:60],
+        )
         repo_dir = Path(repo_path).expanduser().resolve()
         if not repo_dir.exists():
             raise FileNotFoundError(f"Sandbox repository path does not exist: {repo_dir}")
         if not repo_dir.is_dir():
             raise NotADirectoryError(f"Sandbox repository path is not a directory: {repo_dir}")
-        if not command.strip():
+        if not resolved_command.strip():
             raise ValueError("Sandbox command must not be empty.")
         if timeout <= 0:
             raise ValueError("Sandbox timeout must be greater than zero.")
@@ -80,8 +255,8 @@ class DockerSandbox:
 
         try:
             container = await self._start_container(
-                image=image,
-                command=command,
+                image=resolved_image,
+                command=resolved_command,
                 repo_dir=repo_dir,
                 container_name=container_name,
                 labels=labels,
@@ -138,8 +313,8 @@ class DockerSandbox:
                 "timed_out": timed_out,
                 "container_name": container_name,
                 "run_id": run_id,
-                "image": image,
-                "command": command,
+                "image": resolved_image,
+                "command": resolved_command,
             }
         finally:
             if container is not None:

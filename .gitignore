@@ -24,9 +24,12 @@ env/
 config.yaml
 .env
 
-# SQLite memory
+# SQLite memory (data directory — portable via zip, not git)
+data/
 *.db
 *.sqlite
+*.db-wal
+*.db-shm
 
 # OS
 .DS_Store

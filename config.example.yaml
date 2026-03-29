@@ -61,7 +61,7 @@ discovery:
   topics: []
 
 storage:
-  db_path: "~/.farm_agent/memory.db"
+  db_path: "data/memory.db"
   cache_ttl_hours: 24
 
 # ── Phase 4+ Configuration ──────────────────────────

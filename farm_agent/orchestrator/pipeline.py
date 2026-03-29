@@ -366,6 +366,39 @@ class ContribPipeline:
                     )
                     break
 
+                # ── Familiar Grounds: Prioritize friendly repos before discovery ──
+                # Repos where we have a merged PR are trusted — process them first
+                # before spending API tokens on new discoveries.
+                friendly_repos = []
+                if not dry_run and remaining >= 1:
+                    try:
+                        friendly_data = await self._memory.get_friendly_repos_for_hunting(
+                            limit=min(remaining, 2),  # max 2 friendly repos per round
+                            cooldown_days=7,
+                        )
+                        if friendly_data:
+                            logger.info(
+                                "🏠 Familiar Grounds: %d friendly repos off cooldown — processing first",
+                                len(friendly_data),
+                            )
+                            for fr in friendly_data:
+                                from farm_agent.core.models import Repository
+
+                                friendly_repos.append(
+                                    Repository(
+                                        owner=fr["full_name"].split("/")[0],
+                                        name=fr["full_name"].split("/")[1],
+                                        full_name=fr["full_name"],
+                                        language=fr.get("language") or None,
+                                        stars=fr.get("stars") or 0,
+                                        description=f"Merged PR: {fr.get('merged_pr_title', '')}",
+                                        html_url=f"https://github.com/{fr['full_name']}",
+                                        clone_url=f"https://github.com/{fr['full_name']}.git",
+                                    )
+                                )
+                    except Exception as exc:
+                        logger.debug("Familiar Grounds lookup failed (non-critical): %s", exc)
+
                 random.shuffle(langs)
                 stars = star_tiers[(rnd - 1) % len(star_tiers)]
                 criteria = DiscoveryCriteria(
@@ -393,7 +426,16 @@ class ContribPipeline:
                     continue
 
                 # Filter to valid targets (skip already-analyzed repos)
+                # ── Prepend friendly repos that are off cooldown ──
                 targets: list[Repository] = []
+                for repo in friendly_repos:
+                    if await self._memory.has_analyzed(repo.full_name):
+                        logger.debug("🏠 Skipping %s (on cooldown or already analyzed)", repo.full_name)
+                        continue
+                    targets.append(repo)
+                    logger.info("🏠 Familiar Grounds: added %s (off cooldown, stars=%d)", repo.full_name, repo.stars)
+                # ── End friendly repos ──
+
                 for repo in repos:
                     if await self._memory.has_analyzed(repo.full_name):
                         logger.debug("Skipping %s (already analyzed)", repo.full_name)
@@ -708,42 +750,59 @@ class ContribPipeline:
             logger.info("All findings filtered (non-code targets) for %s", repo.full_name)
             return result
 
-        # --- Anti-Farming Filter (impact-level gatekeeper) ---
-        # Filter out trivial/low-impact findings to prevent AI-bot farming perception
+        # --- Anti-Farming Filter (impact-level + keyword gatekeeper) ---
+        # ZERO-TOLERANCE: Drop ANY finding that looks like a spam/exploratory PR
         _FARMING_KEYWORDS = {
-            "docstring", "comment", "typo", "format", "style", "rename",
-            "whitespace", "indent", "spacing", "missing type hint",
-            "type annotation", "naming convention",
+            # Documentation / comments
+            "docstring", "docs", "documentation", "readme", "comment", "spell",
+            # Formatting / style
+            "format", "formatting", "whitespace", "indent", "spacing", "style",
+            "styling", "naming convention", "rename", "ordering", "lint",
+            # Exploratory / curiosity
+            "understand", "explore", "exploring", "read the", "reading",
+            "look at", "looking at", "check this", "investigate",
+            # Low-effort / testing
+            "test", "testing", "todo", "fixme", "chore",
+            # Cosmetic
+            "typo", "typo in", "grammar", "misspell",
+            "missing type hint", "type annotation", "unused import",
         }
         pre_farming_count = len(analysis.findings)
         high_impact_findings = []
         for finding in analysis.findings:
-            # Gate 1: Drop TRIVIAL / LOW / MEDIUM impact — Only HIGH or CRITICAL allowed
+            title_lower = finding.title.lower()
+            desc_lower = finding.description.lower() if finding.description else ""
+
+            # ── Gate 1: Impact level — ONLY CRITICAL and HIGH survive ──────
+            # MEDIUM, LOW, TRIVIAL are ALWAYS dropped. No exceptions.
             if finding.impact_level in (
                 ImpactLevel.TRIVIAL,
                 ImpactLevel.LOW,
                 ImpactLevel.MEDIUM,
             ):
                 logger.info(
-                    "Only HIGH or CRITICAL allowed: '%s' has impact_level=%s",
+                    "🗑️ Dropped '%s' — impact_level=%s (only CRITICAL/HIGH allowed)",
                     finding.title,
                     finding.impact_level.value,
                 )
                 continue
 
-            # Gate 2: Heuristic keyword check (ONLY for non-critical findings)
-            # Bypass: HIGH/CRITICAL findings must survive even if title contains
-            # farming keywords (e.g., "Format string injection" has "format")
-            if finding.severity in (Severity.LOW, Severity.MEDIUM):
-                title_lower = finding.title.lower()
-                if any(kw in title_lower for kw in _FARMING_KEYWORDS):
+            # ── Gate 2: Keyword blacklist — title OR description ───────────
+            # Check both title and description (case-insensitive)
+            combined = title_lower + " " + desc_lower
+            for kw in _FARMING_KEYWORDS:
+                if kw in combined:
                     logger.info(
-                        "🗑️ Bỏ qua lỗi '%s' vì có dấu hiệu PR rác (Farming).",
+                        "🗑️ Dropped '%s' — keyword '%s' matched (spam/farming indicator)",
                         finding.title,
+                        kw,
                     )
-                    continue
-
-            high_impact_findings.append(finding)
+                    break
+            else:
+                # No farming keyword matched — this finding is worth keeping
+                high_impact_findings.append(finding)
+                continue
+            # (break above goes here via else-clause)
 
         if len(high_impact_findings) < pre_farming_count:
             logger.info(
@@ -922,6 +981,20 @@ class ContribPipeline:
 
         # Generate contributions for validated findings
         for finding in validated_findings:
+            # ── Hybrid Contribution Router ─────────────────────────────────
+            # Route A — Direct PR (Firefighter): SECURITY_FIX or CRITICAL/HIGH severity
+            # Route B — Issue-First (Polite Senior): everything else
+            is_direct_pr = (
+                finding.type == ContributionType.SECURITY_FIX
+                or finding.severity in (Severity.CRITICAL, Severity.HIGH)
+            )
+
+            if not is_direct_pr:
+                # Route B: Issue-First Protocol — propose via issue, skip code gen
+                await self._propose_issue_first(finding, repo, context)
+                result.contributions_generated += 1
+                continue
+
             logger.info("🛠️ Generating fix for: %s", finding.title)
             self._set_task("code_gen")
             contribution = await self._generator.generate(
@@ -1043,6 +1116,103 @@ class ContribPipeline:
 
         result.repos_analyzed = 1
         return result
+
+    # ── Hybrid Contribution Protocol ───────────────────────────────────────
+
+    async def _propose_issue_first(
+        self,
+        finding: Finding,
+        repo: Repository,
+        context: RepoContext,
+    ):
+        """Route B: Open a polite GitHub Issue instead of generating a PR.
+
+        This is used for PERFORMANCE_OPT, REFACTOR, CODE_QUALITY, FEATURE_ADD,
+        and other non-critical findings where maintainers prefer discussion
+        before seeing a large code diff.
+        """
+        from farm_agent.core.models import Contribution, ContributionType
+
+        logger.info(
+            "📝 [Route B] Issue-First for '%s' (type=%s, severity=%s) — polite heads-up, no code yet",
+            finding.title,
+            finding.type.value,
+            finding.severity.value,
+        )
+
+        # Build a minimal contribution object for body generation
+        fake_contribution = Contribution(
+            finding=finding,
+            contribution_type=finding.type,
+            title=f"[Proposal] {finding.title}",
+            description=finding.description or "",
+            changes=[],  # no changes — no code generated
+            commit_message=f"chore: propose fix for {finding.file_path}",
+            branch_name="",  # no branch for issue-first
+        )
+
+        # Build a concise issue title
+        issue_title = finding.title
+        if not issue_title or issue_title.lower() == "untitled finding":
+            issue_title = f"Potential {finding.type.value.replace('_', ' ')} in {finding.file_path}"
+
+        # Generate issue body — use _pr_manager if available, else inline fallback
+        if self._pr_manager is not None:
+            issue_body = self._pr_manager._generate_issue_body(fake_contribution)
+        else:
+            # Inline fallback: lazy senior dev style
+            issue_body = (
+                f"Spotted a potential issue in `{finding.file_path}`.\n\n"
+                f"If the team thinks this is worth addressing, I can put together a PR. Happy to help."
+            )
+
+        # Create the issue on GitHub
+            # Inline fallback: lazy senior dev style
+            issue_body = (
+                f"Spotted a potential issue in `{finding.file_path}`.\n\n"
+                f"If the team thinks this is worth addressing, I can put together a PR. Happy to help."
+            )
+
+        # Create the issue on GitHub
+        try:
+            import random
+            thinking_time = random.randint(10, 30)
+            logger.info(f"⏳ Thinking before writing... ({thinking_time}s)")
+            await asyncio.sleep(thinking_time)
+
+            issue_data = await self._github.create_issue(
+                owner=repo.owner,
+                repo=repo.name,
+                title=issue_title,
+                body=issue_body,
+                labels=["enhancement"],  # minimal labels, not pushy
+            )
+
+            issue_number = issue_data.get("number", 0)
+            issue_url = issue_data.get("html_url", f"https://github.com/{repo.full_name}/issues/{issue_number}")
+
+            logger.info(
+                "📝 Issue created: %s/%s/#%d — '%s'",
+                repo.owner,
+                repo.name,
+                issue_number,
+                issue_title,
+            )
+
+            # Record in memory so we don't spam duplicate issues on next run
+            await self._memory.record_issue_proposal(
+                repo=repo.full_name,
+                issue_number=issue_number,
+                issue_url=issue_url,
+                title=issue_title,
+                finding_type=finding.type.value,
+                finding_title=finding.title,
+                file_path=finding.file_path or "",
+            )
+
+        except Exception as exc:
+            logger.error("Failed to create issue for %s: %s", repo.full_name, exc)
+            result.errors.append(str(exc))
 
     async def _process_repo_issues(
         self, repo: Repository, dry_run: bool, max_prs: int = 3

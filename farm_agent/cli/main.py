@@ -384,6 +384,90 @@ def superhuman(ctx, time_warp, dry_run, target_repo):
         console.print("\n\n🛑 Super Human Mode interrupted by user (Ctrl+C). Goodbye!")
 
 
+@cli.command(name="janitor")
+@click.pass_context
+def janitor(ctx):
+    """🧹 The Ruthless Janitor — scan and destroy garbage PRs.
+
+    Scans all OPEN Pull Requests created by the configured GitHub user.
+    Uses the Minimax LLM to evaluate each PR's title and body.
+    Any PR classified as GARBAGE (exploratory, docs, formatting, low-impact)
+    is automatically CLOSED and its branch DELETED.
+
+    This command is completely independent of the main pipeline.
+    It operates purely on what is physically live on GitHub right now.
+    """
+    print_banner()
+
+    config = load_config(ctx.obj["config_path"])
+
+    if not config.github.token:
+        console.print("[red]❌ GitHub token not configured![/red]")
+        sys.exit(1)
+
+    if not config.llm.api_key:
+        console.print("[red]❌ LLM API key not configured for Janitor![/red]")
+        sys.exit(1)
+
+    async def _fetch_username() -> str:
+        from farm_agent.github.client import GitHubClient
+        gh = GitHubClient(config.github.token)
+        try:
+            user_data = await gh.get_authenticated_user()
+            username_val = user_data.get("login", "")
+        finally:
+            await gh.close()
+        if not username_val:
+            raise ValueError("Empty username from GitHub API")
+        return username_val
+
+    async def _run_janitor(username: str):
+        from farm_agent.github.client import GitHubClient
+        from farm_agent.pr.janitor import PRJanitor
+
+        gh = GitHubClient(config.github.token)
+        j = PRJanitor(gh, username, config.llm)
+        try:
+            summary = await j.sweep_and_destroy()
+        finally:
+            await gh.close()
+
+        # Print summary table
+        table = Table(title="Janitor Sweep Results", show_lines=True)
+        table.add_column("PR", style="bold", width=12)
+        table.add_column("Action", width=10)
+        table.add_column("Reason", width=50)
+
+        action_colors = {"closed": "red", "spared": "green"}
+        for detail in summary["details"]:
+            color = action_colors.get(detail["action"], "white")
+            action_label = f"[{color}]{detail['action'].upper()}[/{color}]"
+            table.add_row(detail["pr"], action_label, f"{detail['reason']} ({detail['title']})")
+
+        console.print(table)
+        console.print(
+            f"\n✅ Scanned: {summary['total_scanned']}  "
+            f"[red]Destroyed: {summary['garbage_closed']}[/red]  "
+            f"[green]Spared: {summary['critical_spared']}[/green]  "
+            f"Errors: {summary['errors']}"
+        )
+
+    async def _main():
+        # Fetch username from GitHub API
+        console.print("[yellow]Fetching GitHub username from API...[/yellow]")
+        try:
+            username = await _fetch_username()
+        except Exception as exc:
+            console.print(f"[red]❌ Could not determine GitHub username: {exc}[/red]")
+            return
+
+        console.print(f"\n🧹 Janitor sweep for: [bold]{username}[/bold]")
+        console.print(f"   LLM: {config.llm.provider} (Minimax)\n")
+        await _run_janitor(username)
+
+    asyncio.run(_main())
+
+
 @cli.command()
 @click.argument("url")
 @click.pass_context
