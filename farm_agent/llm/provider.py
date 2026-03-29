@@ -208,6 +208,7 @@ class MinimaxProvider(LLMProvider):
 
     def __init__(self, config: LLMConfig):
         super().__init__(config)
+        import asyncio
         import httpx
 
         headers = {
@@ -223,6 +224,10 @@ class MinimaxProvider(LLMProvider):
             timeout=120.0,
             follow_redirects=True,
         )
+        # ── PROACTIVE LLM THROTTLING: cap concurrent API calls ─────────────
+        # No more than 2 LLM requests may be in-flight simultaneously.
+        # This prevents MiniMax API 429s from burst concurrent calls.
+        self._semaphore = asyncio.Semaphore(2)
 
     async def complete(self, prompt: str, *, system: str | None = None, **kwargs) -> str:
         messages = []
@@ -263,7 +268,11 @@ class MinimaxProvider(LLMProvider):
         }
 
         try:
-            response = await self._client.post(self._chat_url, json=payload)
+            import asyncio as _asyncio
+            # ── PROACTIVE THROTTLING: wait for semaphore slot + pace ─────────
+            async with self._semaphore:
+                await _asyncio.sleep(2.0)  # human-like think gap between LLM calls
+                response = await self._client.post(self._chat_url, json=payload)
             response.raise_for_status()
             data = response.json()
 

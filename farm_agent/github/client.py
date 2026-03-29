@@ -57,6 +57,15 @@ class GitHubClient:
 
         last_error = None
         for attempt in range(1, _retries + 1):
+            # ── PROACTIVE THROTTLING: mimic human pacing ──────────────────
+            # Injects a human-like delay before every API call.
+            # Search APIs are heavily rate-limited — use a longer delay.
+            if attempt == 1:  # Only throttle on first attempt; retries have their own backoff
+                is_search = "/search/" in url
+                delay = 3.0 if is_search else 1.5
+                logger.debug("Throttling GitHub API: sleeping %.1fs before %s %s", delay, method, url)
+                await asyncio.sleep(delay)
+            # ─────────────────────────────────────────────────────────────
             try:
                 response = await self._client.request(method, url, **kwargs)
             except httpx.HTTPError as e:

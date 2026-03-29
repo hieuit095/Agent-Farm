@@ -386,6 +386,11 @@ class SuperHumanLoop:
         now_utc = datetime.now(UTC).isoformat()
 
         for repo_full_name, pr in repo_map.items():
+            # ── PROACTIVE THROTTLING: sequential pacing between repos ─────────
+            # Never hammer multiple repo API calls concurrently.
+            await asyncio.sleep(5.0)
+            logger.debug("Throttling repo iteration: slept 5s before processing %s", repo_full_name)
+            # ─────────────────────────────────────────────────────────────
             owner = repo_full_name.split("/")[0]
             stars = 0
 
