@@ -337,13 +337,25 @@ class SuperHumanLoop:
 
         min_stars, max_stars = self._pipeline.config.discovery.stars_range
 
-        # Get the authenticated username
-        try:
-            user: dict = await self._pipeline._github.get_authenticated_user()
-            username: str = user.get("login", "")
-        except Exception as exc:
-            logger.warning("Cannot sync friendly repos — could not get authenticated user: %s", exc)
-            return 0
+        # Get the authenticated username — retry up to 3× if auth not ready yet
+        username = ""
+        for attempt in range(3):
+            try:
+                if self._pipeline._github is None:
+                    if attempt == 0:
+                        logger.debug("Auth not ready, retrying in 2 seconds... (attempt 1/3)")
+                    await asyncio.sleep(2)
+                    continue
+                user: dict = await self._pipeline._github.get_authenticated_user()
+                username = user.get("login", "")
+                break
+            except Exception as exc:
+                if attempt < 2:
+                    logger.debug("Auth attempt %d/3 failed: %s — retrying in 2 seconds...", attempt + 1, exc)
+                    await asyncio.sleep(2)
+                else:
+                    logger.warning("Cannot sync friendly repos — auth failed after 3 attempts: %s", exc)
+                    return 0
 
         if not username:
             logger.warning("Cannot sync friendly repos — empty username")
@@ -622,8 +634,13 @@ class SuperHumanLoop:
         # ── Familiar Grounds: sync historical merged PRs on startup ─────────
         # Runs on startup and then every 24 hours to populate friendly repos
         # from the GitHub account's merged PR history.
+        # CRIT FIX: Ensure pipeline components (including _github) are initialized
+        # before the first sync call — _init_components is async so must be awaited.
         self._last_sync_time: float = 0.0
         try:
+            if self._pipeline._github is None:
+                logger.info("Auth warmup: initializing GitHub client...")
+                await self._pipeline._init_components()
             await self._sync_historical_friendly_repos()
         except Exception as exc:
             logger.debug("Startup friendly-repos sync failed (non-critical): %s", exc)
