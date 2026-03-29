@@ -396,34 +396,45 @@ class SuperHumanLoop:
                 )
                 continue
 
-            # Insert or ignore (idempotent)
+            # UPSERT: insert new merged PRs, update existing ones to 'merged'
             try:
-                await self._memory._db.execute(
-                    """INSERT OR IGNORE INTO submitted_prs
+                # Track existing row count so we can detect if a NEW row was inserted
+                existing = await self._memory._db.execute(
+                    "SELECT 1 FROM submitted_prs WHERE repo = ? AND pr_number = ? AND status = 'merged'",
+                    (repo_full_name, pr.get("pr_number", 0)),
+                )
+                row_existing = await existing.fetchone()
+
+                cursor = await self._memory._db.execute(
+                    """INSERT INTO submitted_prs
                        (repo, pr_number, pr_url, title, type, status, created_at, updated_at)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                       VALUES (?, ?, ?, ?, 'historical_sync', 'merged', ?, ?)
+                       ON CONFLICT(repo, pr_number) DO UPDATE SET
+                           status = 'merged',
+                           updated_at = excluded.updated_at,
+                           pr_url = excluded.pr_url,
+                           title = excluded.title""",
                     (
                         repo_full_name,
                         pr.get("pr_number", 0),
-                        pr.get("html_url", ""),
-                        pr.get("title", ""),
-                        "code_quality",  # default type for historical merged PRs
-                        "merged",
+                        pr.get("html_url") or "",
+                        pr.get("title") or "",
                         pr.get("merged_at") or now_utc,
                         now_utc,
                     ),
                 )
-                # Check if actually inserted (row_count > 0 means new)
-                cursor = await self._memory._db.execute(
-                    "SELECT changes() AS c FROM submitted_prs WHERE repo = ? AND pr_number = ?",
-                    (repo_full_name, pr.get("pr_number", 0)),
-                )
-                row = await cursor.fetchone()
-                if row and row[0] > 0:
+                # fetchone on a write cursor returns None — use rowcount trick instead
+                if row_existing is None:
                     new_count += 1
                     logger.info("🏠 Friendly repo added: %s (★ %d)", repo_full_name, stars)
             except Exception as exc:
-                logger.debug("Failed to insert %s into submitted_prs: %s", repo_full_name, exc)
+                logger.error(
+                    "🏠 Sync DB Error for %s: %s — html_url=%s, title=%s",
+                    repo_full_name,
+                    exc,
+                    pr.get("html_url") or "(empty)",
+                    pr.get("title") or "(empty)",
+                )
 
         await self._memory._db.commit()
         elapsed = time_module.time() - start
