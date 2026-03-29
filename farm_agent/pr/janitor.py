@@ -147,12 +147,7 @@ class PRJanitor:
                         owner,
                         repo_name,
                         pr_number,
-                        comment=(
-                            "Automated Janitor: This PR was classified as GARBAGE "
-                            f"and closed to protect account reputation.\n\n"
-                            f"Reason: {reason}\n\n"
-                            "This is an automated action by ContribAI Janitor."
-                        ),
+                        comment=f"Reason: {reason}",
                     )
                     # Also delete the branch if we have a branch name
                     if head_branch:
