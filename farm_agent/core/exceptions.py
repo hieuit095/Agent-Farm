@@ -45,5 +45,9 @@ class ContributionError(FarmAgentError):
     """Contribution generation failure."""
 
 
+class GenerationError(FarmAgentError):
+    """LLM generation output is invalid or unsafe (includes Gag Order violations)."""
+
+
 class PRCreationError(FarmAgentError):
     """Pull request creation failure."""
