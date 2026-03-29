@@ -943,6 +943,130 @@ def schedule(ctx, cron):
     sched.start()
 
 
+@cli.command("vips")
+@click.option(
+    "--no-sync",
+    is_flag=True,
+    help="Skip Alumni Sync — show cached data only (faster, uses no API calls)",
+)
+@click.pass_context
+def vips(ctx, no_sync):
+    """🌟 VIP Roster — Alumni Sync + Full Friendly Repo List.
+
+    Triggers the full Alumni Sync to pull merged PR history from GitHub,
+    then displays every unique repository where you have merged PRs,
+    with merged-PR counts and last-seen timestamps. Full list — no item cap.
+
+    Star counts are fetched live from the GitHub API for each repo.
+    Run with --no-sync to skip the API sync and just dump cached data.
+    """
+    print_banner()
+
+    config = load_config(ctx.obj["config_path"])
+
+    if not config.github.token:
+        console.print("[red]❌ GitHub token not configured![/red]")
+        sys.exit(1)
+
+    async def _run():
+        from farm_agent.orchestrator.pipeline import ContribPipeline
+        from farm_agent.orchestrator.memory import Memory
+        from farm_agent.orchestrator.human import SuperHumanLoop
+
+        # Build minimal pipeline + memory for the sync
+        pipeline = ContribPipeline(config)
+        memory = Memory(config.storage.resolved_db_path)
+        await memory.init()
+
+        loop = SuperHumanLoop(
+            pipeline,
+            memory,
+            dry_run=True,
+            target_repo_url=None,
+            target_repo_max_prs=0,
+        )
+
+        if not no_sync:
+            console.print("\n[bold cyan]🔄 Running Alumni Sync...[/bold cyan]")
+            new_repos = await loop._sync_historical_friendly_repos()
+            console.print(f"[green]✅ Sync complete — {new_repos} new repos indexed.[/green]\n")
+        else:
+            console.print("\n[dim]Skipping sync — showing cached data only.[/dim]\n")
+
+        # ── Fetch live star counts for each unique repo ──────────────────────
+        db_path = config.storage.resolved_db_path
+        import sqlite3
+
+        conn = sqlite3.connect(db_path)
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT repo, COUNT(*) AS merged_pr_count, MAX(updated_at) AS last_seen
+            FROM submitted_prs
+            WHERE status = 'merged'
+            GROUP BY repo
+            ORDER BY merged_pr_count DESC, repo ASC
+            """,
+        )
+        rows = cur.fetchall()
+        conn.close()
+
+        if not rows:
+            console.print("[yellow]⚠️  No merged PRs found in database.[/yellow]")
+            console.print(
+                "[dim]Tip: run without --no-sync to pull your GitHub history first.[/dim]"
+            )
+            await memory.close()
+            return
+
+        # Fetch stars live from GitHub API
+        from farm_agent.github.client import GitHubClient
+
+        gh = GitHubClient(config.github.token)
+
+        table = Table(
+            title=f"🌟 VIP Roster — {len(rows)} Friendly Repositories",
+            title_style="bold cyan",
+            show_lines=False,
+            header_style="bold cyan",
+            pad_edge=True,
+            row_styles=["", "dim"],
+        )
+        table.add_column("#", justify="right", style="cyan", no_wrap=True)
+        table.add_column("Repository", style="cyan")
+        table.add_column("⭐ Stars", justify="right", style="yellow")
+        table.add_column("Merged PRs", justify="right", style="green")
+        table.add_column("Last Seen", style="dim")
+
+        for idx, (repo, pr_count, last_seen) in enumerate(rows, start=1):
+            stars = "—"
+            try:
+                owner, name = repo.split("/", 1)
+                details = await gh.get_repo_details(owner, name)
+                stars = f"{details.get('stargazers_count', 0):,}"
+            except Exception:
+                stars = "⚠️"
+            table.add_row(
+                str(idx),
+                repo,
+                stars,
+                str(pr_count),
+                last_seen or "unknown",
+            )
+
+        await gh.close()
+        console.print(table)
+
+        total_prs = sum(r[1] for r in rows)
+        console.print(
+            f"\n[dim]Total: {len(rows)} repos, {total_prs} merged PRs[/dim]"
+        )
+
+        await memory.close()
+
+    asyncio.run(_run())
+
+
 @cli.command("templates")
 @click.option(
     "--type",
