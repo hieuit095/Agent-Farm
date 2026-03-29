@@ -63,6 +63,7 @@ class TelegramNotifier:
                 {"command": "quota", "description": "Check Minimax API budget and usage"},
                 {"command": "update", "description": "Trigger Alumni Sync — scan new merged PRs"},
                 {"command": "clean", "description": "Run Janitor — destroy garbage PRs on GitHub"},
+                {"command": "accept", "description": "Hall of Fame — merged PRs (Bảng Vàng)"},
                 {"command": "help", "description": "Show the help menu"}
             ]
         }
@@ -74,13 +75,14 @@ class TelegramNotifier:
         except Exception as e:
             logger.warning("Failed to register Telegram commands menu: %s", e)
 
-    async def start_polling(self, memory_instance, on_update_callback=None, on_clean_callback=None) -> None:
+    async def start_polling(self, memory_instance, on_update_callback=None, on_clean_callback=None, on_accept_callback=None) -> None:
         """Run long-polling loop to receive Telegram commands.
 
         Args:
             memory_instance: The Memory instance for DB queries.
             on_update_callback: Optional async callable — triggers Alumni Sync.
             on_clean_callback: Optional async callable — triggers PR Janitor sweep.
+            on_accept_callback: Optional async callable — returns Hall of Fame string.
         """
         import asyncio
         if not self.enabled or not self._client:
@@ -116,6 +118,7 @@ class TelegramNotifier:
                             memory_instance,
                             on_update_callback=on_update_callback,
                             on_clean_callback=on_clean_callback,
+                            on_accept_callback=on_accept_callback,
                         )
 
             except Exception as e:
@@ -124,7 +127,7 @@ class TelegramNotifier:
             
             await asyncio.sleep(1)
 
-    async def _handle_command(self, text: str, memory_instance, on_update_callback=None, on_clean_callback=None) -> None:
+    async def _handle_command(self, text: str, memory_instance, on_update_callback=None, on_clean_callback=None, on_accept_callback=None) -> None:
         """Handle incoming C2 commands from Telegram."""
         import time
         from datetime import UTC, datetime
@@ -223,6 +226,25 @@ class TelegramNotifier:
             else:
                 await self.send_message(
                     "⚠️ Janitor sweep callback not configured. Cleanup is disabled."
+                )
+
+        elif command == "/accept":
+            # /accept returns the Hall of Fame — merged PRs from the database
+            await self.send_message(
+                "📜 Sếp đợi em phủi bụi cuốn Sổ Vàng rồi đọc danh sách "
+                "chiến tích cho Sếp nghe nhé..."
+            )
+            if on_accept_callback is not None:
+                try:
+                    result = await on_accept_callback()
+                    await self.send_message(result)
+                except Exception as e:
+                    await self.send_message(
+                        f"❌ Ây da, kẹt tủ rồi Sếp ơi. Lỗi: {e}"
+                    )
+            else:
+                await self.send_message(
+                    "⚠️ Hall of Fame callback not configured."
                 )
 
     async def close(self) -> None:

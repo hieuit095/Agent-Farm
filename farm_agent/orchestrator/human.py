@@ -471,6 +471,41 @@ class SuperHumanLoop:
         )
         return result
 
+    async def _run_accept_check(self) -> str:
+        """Build a Hall of Fame message from merged PRs in the database.
+
+        Queries memory.db for up to 15 merged PRs and formats them into
+        a clean Telegram-readable Markdown string.
+
+        Returns:
+            str: Formatted Hall of Fame message.
+        """
+        merged = await self._memory.get_prs(status="merged", limit=15)
+
+        if not merged:
+            return (
+                "Chưa có PR nào được gộp vào Bảng Vàng Sếp ạ. "
+                "Em vẫn đang cố gắng đi săn đây! 🏃‍♂️"
+            )
+
+        lines = ["🏆 <b>BẢNG VÀNG DANH DỰ</b> 🏆\n"]
+        for i, pr in enumerate(merged, 1):
+            title = pr.get("title") or pr.get("pr_title") or "(untitled)"
+            pr_num = pr.get("pr_number") or pr.get("pr_num") or "?"
+            url = pr.get("pr_url") or pr.get("url") or ""
+            repo = pr.get("repo", "").split("/")[-1] if pr.get("repo") else ""
+
+            title_escaped = title.replace("<", "&lt;").replace(">", "&gt;")
+            if url:
+                lines.append(
+                    f"{i}. <code>{title_escaped}</code> (#{pr_num}) "
+                    f"🔗 {url}"
+                )
+            else:
+                lines.append(f"{i}. <code>{title_escaped}</code> (#{pr_num})")
+
+        return "\n".join(lines)
+
     async def _do_patrol(self) -> None:
         """Execute a single PR Patrol action."""
         from farm_agent.pr.patrol import PRPatrol
@@ -568,6 +603,7 @@ class SuperHumanLoop:
                     self._memory,
                     on_update_callback=self._sync_historical_friendly_repos,
                     on_clean_callback=self._run_janitor_sweep,
+                    on_accept_callback=self._run_accept_check,
                 )
             )
             self._poller_task.add_done_callback(self._poller_done_callback)
@@ -801,6 +837,7 @@ class SuperHumanLoop:
                         self._memory,
                         on_update_callback=self._sync_historical_friendly_repos,
                         on_clean_callback=self._run_janitor_sweep,
+                        on_accept_callback=self._run_accept_check,
                     )
                 )
                 self._poller_task.add_done_callback(self._poller_done_callback)
