@@ -162,6 +162,7 @@ class ContribPipeline:
         self._generator: ContributionGenerator | None = None
         self._pr_manager: PRManager | None = None
         self._discovery: RepoDiscovery | None = None
+        self._sandbox = None  # DockerSandbox — initialized in _init_components
         self._middleware_chain: list = []
         self._agent_registry = None
         self._tool_registry = None
@@ -213,6 +214,11 @@ class ContribPipeline:
 
         # PR Manager
         self._pr_manager = PRManager(github=self._github)
+
+        # ── Polyglot Sandbox — Docker-based patch validation ─────────────────
+        from farm_agent.core.sandbox import DockerSandbox
+        self._sandbox = DockerSandbox()
+        logger.info("DockerSandbox initialised — patches will be validated before PR creation")
 
         # Discovery
         self._discovery = RepoDiscovery(
@@ -1092,38 +1098,72 @@ class ContribPipeline:
                 logger.info("🏃 [DRY RUN] Would create PR: %s", contribution.title)
                 continue
 
-            # --- Sandbox Guillotine ---
-            if getattr(self, "_sandbox", None) is not None:
+            # --- Sandbox Guillotine — Docker-based patch validation ---
+            if self._sandbox is not None:
                 guillotine_passed = False
-                max_retries = getattr(self.config.pipeline, "max_retries", 3)
-                
-                for attempt in range(max_retries):
-                    sandbox_result = await self._sandbox.run_in_sandbox(
-                        repo_path=str(repo.full_name),
-                        command="pytest",  # Default test command
+                max_retries = 3
+                max_sandbox_attempts = max_retries
+
+                for attempt in range(1, max_sandbox_attempts + 1):
+                    logger.info(
+                        "🔬 Sandbox validation attempt %d/%d for '%s'",
+                        attempt, max_sandbox_attempts, contribution.title,
                     )
-                    
-                    is_success = getattr(sandbox_result, "is_success", False) if not isinstance(sandbox_result, dict) else sandbox_result.get("is_success", False)
-                    
+                    sandbox_result = await self._sandbox.run_in_sandbox(
+                        repo_path=str(repo.clone_url),
+                        command="pytest",
+                    )
+
+                    # Determine success
+                    if isinstance(sandbox_result, dict):
+                        is_success = sandbox_result.get("is_success", False)
+                        error_log = sandbox_result.get("logs", "Validation failed")
+                    else:
+                        is_success = getattr(sandbox_result, "is_success", False)
+                        error_log = getattr(sandbox_result, "logs", "Validation failed")
+
                     if is_success:
                         guillotine_passed = True
+                        logger.info("✅ Sandbox validated — patch passes CI/tests.")
                         break
-                        
-                    logger.warning("Sandbox validation failed (attempt %d/%d). Invoking LLM fix...", attempt + 1, max_retries)
-                    logs = getattr(sandbox_result, "logs", "Validation failed") if not isinstance(sandbox_result, dict) else sandbox_result.get("logs", "Validation failed")
-                    
-                    if hasattr(self._generator, "fix_contribution_from_error"):
-                        contribution = await self._generator.fix_contribution_from_error(
+
+                    logger.warning(
+                        "🚫 Sandbox attempt %d/%d failed for '%s' — invoking self-correction.",
+                        attempt, max_sandbox_attempts, contribution.title,
+                    )
+
+                    # Self-Correction: try to fix the broken patch
+                    try:
+                        corrected = await self._generator.fix_contribution_from_error(
                             contribution,
-                            repo,
-                            logs,
-                            context
+                            context,
+                            error_log,
                         )
-                    
+                        if corrected is not None:
+                            contribution = corrected
+                            logger.info(
+                                "🔧 Self-correction attempt %d succeeded for '%s'",
+                                attempt, contribution.title,
+                            )
+                        else:
+                            logger.warning(
+                                "🔧 Self-correction attempt %d returned None — retrying.",
+                                attempt,
+                            )
+                    except Exception as correction_err:
+                        logger.warning(
+                            "🔧 Self-correction attempt %d threw: %s — retrying.",
+                            attempt, correction_err,
+                        )
+
                 if not guillotine_passed:
-                    logger.error("🚫 SANDBOX GUILLOTINE: PR creation blocked. Code still failing after %d retries.", max_retries)
+                    logger.error(
+                        "🚫 SANDBOX GUILLOTINE: PR creation blocked — "
+                        "patch still failing after %d self-correction attempts.",
+                        max_sandbox_attempts,
+                    )
                     continue
-            # --------------------------
+            # ----------------------------------------------------------
 
             # Create PR
             try:
