@@ -335,11 +335,11 @@ class SuperHumanLoop:
         """
         import time as time_module
 
-        min_stars, max_stars = self.config.discovery.stars_range
+        min_stars, max_stars = self._pipeline.config.discovery.stars_range
 
         # Get the authenticated username
         try:
-            user: dict = await self._github.get_authenticated_user()
+            user: dict = await self._pipeline._github.get_authenticated_user()
             username: str = user.get("login", "")
         except Exception as exc:
             logger.warning("Cannot sync friendly repos — could not get authenticated user: %s", exc)
@@ -353,7 +353,7 @@ class SuperHumanLoop:
         start = time_module.time()
 
         try:
-            merged_prs = await self._github.fetch_user_merged_prs(username)
+            merged_prs = await self._pipeline._github.fetch_user_merged_prs(username)
         except Exception as exc:
             logger.warning("GitHub search API failed during friendly-repos sync: %s", exc)
             return 0
@@ -379,7 +379,7 @@ class SuperHumanLoop:
 
             # Check repo stars to respect the configured star range
             try:
-                repo_details = await self._github.get_repo_details(owner, repo_full_name.split("/")[1])
+                repo_details = await self._pipeline._github.get_repo_details(owner, repo_full_name.split("/")[1])
                 stars = getattr(repo_details, "stars", 0) or 0
             except Exception:
                 # If we can't get stars, skip the repo
@@ -447,7 +447,7 @@ class SuperHumanLoop:
         from farm_agent.pr.janitor import PRJanitor
 
         try:
-            user: dict = await self._github.get_authenticated_user()
+            user: dict = await self._pipeline._github.get_authenticated_user()
             username: str = user.get("login", "")
         except Exception as exc:
             logger.warning("Janitor sweep: could not get GitHub username: %s", exc)
@@ -459,7 +459,7 @@ class SuperHumanLoop:
                 "details": [],
             }
 
-        janitor = PRJanitor(self._github, username, self.config.llm)
+        janitor = PRJanitor(self._pipeline._github, username, self._pipeline.config.llm)
         logger.info("🧹 Janitor sweep triggered via Telegram /clean command.")
         result = await janitor.sweep_and_destroy()
         logger.info(
