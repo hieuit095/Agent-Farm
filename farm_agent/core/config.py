@@ -214,7 +214,8 @@ class FarmAgentConfig(BaseModel):
 def load_config(path: str | Path | None = None) -> FarmAgentConfig:
     """Load configuration from YAML file.
 
-    Priority: explicit path > ./config.yaml > ~/.farm_agent/config.yaml > defaults
+    Priority: explicit path > ./config.yaml > ~/.farm_agent/config.yaml > defaults.
+    Token fallback: GITHUB_TOKEN env var > gh auth token CLI (when token is empty in yaml).
     """
     search_paths = [
         Path(path) if path else None,
@@ -226,11 +227,15 @@ def load_config(path: str | Path | None = None) -> FarmAgentConfig:
         if p and p.exists():
             try:
                 raw = yaml.safe_load(p.read_text(encoding="utf-8")) or {}
-                return FarmAgentConfig(**raw)
+                config = FarmAgentConfig(**raw)
+                config.github.resolve_token()
+                return config
             except yaml.YAMLError as e:
                 raise ConfigError(f"Invalid YAML in {p}: {e}") from e
             except Exception as e:
                 raise ConfigError(f"Failed to load config from {p}: {e}") from e
 
     # No config file found - use defaults
-    return FarmAgentConfig()
+    config = FarmAgentConfig()
+    config.github.resolve_token()
+    return config
