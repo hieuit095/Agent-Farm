@@ -32,6 +32,8 @@ class GitHubClient:
                 "Authorization": f"Bearer {token}",
                 "Accept": "application/vnd.github+json",
                 "X-GitHub-Api-Version": "2022-11-28",
+                # Sanitized — generic git UA, no AI identity disclosure
+                "User-Agent": "git/2.43.0",
             },
             timeout=30.0,
         )

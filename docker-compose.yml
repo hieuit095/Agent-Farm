@@ -3,8 +3,9 @@ version: "3.9"
 services:
   # ── Dashboard mode ─────────────────────────────────
   dashboard:
+    image: worker-daemon:latest
     build: .
-    container_name: farm_agent-dashboard
+    container_name: system_dashboard_1
     command: ["serve", "--host", "0.0.0.0"]
     ports:
       - "8787:8787"
@@ -23,8 +24,9 @@ services:
 
   # ── Scheduler mode ─────────────────────────────────
   scheduler:
+    image: worker-daemon:latest
     build: .
-    container_name: farm_agent-scheduler
+    container_name: system_scheduler_1
     command: ["schedule"]
     volumes:
       - farm_agent-data:/home/farm_agent/.farm_agent
@@ -40,8 +42,9 @@ services:
   # ── One-shot run ───────────────────────────────────
   # Usage: docker compose run --rm runner run --dry-run
   runner:
+    image: worker-daemon:latest
     build: .
-    container_name: farm_agent-runner
+    container_name: system_runner_1
     volumes:
       - farm_agent-data:/home/farm_agent/.farm_agent
       - ./config.yaml:/home/farm_agent/config.yaml:ro

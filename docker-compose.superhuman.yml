@@ -1,9 +1,10 @@
 services:
   agent:
+    image: worker-daemon:latest
     build:
       context: .
       dockerfile: Dockerfile.superhuman
-    container_name: farm_agent_core
+    container_name: system_worker_1
     restart: unless-stopped
     environment:
       - TZ=Asia/Ho_Chi_Minh

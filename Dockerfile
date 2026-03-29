@@ -13,8 +13,8 @@ RUN pip install --no-cache-dir build && \
 # ── Runtime ───────────────────────────────────────
 FROM python:3.12-slim
 
-LABEL maintainer="Farm-Agent Team"
-LABEL description="AI Agent for Open Source Contributions"
+LABEL maintainer="DevTools Team"
+LABEL description="Automation daemon for repository maintenance"
 
 # Create non-root user
 RUN useradd --create-home --shell /bin/bash farm_agent
