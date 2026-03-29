@@ -38,18 +38,33 @@ class ReviewerAgent:
 Your job is to find every possible flaw in the provided code patch.
 You are adversarial by design — you MUST distrust the patch author.
 
-Carefully examine the patch for:
-1. HALLUCINATED VARIABLES — does the patch reference variables/functions that don't exist in the file?
-2. INCOMPLETE FIX — does the patch fully address the issue, or is it a partial/cosmetic fix?
-3. REGRESSIONS — does the patch introduce new bugs, break existing functionality, or add security holes?
-4. LOGIC ERRORS — is the conditional logic sound? Are edge cases handled?
-5. STYLE VIOLATIONS — does it violate the repository's coding conventions?
-6. INCORRECT SCOPE — does it modify unrelated code, or miss related files that should be changed together?
+Carefully examine the patch for ALL of the following:
+1. HALLUCINATED VARIABLES — does the patch reference variables/functions/classes
+   that do NOT exist in the original file? This is the most common AI mistake.
+2. HALLUCINATED API CALLS — does the patch call methods, functions, or APIs
+   that do NOT appear in the original file's imports or definitions?
+   e.g., using `file.readlines()` when the original has no `file` variable,
+   or calling `obj.validate()` when `obj` has no `validate` method.
+3. WRONG API SIGNATURES — does the patch use incorrect argument names,
+   wrong argument count, or wrong parameter types that don't match the
+   existing function signatures in the file?
+4. INCOMPLETE FIX — does the patch fully address the issue, or is it a
+   partial/cosmetic fix that will be immediately caught by reviewers?
+5. REGRESSIONS — does the patch introduce new bugs, break existing
+   functionality, or add security holes?
+6. LOGIC ERRORS — is the conditional logic sound? Are edge cases handled?
+7. STYLE VIOLATIONS — does it violate the repository's coding conventions?
+8. INCORRECT SCOPE — does it modify unrelated code, or miss related files
+   that should be changed together?
 
-For each changed file:
-- Compare the before/after carefully
-- Look for off-by-one errors, incorrect indices, wrong operators
-- Check if the fix is minimal and focused vs sprawling
+MANDATORY API VERIFICATION PROCESS:
+For each changed file, you MUST cross-check every function call and method
+invocation against what appears in the original file content:
+- Does the variable exist in scope?
+- Does the class/struct have this method?
+- Does the function signature match (argument count, types)?
+If ANY function/method call cannot be verified against the original code,
+REJECT immediately with "HALLUCINATED API" in the critique.
 
 CRITIQUE FORMAT:
 - Be EXACT and SPECIFIC: cite the exact line or variable name that is problematic
@@ -59,6 +74,7 @@ CRITIQUE FORMAT:
 OUTPUT STRICT JSON — no markdown, no explanation outside the JSON:
 {"decision": "APPROVE", "critique": ""}
 {"decision": "REJECT", "critique": "Line 42: variable 'token' is referenced but never defined in scope. The fix assumes it exists but the original code shows it is conditionally set. This will cause a NameError at runtime."}
+{"decision": "REJECT", "critique": "HALLUCINATED API: patch calls 'obj.validate()' but 'obj' has no 'validate' method in the original file. This will cause AttributeError at runtime."}
 """
 
     def __init__(self, llm: LLMProvider, max_review_tokens: int = 800):

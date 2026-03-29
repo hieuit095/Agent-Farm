@@ -820,6 +820,49 @@ def cleanup(ctx, yes):
     asyncio.run(_cleanup())
 
 
+@cli.command("reset-db")
+@click.option("--yes", "-y", is_flag=True, help="Skip confirmation prompt (for scripting)")
+@click.pass_context
+def reset_db(ctx, yes):
+    """🗑️ Reset the run history database (keeps submitted_prs for Alumni Sync).
+
+    Safely clears the run_log and analyzed_repos tables so the agent starts
+    fresh. submitted_prs is preserved for the Alumni Sync patrol feature.
+
+    Requires confirmation before executing (use --yes to skip).
+    """
+    from farm_agent.core.config import load_config
+
+    config = load_config(ctx.obj["config_path"])
+    db_path = config.storage.db_path
+
+    console.print(f"\n[bold]Database reset[/bold]")
+    console.print(f"  Path: {db_path}")
+    console.print(f"  Tables to CLEAR: run_log, analyzed_repos")
+    console.print(f"  Tables to KEEP: submitted_prs, blacklisted_repos, repo_preferences")
+
+    if not yes and not click.confirm("\nProceed with reset?"):
+        console.print("[dim]Cancelled.[/dim]")
+        return
+
+    try:
+        import sqlite3
+        conn = sqlite3.connect(db_path)
+        cur = conn.cursor()
+
+        cur.execute("DELETE FROM run_log")
+        cur.execute("DELETE FROM analyzed_repos")
+        conn.commit()
+        affected = cur.rowcount
+        conn.close()
+
+        console.print(f"[green]✅ Reset complete.[/green]")
+        console.print(f"   Cleared: run_log, analyzed_repos")
+
+    except Exception as e:
+        console.print(f"[red]❌ Reset failed: {e}[/red]")
+
+
 @cli.command("config")
 @click.pass_context
 def show_config(ctx):

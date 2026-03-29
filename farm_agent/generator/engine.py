@@ -741,6 +741,31 @@ class ContributionGenerator:
                 path = str(item["path"]).strip().strip("`\"'")
                 is_new = item.get("is_new_file", False)
 
+                # ── Discipline Protocol: Block scratchpad/note files ────────────
+                if is_new:
+                    _SCRATCHPAD_PATTERNS = (
+                        "note", "explore", "exploration", "scratchpad",
+                        "temp_", "tmp_", "draft", "wip_", "thought",
+                    )
+                    path_lower = path.lower()
+                    is_scratchpad = any(p in path_lower for p in _SCRATCHPAD_PATTERNS)
+                    # Block .md/.txt placed in src/ or source/ directories
+                    is_md_in_src = (
+                        path_lower.startswith(("src/", "source/", "app/", "lib/"))
+                        and path_lower.endswith((".md", ".txt"))
+                    )
+                    if is_scratchpad or is_md_in_src:
+                        logger.warning(
+                            "🗑️ Discipline Protocol: rejecting new file '%s' "
+                            "(scratchpad=%s, md_in_src=%s) — "
+                            "non-code or note file in source dir is forbidden.",
+                            path, is_scratchpad, is_md_in_src,
+                        )
+                        raise GenerationError(
+                            f"Generator produced a forbidden scratchpad/note file: {path}"
+                        )
+                # ─────────────────────────────────────────────────────────────────
+
                 if "edits" in item and not is_new:
                     # Search/replace mode — apply edits to original content
                     original = context.relevant_files.get(path, "")

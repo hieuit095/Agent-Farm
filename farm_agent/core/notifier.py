@@ -61,6 +61,8 @@ class TelegramNotifier:
                 {"command": "status", "description": "Check if the bot is online and running"},
                 {"command": "rptoday", "description": "View the PRs generated today"},
                 {"command": "quota", "description": "Check Minimax API budget and usage"},
+                {"command": "update", "description": "Trigger Alumni Sync — scan new merged PRs"},
+                {"command": "clean", "description": "Run Janitor — destroy garbage PRs on GitHub"},
                 {"command": "help", "description": "Show the help menu"}
             ]
         }
@@ -72,8 +74,14 @@ class TelegramNotifier:
         except Exception as e:
             logger.warning("Failed to register Telegram commands menu: %s", e)
 
-    async def start_polling(self, memory_instance) -> None:
-        """Run long-polling loop to receive Telegram commands."""
+    async def start_polling(self, memory_instance, on_update_callback=None, on_clean_callback=None) -> None:
+        """Run long-polling loop to receive Telegram commands.
+
+        Args:
+            memory_instance: The Memory instance for DB queries.
+            on_update_callback: Optional async callable — triggers Alumni Sync.
+            on_clean_callback: Optional async callable — triggers PR Janitor sweep.
+        """
         import asyncio
         if not self.enabled or not self._client:
             return
@@ -91,7 +99,7 @@ class TelegramNotifier:
 
                 for result in data.get("result", []):
                     self._last_update_id = result["update_id"]
-                    
+
                     message = result.get("message")
                     if not message:
                         continue
@@ -103,7 +111,12 @@ class TelegramNotifier:
 
                     text = message.get("text", "").strip()
                     if text.startswith("/"):
-                        await self._handle_command(text, memory_instance)
+                        await self._handle_command(
+                            text,
+                            memory_instance,
+                            on_update_callback=on_update_callback,
+                            on_clean_callback=on_clean_callback,
+                        )
 
             except Exception as e:
                 logger.warning("Telegram polling error: %s", e)
@@ -111,7 +124,7 @@ class TelegramNotifier:
             
             await asyncio.sleep(1)
 
-    async def _handle_command(self, text: str, memory_instance) -> None:
+    async def _handle_command(self, text: str, memory_instance, on_update_callback=None, on_clean_callback=None) -> None:
         """Handle incoming C2 commands from Telegram."""
         import time
         from datetime import UTC, datetime
@@ -161,6 +174,56 @@ class TelegramNotifier:
             count_7d = row[0] if row else 0
             
             await self.send_message(f"📈 <b>Minimax Quota Usage:</b>\nLast 5h: {count_5h}/1000\nLast 7d: {count_7d}/10000")
+
+        elif command == "/update":
+            import asyncio
+            # Notify user immediately that sync has started
+            await self.send_message(
+                "⏳ Sếp đợi em một chút nhé, em đang lên GitHub lật lại sổ Nam Tào "
+                "xem có khách VIP nào mới gộp PR không..."
+            )
+            if on_update_callback is not None:
+                try:
+                    count = await on_update_callback()
+                    await self.send_message(
+                        f"✅ Báo cáo Sếp! Em đã quét xong. "
+                        f"Thêm được {count} khách VIP mới vào danh sách Familiar Grounds ạ!"
+                    )
+                except Exception as e:
+                    await self.send_message(
+                        f"❌ Sếp ơi, API GitHub đang dở chứng, "
+                        f"đồng bộ thất bại rồi ạ. Lỗi: {e}"
+                    )
+            else:
+                await self.send_message(
+                    "⚠️ Alumni Sync callback not configured. Sync is disabled."
+                )
+
+        elif command == "/clean":
+            # /clean triggers the PR Janitor sweep — destroy garbage PRs via LLM
+            await self.send_message(
+                "🧹 Sếp đợi em xách chổi lên GitHub quét dọn mấy cái PR rác rưởi nhé..."
+            )
+            if on_clean_callback is not None:
+                try:
+                    result = await on_clean_callback()
+                    scanned = result.get("total_scanned", 0)
+                    destroyed = result.get("garbage_closed", 0)
+                    spared = result.get("critical_spared", 0)
+                    await self.send_message(
+                        f"✨ Dọn xong rồi Sếp ơi! "
+                        f"Tổng quét: {scanned}. "
+                        f"Đã chém bay màu: {destroyed} rác. "
+                        f"Giữ lại: {spared} tinh hoa."
+                    )
+                except Exception as e:
+                    await self.send_message(
+                        f"❌ Ây da, cán chổi bị gãy rồi Sếp ơi. Lỗi: {e}"
+                    )
+            else:
+                await self.send_message(
+                    "⚠️ Janitor sweep callback not configured. Cleanup is disabled."
+                )
 
     async def close(self) -> None:
         """Release the persistent HTTP connection pool."""

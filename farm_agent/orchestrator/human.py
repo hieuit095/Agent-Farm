@@ -435,6 +435,42 @@ class SuperHumanLoop:
         )
         return new_count
 
+    async def _run_janitor_sweep(self) -> dict:
+        """Run the PR Janitor sweep — destroy garbage PRs via LLM evaluation.
+
+        Instantiates PRJanitor with the current GitHub client and config,
+        runs sweep_and_destroy(), and returns the summary dict.
+
+        Returns:
+            dict with keys: total_scanned, garbage_closed, critical_spared, errors, details
+        """
+        from farm_agent.pr.janitor import PRJanitor
+
+        try:
+            user: dict = await self._github.get_authenticated_user()
+            username: str = user.get("login", "")
+        except Exception as exc:
+            logger.warning("Janitor sweep: could not get GitHub username: %s", exc)
+            return {
+                "total_scanned": 0,
+                "garbage_closed": 0,
+                "critical_spared": 0,
+                "errors": 1,
+                "details": [],
+            }
+
+        janitor = PRJanitor(self._github, username, self.config.llm)
+        logger.info("🧹 Janitor sweep triggered via Telegram /clean command.")
+        result = await janitor.sweep_and_destroy()
+        logger.info(
+            "🧹 Janitor sweep complete: scanned=%d, destroyed=%d, spared=%d, errors=%d",
+            result["total_scanned"],
+            result["garbage_closed"],
+            result["critical_spared"],
+            result["errors"],
+        )
+        return result
+
     async def _do_patrol(self) -> None:
         """Execute a single PR Patrol action."""
         from farm_agent.pr.patrol import PRPatrol
@@ -527,7 +563,13 @@ class SuperHumanLoop:
 
         # Start telegram listener in the background with crash recovery
         if getattr(self, "_notifier", None):
-            self._poller_task = asyncio.create_task(self._notifier.start_polling(self._memory))
+            self._poller_task = asyncio.create_task(
+                self._notifier.start_polling(
+                    self._memory,
+                    on_update_callback=self._sync_historical_friendly_repos,
+                    on_clean_callback=self._run_janitor_sweep,
+                )
+            )
             self._poller_task.add_done_callback(self._poller_done_callback)
 
         # ── Familiar Grounds: sync historical merged PRs on startup ─────────
@@ -754,7 +796,13 @@ class SuperHumanLoop:
         await asyncio.sleep(10)
         if getattr(self, "_notifier", None):
             try:
-                self._poller_task = asyncio.create_task(self._notifier.start_polling(self._memory))
+                self._poller_task = asyncio.create_task(
+                    self._notifier.start_polling(
+                        self._memory,
+                        on_update_callback=self._sync_historical_friendly_repos,
+                        on_clean_callback=self._run_janitor_sweep,
+                    )
+                )
                 self._poller_task.add_done_callback(self._poller_done_callback)
                 logger.info("Telegram poller restarted successfully")
             except Exception as exc:

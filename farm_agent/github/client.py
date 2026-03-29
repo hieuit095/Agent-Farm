@@ -23,7 +23,7 @@ GITHUB_API = "https://api.github.com"
 class GitHubClient:
     """Async GitHub REST API client."""
 
-    def __init__(self, token: str, rate_limit_buffer: int = 100):
+    def __init__(self, token: str, rate_limit_buffer: int = 3):
         self._token = token
         self._rate_limit_buffer = rate_limit_buffer
         self._client = httpx.AsyncClient(

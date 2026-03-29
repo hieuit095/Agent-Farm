@@ -21,7 +21,7 @@ class GitHubConfig(BaseModel):
     max_prs_per_day: int = 10
     min_daily_prs: int = 3
     max_daily_prs: int = 10
-    rate_limit_buffer: int = 100
+    rate_limit_buffer: int = 3  # Stop API calls when remaining < 3 to prevent secondary rate limits
     dco_signoff: bool = True  # Auto-append Signed-off-by to commit messages
 
     @model_validator(mode="after")

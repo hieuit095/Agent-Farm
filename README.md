@@ -5,10 +5,10 @@
 **Autonomous AI Agent That Contributes to Open Source — Without Looking Like One.**
 
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-3776AB?logo=python&logoColor=white)](https://python.org)
-[![Docker](https://img.shields.io/badge/docker-ready-2496ED?logo=docker&logoColor=white)](Dockerfile.superhuman)
+[![Docker](https://img.shields.io/badge/docker-ready-2496ED?logo=docker&logoColor=white)](docker-compose.superhuman.yml)
 [![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue)](LICENSE)
 [![Code Style: Ruff](https://img.shields.io/badge/code%20style-ruff-000000?logo=ruff)](https://github.com/astral-sh/ruff)
-[![Tests](https://img.shields.io/badge/tests-107%20passed-brightgreen?logo=pytest)](tests/)
+[![Tests](https://img.shields.io/badge/tests-561%20passed-brightgreen?logo=pytest)](tests/)
 
 *An LLM-powered agent that discovers repositories, analyzes code for real bugs, generates fixes, opens Pull Requests, responds to maintainer feedback, and self-heals failed CI — all while mimicking human behavioral patterns to avoid spam detection.*
 
@@ -24,7 +24,28 @@ Most "AI contribution" bots spam repositories with trivial changes — adding do
 
 ---
 
-## Key Features
+## 7 Enterprise-Grade Protocols
+
+### 1. Hybrid Contribution Router (Issue-First vs Direct PR)
+Analyzes open GitHub Issues first — if a critical issue exists, the agent solves it directly. Falls back to static code analysis only when no actionable issues are found. Prevents wasted effort on cosmetic changes that maintainers don't want.
+
+### 2. Familiar Grounds (Alumni Repo Prioritization)
+Scores and prioritizes repositories the user has previously contributed to (Alumni repos). These repos have established trust — lower review friction, faster merges, and higher acceptance rates.
+
+### 3. Immortal Memory (SQLite WAL Persistence)
+All run state, PR history, analyzed repos, and API quota usage are persisted in SQLite with WAL mode. The agent survives restarts without losing state. Tracks 7-day rolling quota to prevent over-contributing.
+
+### 4. Alumni Sync (24h Background PR Synchronization)
+A background cron job runs every 24 hours, syncing the PR state database with live GitHub — tracking which PRs were merged, closed, or need attention. Keeps the patrol agent accurately informed at all times.
+
+### 5. Polyglot Guillotine (Multi-language Docker Execution)
+Every generated patch is validated inside an isolated Docker container specific to the target language before any PR is created. Supports Python, Node.js, TypeScript, Rust, Go, Java, C#, Ruby, PHP, C, C++ via Alpine-based images. If the patch fails to compile or tests red, it is rejected — no bad PRs reach GitHub.
+
+### 6. X-Ray Vision (Local Ephemeral RAG via ChromaDB)
+Before generating cross-file patches, the agent builds a local ChromaDB vector index of the repository using a word-frequency embedding model. It queries semantically relevant context (up to 8 chunks) to ensure patches are contextually accurate and don't break downstream code.
+
+### 7. Red Team Adversarial Review (Independent Security Auditor Agent)
+The Generator produces a patch, then an independently-instantiated ReviewerAgent (with its own LLM provider and paranoid security auditor system prompt) evaluates it. If REJECTED, the Generator rewrites with the critique injected — up to 2 retries. This adversarial loop ensures no substandard, exploratory, or incomplete PRs escape to GitHub.
 
 ### 🧠 Agentic LLM Engine
 
@@ -138,18 +159,21 @@ farm_agent target https://github.com/owner/repo --dry-run
 farm_agent superhuman
 ```
 
-### 4. Deploy (Edge Device)
+### 4. Deploy (Production / 24/7)
 
 ```sh
 # Create .env with secrets
 echo "GITHUB_TOKEN=ghp_xxx" > .env
 echo "MINIMAX_API_KEY=xxx" >> .env
 
-# Launch containerized agent
-docker compose -f docker-compose.superhuman.yml up -d
+# Build and launch the autonomous daemon
+docker compose -f docker-compose.superhuman.yml up -d --build
 
-# Monitor logs
+# Monitor logs in real time
 docker compose -f docker-compose.superhuman.yml logs -f
+
+# View container status
+docker compose -f docker-compose.superhuman.yml ps
 ```
 
 See [DEPLOYMENT.md](DEPLOYMENT.md) for full edge deployment guide.
@@ -167,10 +191,12 @@ See [DEPLOYMENT.md](DEPLOYMENT.md) for full edge deployment guide.
 | `farm_agent target <url>` | Target a specific repository |
 | `farm_agent analyze <url>` | Analyze without creating PRs |
 | `farm_agent solve <url>` | Solve open issues in a repo |
+| `farm_agent janitor` | Scan and auto-close garbage PRs via LLM |
+| `farm_agent reset-db` | Clear run history (keeps submitted_prs) |
 | `farm_agent status` | Show submitted PR statuses |
 | `farm_agent stats` | Overall contribution statistics |
 | `farm_agent leaderboard` | Success rates per repository |
-| `farm_agent cleanup` | Delete forks with all PRs merged/closed |
+| `farm_agent cleanup-forks` | Delete forks with all PRs merged/closed |
 | `farm_agent sysinfo` | System health, memory, rate limits |
 | `farm_agent notify-test` | Send a test notification |
 | `farm_agent serve` | Start web dashboard (port 8787) |
@@ -180,17 +206,19 @@ See [DEPLOYMENT.md](DEPLOYMENT.md) for full edge deployment guide.
 
 ## Anti-Farming Pipeline
 
-Every finding passes through a dual-gate filter before becoming a PR:
+Every finding passes through a triple-gate filter before becoming a PR:
 
 ```
-Finding → Gate 1: Impact Filter → Gate 2: Keyword Filter → PR
-          ↓ drop if TRIVIAL/LOW     ↓ drop if farming keyword
-          (default: TRIVIAL)        (bypass for HIGH/CRITICAL)
+Finding → Gate 1: Impact Filter → Gate 2: Keyword Blacklist → Gate 3: Generator Sanity Check → PR
+          ↓ drop MEDIUM/LOW/TRIVIAL  ↓ drop farming keywords       ↓ drop no-op patches
+          (only CRITICAL/HIGH pass)   in title OR description        (search == replace)
 ```
 
-**Gate 1** drops any finding with `impact_level ∈ {TRIVIAL, LOW}`. Since the default is `TRIVIAL`, any finding the LLM fails to classify is automatically rejected (fail-safe).
+**Gate 1 — Impact Level** drops any finding with `impact_level ∈ {TRIVIAL, LOW, MEDIUM}`. Only `CRITICAL` and `HIGH` survive.
 
-**Gate 2** scans titles for farming keywords (`docstring`, `format`, `style`, `whitespace`, etc.) but **only** for `LOW`/`MEDIUM` severity findings. A `CRITICAL` finding like "Format string injection" will never be accidentally filtered.
+**Gate 2 — Keyword Blacklist** drops any finding where the title OR description contains farming keywords (case-insensitive): `understand`, `explore`, `read`, `docs`, `typo`, `format`, `whitespace`, `comment`, `spell`, `styling`, `test`, `chore`, etc. No bypass — even a `HIGH` finding with "understand" in the title is dropped.
+
+**Gate 3 — Generator Sanity Check** runs after patch generation. Any patch where `search == replace` (no-op) is immediately rejected and the PR is aborted.
 
 ---
 

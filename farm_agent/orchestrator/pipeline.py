@@ -38,6 +38,7 @@ logger = logging.getLogger(__name__)
 # Files that should NOT be modified/created by Farm-Agent
 # These are meta/governance files that projects manage themselves
 PROTECTED_META_FILES = {
+    # Documentation
     "CONTRIBUTING.md",
     ".github/CONTRIBUTING.md",
     "docs/CONTRIBUTING.md",
@@ -51,6 +52,59 @@ PROTECTED_META_FILES = {
     "SECURITY.md",
     ".github/CODEOWNERS",
     ".all-contributorsrc",
+    # ── Config / Build / Tooling files — NEVER tweak ──────────────────
+    # Compiler & type-checker configs
+    "tsconfig.json",
+    "tsconfig.base.json",
+    "tsconfig.build.json",
+    "tsconfig.app.json",
+    "tsconfig.node.json",
+    "tsconfig.spec.json",
+    "jsconfig.json",
+    ".tsbuildinfo",
+    # Linter & formatter configs
+    ".eslintrc",
+    ".eslintrc.js",
+    ".eslintrc.cjs",
+    ".eslintrc.json",
+    ".eslintrc.yaml",
+    ".eslintignore",
+    ".prettierrc",
+    ".prettierrc.js",
+    ".prettierrc.cjs",
+    ".prettierrc.json",
+    ".prettierrc.yaml",
+    ".prettierignore",
+    ".editorconfig",
+    # Bundler configs
+    "webpack.config.js",
+    "webpack.config.ts",
+    "webpack.config.base.js",
+    "vite.config.ts",
+    "vite.config.js",
+    "rollup.config.js",
+    ".babelrc",
+    "babel.config.js",
+    "babel.config.json",
+    # Package manager & dependency configs
+    "package.json",
+    "package-lock.json",
+    "yarn.lock",
+    "pnpm-lock.yaml",
+    "npm-shrinkwrap.json",
+    ".npmrc",
+    # CI/CD configs (not code logic)
+    ".github/workflows/*.yml",
+    ".github/workflows/*.yaml",
+    "azure-pipelines.yml",
+    ".gitlab-ci.yml",
+    "Jenkinsfile",
+    # Env & secrets
+    ".env",
+    ".env.local",
+    ".env.development",
+    ".env.production",
+    ".env.example",
 }
 
 # File extensions to skip — doc/config-only changes are low-value
@@ -731,9 +785,29 @@ class ContribPipeline:
 
             # Skip findings on protected meta files
             basename = fp.rsplit("/", 1)[-1] if "/" in fp else fp
+            # Exact match (e.g., tsconfig.json, .eslintrc)
             if basename.upper() in PROTECTED_META_FILES:
                 logger.debug("⏭️ Pre-filter: skip protected file %s", fp)
                 continue
+            # Pattern match for config files (e.g., .github/workflows/ci.yml, tsconfig.base.json)
+            fp_lower = fp.lower()
+            for protected in PROTECTED_META_FILES:
+                if protected.startswith(".github/workflows/"):
+                    pattern = protected[len(".github/workflows/"):]
+                    if fp_lower.endswith(pattern) or f"/{pattern}" in fp_lower:
+                        logger.debug("⏭️ Pre-filter: skip protected workflow file %s", fp)
+                        break
+                elif fp_lower == protected.lower():
+                    break
+            else:
+                # Also block tsconfig-strict, tsconfig-noImplicitAny, etc.
+                _CONFIG_BOOTSTRAP_KEYWORDS = {
+                    "tsconfig", "eslint", "prettier", "babel", "webpack",
+                    "vite.config", "rollup", "jsconfig", "package.json",
+                }
+                if any(kw in fp_lower for kw in _CONFIG_BOOTSTRAP_KEYWORDS):
+                    logger.debug("⏭️ Pre-filter: skip config/build file %s", fp)
+                    continue
 
             filtered.append(f)
 
@@ -766,6 +840,11 @@ class ContribPipeline:
             # Cosmetic
             "typo", "typo in", "grammar", "misspell",
             "missing type hint", "type annotation", "unused import",
+            # ── Config / Compiler / Tooling tweaks — NEVER tweak these ──────────
+            "no-explicit-any", "noimplicitany", "strict mode", "strict: true",
+            "compiler flag", "compiler option", "tsconfig", "eslint", "prettier",
+            "babel config", "webpack config", "vite config", "rollup config",
+            "linter rule", "lint rule", "tsconfig.json", "package.json",
         }
         pre_farming_count = len(analysis.findings)
         high_impact_findings = []
