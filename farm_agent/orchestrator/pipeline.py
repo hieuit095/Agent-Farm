@@ -1272,20 +1272,14 @@ class ContribPipeline:
 
         # Build a concise issue title
         issue_title = finding.title
+        finding_type = finding.type.value if finding.type else "unknown"
         if not issue_title or issue_title.lower() == "untitled finding":
-            issue_title = f"Potential {finding.type.value.replace('_', ' ')} in {finding.file_path}"
+            issue_title = f"Potential {finding_type.replace('_', ' ')} in {finding.file_path}"
 
         # Generate issue body — use _pr_manager if available, else inline fallback
         if self._pr_manager is not None:
             issue_body = self._pr_manager._generate_issue_body(fake_contribution)
         else:
-            # Inline fallback: lazy senior dev style
-            issue_body = (
-                f"Spotted a potential issue in `{finding.file_path}`.\n\n"
-                f"If the team thinks this is worth addressing, I can put together a PR. Happy to help."
-            )
-
-        # Create the issue on GitHub
             # Inline fallback: lazy senior dev style
             issue_body = (
                 f"Spotted a potential issue in `{finding.file_path}`.\n\n"
@@ -1685,8 +1679,7 @@ class ContribPipeline:
                 validated.append(finding)
 
             except Exception as e:
-                logger.warning("Validation failed for %s: %s, keeping", finding.title, e)
-                validated.append(finding)
+                logger.warning("Validation failed for %s: %s", finding.title, e)
 
         return validated
 
@@ -1722,8 +1715,9 @@ class ContribPipeline:
                     ]
                     if any(kw in content_lower for kw in ban_keywords):
                         return True
-            except Exception:
-                pass
+            except Exception as e:
+                logger.error("AI policy check failed: %s — continuing", e)
+                continue
 
         # Also check CONTRIBUTING.md for anti-AI language
         try:
@@ -1743,10 +1737,12 @@ class ContribPipeline:
                         ]
                         if any(phrase in content_lower for phrase in ban_phrases):
                             return True
-                except Exception:
-                    pass
-        except Exception:
-            pass
+                except Exception as e:
+                    logger.error("AI policy check failed: %s — denying by default", e)
+                    return False
+        except Exception as e:
+            logger.error("AI policy check failed: %s — denying by default", e)
+            return False
 
         return False
 

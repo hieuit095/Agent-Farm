@@ -138,7 +138,10 @@ class GitHubClient:
 
             return response.json() if response.content else None
 
-        raise last_error  # should never reach here
+        if last_error is not None:
+            raise last_error
+        else:
+            raise RuntimeError("All retries failed with no recorded exception")
 
     async def _get(self, url: str, **kwargs) -> Any:
         return await self._request("GET", url, **kwargs)
@@ -401,8 +404,13 @@ class GitHubClient:
                 "email": author_email,
                 "date": author_date
             }
-        except Exception:
-            pass
+        except Exception as e:
+            logger.error("Failed to get authenticated user: %s", e)
+            # Ensure author_email/author_name are always defined with safe fallbacks
+            if "author_email" not in locals():
+                author_email = "unknown@contrib.ai"
+            if "author_name" not in locals():
+                author_name = "ContribAI"
 
         return await self._put(f"/repos/{owner}/{repo}/contents/{path}", json=payload)
 

@@ -232,7 +232,7 @@ class MinimaxProvider(LLMProvider):
         # ── PROACTIVE LLM THROTTLING: cap concurrent API calls ─────────────
         # No more than 2 LLM requests may be in-flight simultaneously.
         # This prevents MiniMax API 429s from burst concurrent calls.
-        self._semaphore = asyncio.Semaphore(2)
+        self._semaphore = asyncio.Semaphore(4)
 
     async def complete(self, prompt: str, *, system: str | None = None, **kwargs) -> str:
         messages = []
