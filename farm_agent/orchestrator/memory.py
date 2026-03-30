@@ -98,6 +98,12 @@ CREATE TABLE IF NOT EXISTS api_usage_log (
     timestamp   REAL NOT NULL,
     provider    TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS task_schedule (
+    task_key    TEXT PRIMARY KEY,
+    next_run    TEXT NOT NULL,
+    updated_at  TEXT NOT NULL
+);
 """
 
 
@@ -656,4 +662,24 @@ class Memory:
             )
             self._last_quota_cleanup = now
 
+        await self._db.commit()
+
+    # ── Task Schedule (for non-blocking skip logic) ─────────────────────────
+
+    async def get_task_schedule(self, task_key: str) -> str | None:
+        """Get the next_run ISO timestamp for a task, or None if not scheduled."""
+        cursor = await self._db.execute(
+            "SELECT next_run FROM task_schedule WHERE task_key = ?",
+            (task_key,),
+        )
+        row = await cursor.fetchone()
+        return row[0] if row else None
+
+    async def set_task_schedule(self, task_key: str, next_run: str) -> None:
+        """Set the next_run ISO timestamp for a task."""
+        await self._db.execute(
+            """INSERT OR REPLACE INTO task_schedule (task_key, next_run, updated_at)
+               VALUES (?, ?, ?)""",
+            (task_key, next_run, datetime.now(UTC).isoformat()),
+        )
         await self._db.commit()

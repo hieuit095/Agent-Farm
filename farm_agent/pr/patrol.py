@@ -118,12 +118,25 @@ CONTROLLED_TEST_MARKER = "[CONTROLLED_TEST]"
 
 # CI check names and log patterns that indicate infrastructure/auth failures
 # that CANNOT be fixed via code changes.  The bot must skip these.
-CI_INFRA_IGNORE_PATTERNS: list[str] = [
-    # Deployment preview services (require manual auth for fork PRs)
+# P1-OPSEC-3: Exact names (no substring false-positives) + prefix matches for namespaced bots
+CI_INFRA_IGNORE_NAMES: frozenset[str] = {
     "vercel",
+    "netlify",
+    "codecov",
     "cloudflare",
     "pages",
-    "netlify",
+    "cla-bot",
+    "license-check",
+}
+CI_INFRA_IGNORE_PREFIXES: tuple[str, ...] = (
+    "vercel/",
+    "netlify/",
+    "codecov/",
+    "cla/",
+    "license/",
+)
+CI_INFRA_IGNORE_PATTERNS: list[str] = [
+    # Deployment preview services (require manual auth for fork PRs)
     # Missing credentials / secrets
     "no existing credentials found",
     "unauthorized",
@@ -131,13 +144,7 @@ CI_INFRA_IGNORE_PATTERNS: list[str] = [
     "missing secret",
     "secrets.",
     # Coverage-only checks (not fixable via code)
-    "codecov",
     "coverage",
-    # CLA / license signing bots
-    "cla/",
-    "license/",
-    "cla-bot",
-    "license-check",
 ]
 
 
@@ -841,6 +848,23 @@ class PRPatrol:
                 except Exception:
                     logger.warning("Could not fetch file: %s", file_path)
 
+            # P1-OPSEC-1: Non-blocking skip — check scheduled run time BEFORE doing any work
+            task_key = f"code_fix:{pr_record['repo']}:{pr_data['number']}:{file_path or 'no_file'}"
+            if self._memory:
+                scheduled = await self._memory.get_task_schedule(task_key)
+                if scheduled:
+                    from datetime import datetime, timezone as tz
+                    try:
+                        scheduled_dt = datetime.fromisoformat(scheduled)
+                        if scheduled_dt > datetime.now(tz.utc):
+                            logger.info(
+                                "Skipping code fix for task %s — scheduled for %s",
+                                task_key, scheduled,
+                            )
+                            return False
+                    except Exception:
+                        pass  # corrupted schedule entry — proceed
+
             # Get PR diff for context
             try:
                 diff = await self._github.get_pr_diff(owner, repo, pr_data["number"])
@@ -894,13 +918,20 @@ class PRPatrol:
                 sha = None
 
             if not dry_run:
-                # BEHV-04 fix: bimodal distribution to simulate human work patterns
+                # P1-OPSEC-1: Non-blocking skip for long delays
+                # Bimodal distribution: short delays (sleep + work), long delays (schedule + skip)
                 if random.random() < 0.80:
                     read_delay = random.randint(30, 300)  # Quick response (active coding)
+                    logger.info("  Mới check mail thấy có notification từ Maintainer. Bắt đầu đọc... (Simulating notification lag: %ds)", read_delay)
+                    await asyncio.sleep(read_delay)
                 else:
-                    read_delay = random.randint(3600, 28800)  # Long delay (meeting/sleep)
-                logger.info("  Mới check mail thấy có notification từ Maintainer. Bắt đầu đọc... (Simulating notification lag: %ds)", read_delay)
-                await asyncio.sleep(read_delay)
+                    # Long delay — schedule for later instead of blocking the patrol loop
+                    read_delay = random.randint(3600, 28800)  # 1-8 hours
+                    from datetime import datetime, timezone as tz
+                    next_run = datetime.now(tz.utc) + __import__("datetime").timedelta(seconds=read_delay)
+                    await self._memory.set_task_schedule(task_key, next_run.isoformat())
+                    logger.info("  Long notification lag (%ds) scheduled for %s — skipping this cycle", read_delay, next_run.isoformat())
+                    return False
 
                 delay = self._calculate_typing_delay(fixed_content)
                 logger.info("  ⏳ WPM Simulator: 'Typing' code fix for %ds...", delay)
@@ -1255,8 +1286,19 @@ class PRPatrol:
         Infrastructure/auth failures (Vercel previews, missing secrets,
         Codecov, CLA bots) cannot be fixed via code changes and must not
         trigger the auto-heal loop.
+
+        P1-OPSEC-3: For check names, uses exact match or prefix match to prevent
+        false positives (e.g., "vercel-fake" must NOT match "vercel").
+        For log content, uses substring matching.
         """
-        text_lower = text.lower()
+        text_lower = text.lower().strip()
+        # For check names: exact match (vercel, netlify, codecov...)
+        if text_lower in CI_INFRA_IGNORE_NAMES:
+            return True
+        # For check names: prefix match (vercel/, netlify/, cla/...)
+        if text_lower.startswith(CI_INFRA_IGNORE_PREFIXES):
+            return True
+        # For log content: substring matching still applies
         return any(pattern in text_lower for pattern in CI_INFRA_IGNORE_PATTERNS)
 
     @staticmethod
@@ -1578,9 +1620,6 @@ class PRPatrol:
                         self.MAX_CI_RETRIES,
                         last_result.get("exit_code"),
                     )
-
-                    if self._memory:
-                        await self._memory.increment_ci_fix_attempts(repo_full, pr_number)
 
                     if total_attempts >= self.MAX_CI_RETRIES:
                         break

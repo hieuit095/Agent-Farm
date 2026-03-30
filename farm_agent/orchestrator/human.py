@@ -385,12 +385,14 @@ class SuperHumanLoop:
         new_count = 0
         now_utc = datetime.now(UTC).isoformat()
 
-        for repo_full_name, pr in repo_map.items():
-            # ── PROACTIVE THROTTLING: sequential pacing between repos ─────────
-            # Never hammer multiple repo API calls concurrently.
-            await asyncio.sleep(5.0)
-            logger.debug("Throttling repo iteration: slept 5s before processing %s", repo_full_name)
-            # ─────────────────────────────────────────────────────────────
+        # P1-OPSEC-6: Bounded concurrent processing — ~8 min for 1000 repos
+        # instead of ~83 min sequential.  Semaphore limits concurrent API calls.
+        semaphore = asyncio.Semaphore(10)
+
+        async def process_one_repo(repo_full_name: str, pr: dict) -> bool:
+            """Process a single repo with semaphore-bounded concurrency."""
+            async with semaphore:
+                await asyncio.sleep(5.0)  # rate limit between batches
             owner = repo_full_name.split("/")[0]
             stars = 0
 
@@ -399,9 +401,8 @@ class SuperHumanLoop:
                 repo_details = await self._pipeline._github.get_repo_details(owner, repo_full_name.split("/")[1])
                 stars = getattr(repo_details, "stars", 0) or 0
             except Exception:
-                # If we can't get stars, skip the repo
                 logger.debug("Could not fetch stars for %s — skipping", repo_full_name)
-                continue
+                return False
 
             if not (min_stars <= stars <= max_stars):
                 logger.debug(
@@ -411,18 +412,17 @@ class SuperHumanLoop:
                     min_stars,
                     max_stars,
                 )
-                continue
+                return False
 
             # UPSERT: insert new merged PRs, update existing ones to 'merged'
             try:
-                # Track existing row count so we can detect if a NEW row was inserted
                 existing = await self._memory._db.execute(
                     "SELECT 1 FROM submitted_prs WHERE repo = ? AND pr_number = ? AND status = 'merged'",
                     (repo_full_name, pr.get("pr_number", 0)),
                 )
                 row_existing = await existing.fetchone()
 
-                cursor = await self._memory._db.execute(
+                await self._memory._db.execute(
                     """INSERT INTO submitted_prs
                        (repo, pr_number, pr_url, title, type, status, created_at, updated_at)
                        VALUES (?, ?, ?, ?, 'historical_sync', 'merged', ?, ?)
@@ -440,10 +440,9 @@ class SuperHumanLoop:
                         now_utc,
                     ),
                 )
-                # fetchone on a write cursor returns None — use rowcount trick instead
                 if row_existing is None:
-                    new_count += 1
                     logger.info("🏠 Friendly repo added: %s (★ %d)", repo_full_name, stars)
+                    return True
             except Exception as exc:
                 logger.error(
                     "🏠 Sync DB Error for %s: %s — html_url=%s, title=%s",
@@ -452,7 +451,13 @@ class SuperHumanLoop:
                     pr.get("html_url") or "(empty)",
                     pr.get("title") or "(empty)",
                 )
+            return False
 
+        results = await asyncio.gather(*[
+            process_one_repo(repo_full_name, pr)
+            for repo_full_name, pr in repo_map.items()
+        ])
+        new_count = sum(1 for r in results if r)
         await self._memory._db.commit()
         elapsed = time_module.time() - start
         logger.info(
@@ -679,7 +684,7 @@ class SuperHumanLoop:
             # ── Mandatory Lunch Break ───────────────────────────────────
             # CRIT-02 FIX: Use UTC consistently, add _took_lunch_today
             # guard to prevent re-trigger, sleep past 13:01 for safety.
-            now = datetime.now()  # LOCAL time — UTC+7 19:00 was incorrectly triggering lunch (UTC hour=12)
+            now = datetime.now(UTC)  # UTC time
             if not time_warp and now.hour == 12 and not self._took_lunch_today:
                 self._took_lunch_today = True
                 target_lunch_end = now.replace(hour=13, minute=1, second=0, microsecond=0)
