@@ -147,7 +147,7 @@ class Memory:
                 )
                 await self._db.commit()
             except sqlite3.OperationalError as e:
-                if "already exists" in str(e):
+                if "already exists" in str(e) or "duplicate column name" in str(e).lower():
                     logger.debug("Schema migration skipped: column already exists — %s", e)
                 else:
                     logger.error("Schema migration failed critically: %s", e)

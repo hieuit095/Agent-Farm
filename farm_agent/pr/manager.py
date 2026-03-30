@@ -11,7 +11,7 @@ import re
 
 from farm_agent.core.exceptions import GenerationError, PRCreationError
 from farm_agent.core.models import Contribution, ContributionType, PRResult, PRStatus, Repository
-from farm_agent.generator.engine import _sanitize_text
+from farm_agent.generator.engine import _sanitize_text, escape_html_xss
 from farm_agent.github.client import GitHubClient
 
 logger = logging.getLogger(__name__)
@@ -370,8 +370,8 @@ class PRManager:
                 scope = parts[1]
 
         # P2-3 FIX: Sanitize finding title and description to prevent XSS in GitHub issue body
-        safe_title = _sanitize_text(finding.title, "issue title")
-        safe_description = _sanitize_text(finding.description, "issue description")
+        safe_title = escape_html_xss(_sanitize_text(finding.title, "issue title"))
+        safe_description = escape_html_xss(_sanitize_text(finding.description, "issue description"))
 
         if scope:
             issue_title = f"{prefix}({scope}): {safe_title.lower()}"
