@@ -16,7 +16,12 @@
       "Bash(python -m pytest tests/unit/ --ignore=tests/unit/test_superhuman.py -q)",
       "Bash(python -c \":*)",
       "Bash(python -m pytest tests/unit/test_superhuman.py::TestTimeWarp::test_time_warp_exits_after_max_iterations -v -s --tb=short)",
-      "Bash(python -m pytest tests/unit/ -q)"
+      "Bash(python -m pytest tests/unit/ -q)",
+      "Bash(python -c \"import sys; sys.path.insert\\(0, ''scripts''\\); import trophy_room; print\\(''Syntax OK''\\)\")",
+      "Bash(python scripts/trophy_room.py)",
+      "Bash(python -c \"import dotenv; print\\(''dotenv available''\\)\")",
+      "Bash(python -m py_compile farm_agent/orchestrator/pipeline.py)",
+      "Bash(python -m py_compile farm_agent/core/exceptions.py farm_agent/core/config.py farm_agent/generator/engine.py farm_agent/pr/janitor.py)"
     ]
   }
 }

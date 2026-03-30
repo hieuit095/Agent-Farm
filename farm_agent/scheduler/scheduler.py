@@ -88,7 +88,8 @@ class ContribScheduler:
         loop.add_signal_handler(signal.SIGINT, lambda: shutdown_event.set())
         loop.add_signal_handler(signal.SIGTERM, lambda: shutdown_event.set())
         await shutdown_event.wait()
-        self.stop()
+
+    def stop(self):
         """Stop the scheduler."""
         self._running = False
         if self._scheduler and self._scheduler.running:

@@ -28,6 +28,10 @@ RUN pip install --no-cache-dir /tmp/*.whl && rm /tmp/*.whl
 RUN mkdir -p /home/farm_agent/.farm_agent && \
     chown -R farm_agent:farm_agent /home/farm_agent
 
+# Copy and set up entrypoint script
+COPY entrypoint.sh /home/farm_agent/entrypoint.sh
+RUN chmod +x /home/farm_agent/entrypoint.sh
+
 # Expose dashboard port
 EXPOSE 8787
 
@@ -37,6 +41,5 @@ USER farm_agent
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
     CMD python -c "import httpx; httpx.get('http://localhost:8787/api/health')" || exit 1
 
-# Default: show help
-ENTRYPOINT ["farm_agent"]
-CMD ["--help"]
+# Default: run entrypoint script (DB init + scheduler)
+ENTRYPOINT ["/bin/bash", "/home/farm_agent/entrypoint.sh"]
