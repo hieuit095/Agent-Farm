@@ -1195,15 +1195,24 @@ class ContribPipeline:
                 result.pr_urls.append(pr_result.pr_url)
 
                 # Record in memory
-                await self._memory.record_pr(
-                    repo=repo.full_name,
-                    pr_number=pr_result.pr_number,
-                    pr_url=pr_result.pr_url,
-                    title=contribution.title,
-                    pr_type=contribution.contribution_type.value,
-                    branch=pr_result.branch_name,
-                    fork=pr_result.fork_full_name,
-                )
+                try:
+                    await self._memory.record_pr(
+                        repo=repo.full_name,
+                        pr_number=pr_result.pr_number,
+                        pr_url=pr_result.pr_url,
+                        title=contribution.title,
+                        pr_type=contribution.contribution_type.value,
+                        branch=pr_result.branch_name,
+                        fork=pr_result.fork_full_name,
+                    )
+                except Exception as e:
+                    logger.critical(
+                        "PR %s/%s #%d created on GitHub but local DB record failed: %s — "
+                        "PR may be duplicated on next restart",
+                        repo.full_name,
+                        pr_result.pr_number,
+                        e,
+                    )
 
                 if not dry_run and getattr(self, "_notifier", None):
                     asyncio.create_task(
@@ -1313,15 +1322,24 @@ class ContribPipeline:
             )
 
             # Record in memory so we don't spam duplicate issues on next run
-            await self._memory.record_issue_proposal(
-                repo=repo.full_name,
-                issue_number=issue_number,
-                issue_url=issue_url,
-                title=issue_title,
-                finding_type=finding.type.value,
-                finding_title=finding.title,
-                file_path=finding.file_path or "",
-            )
+            try:
+                await self._memory.record_issue_proposal(
+                    repo=repo.full_name,
+                    issue_number=issue_number,
+                    issue_url=issue_url,
+                    title=issue_title,
+                    finding_type=finding.type.value,
+                    finding_title=finding.title,
+                    file_path=finding.file_path or "",
+                )
+            except Exception as e:
+                logger.critical(
+                    "Issue %s/%s #%d created on GitHub but local DB record failed: %s — "
+                    "Issue may be duplicated on next restart",
+                    repo.full_name,
+                    issue_number,
+                    e,
+                )
 
         except Exception as exc:
             logger.error("Failed to create issue for %s: %s", repo.full_name, exc)

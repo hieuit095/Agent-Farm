@@ -201,6 +201,10 @@ class LLMProvider(ABC):
 
 # ── Minimax ─────────────────────────────────────────────────────────────────────
 
+# Module-level semaphore shared by ALL MinimaxProvider instances so the
+# concurrent-call cap is enforced globally, not per-instance.
+_LLM_SEMAPHORE: asyncio.Semaphore | None = None
+
 
 class MinimaxProvider(LLMProvider):
     """Minimax provider (ABAB models) via direct REST API.
@@ -232,7 +236,10 @@ class MinimaxProvider(LLMProvider):
         # ── PROACTIVE LLM THROTTLING: cap concurrent API calls ─────────────
         # No more than 2 LLM requests may be in-flight simultaneously.
         # This prevents MiniMax API 429s from burst concurrent calls.
-        self._semaphore = asyncio.Semaphore(4)
+        global _LLM_SEMAPHORE
+        if _LLM_SEMAPHORE is None:
+            _LLM_SEMAPHORE = asyncio.Semaphore(4)
+        self._semaphore = _LLM_SEMAPHORE
 
     async def complete(self, prompt: str, *, system: str | None = None, **kwargs) -> str:
         messages = []
