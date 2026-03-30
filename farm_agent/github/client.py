@@ -387,17 +387,19 @@ class GitHubClient:
         if sha:
             payload["sha"] = sha
 
+        author_email = "unknown@contrib.ai"
+        author_name = "ContribAI"
         try:
             from datetime import datetime, timedelta, UTC
             import random
             if not hasattr(self, "_cached_user"):
                 self._cached_user = await self.get_authenticated_user()
-            
-            author_name = self._cached_user.get("name") or self._cached_user.get("login", "farm_agent")
+
+            author_name = self._cached_user.get("name") or self._cached_user.get("login", author_name)
             author_email = self._cached_user.get("email")
             if not author_email:
                 author_email = f"{self._cached_user.get('id')}+{self._cached_user.get('login')}@users.noreply.github.com"
-                
+
             author_date = (datetime.now(UTC) - timedelta(minutes=random.randint(15, 45))).strftime("%Y-%m-%dT%H:%M:%SZ")
             payload["author"] = {
                 "name": author_name,
@@ -406,11 +408,6 @@ class GitHubClient:
             }
         except Exception as e:
             logger.error("Failed to get authenticated user: %s", e)
-            # Ensure author_email/author_name are always defined with safe fallbacks
-            if "author_email" not in locals():
-                author_email = "unknown@contrib.ai"
-            if "author_name" not in locals():
-                author_name = "ContribAI"
 
         return await self._put(f"/repos/{owner}/{repo}/contents/{path}", json=payload)
 

@@ -1678,8 +1678,14 @@ class ContribPipeline:
                 )
                 validated.append(finding)
 
+            except (ValueError, TypeError) as e:
+                # Finding is genuinely invalid — skip it, don't retry
+                logger.warning("Finding %s failed validation (invalid): %s", finding.title, e)
+                continue
             except Exception as e:
-                logger.warning("Validation failed for %s: %s", finding.title, e)
+                # Infrastructure error — re-raise so caller can handle
+                logger.error("Finding %s validation failed (infrastructure): %s", finding.title, e)
+                raise
 
         return validated
 
