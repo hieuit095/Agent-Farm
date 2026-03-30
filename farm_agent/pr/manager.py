@@ -369,14 +369,18 @@ class PRManager:
             ):
                 scope = parts[1]
 
+        # P2-3 FIX: Sanitize finding title and description to prevent XSS in GitHub issue body
+        safe_title = _sanitize_text(finding.title, "issue title")
+        safe_description = _sanitize_text(finding.description, "issue description")
+
         if scope:
-            issue_title = f"{prefix}({scope}): {finding.title.lower()}"
+            issue_title = f"{prefix}({scope}): {safe_title.lower()}"
         else:
-            issue_title = f"{prefix}: {finding.title.lower()}"
+            issue_title = f"{prefix}: {safe_title.lower()}"
 
         issue_body = (
             f"## Description\n\n"
-            f"{finding.description}\n\n"
+            f"{safe_description}\n\n"
             f"**Severity**: `{finding.severity.value}`\n"
             f"**File**: `{finding.file_path}`\n\n"
             f"## Expected Behavior\n\n"
