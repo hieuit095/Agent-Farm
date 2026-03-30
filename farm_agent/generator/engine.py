@@ -58,7 +58,7 @@ def _sanitize_text(text: str, field_name: str) -> str:
 
 from farm_agent.analysis.mapper import RepoMapper
 from farm_agent.core.config import ContributionConfig
-from farm_agent.core.exceptions import GenerationError
+from farm_agent.core.exceptions import ContextMissingError, GenerationError
 from farm_agent.core.models import (
     Contribution,
     ContributionType,
@@ -148,6 +148,97 @@ class ContributionGenerator:
             style_guide, project_map, repo_prefs = await asyncio.gather(
                 style_task, map_task, prefs_task
             )
+
+            # ── P0-1 GRACEFUL CONTEXT FALLBACK — 3-tier rescue before aborting ─────────
+            # The generator MUST have the actual source file content. Without it,
+            # the LLM would hallucinate edits against an empty context.
+            # TIER 1: Already-fetched file content (RAG/ChromaDB success)
+            target_file_content = context.relevant_files.get(finding.file_path)
+
+            # TIER 2: Explicit GitHubClient fetch (RAG was empty but we can still get the file)
+            if not target_file_content and github_client is not None and finding.file_path:
+                logger.warning(
+                    "RAG miss for '%s' — attempting direct GitHub fetch for '%s'.",
+                    finding.title,
+                    finding.file_path,
+                )
+                try:
+                    direct_content = await github_client.get_file_content(
+                        context.repo.owner,
+                        context.repo.name,
+                        finding.file_path,
+                    )
+                    if direct_content:
+                        context.relevant_files[finding.file_path] = direct_content
+                        target_file_content = direct_content
+                        logger.info(
+                            "Tier-2 GitHub fetch succeeded for '%s' — context recovered.",
+                            finding.file_path,
+                        )
+                except Exception as gh_exc:
+                    logger.debug(
+                        "Tier-2 GitHub fetch failed for '%s': %s",
+                        finding.file_path,
+                        gh_exc,
+                    )
+
+            # TIER 3: Deduce file from project_map (last resort before aborting)
+            if not target_file_content and project_map and finding.file_path:
+                logger.warning(
+                    "RAG miss and GitHub fetch failed for '%s' — "
+                    "scanning project_map for clues about '%s'.",
+                    finding.title,
+                    finding.file_path,
+                )
+                # The project_map is a structural overview — scan it for the target file
+                # to confirm the file exists in the repo even if we cannot fetch it
+                map_lower = project_map.lower()
+                target_lower = finding.file_path.lower()
+                if target_lower in map_lower or any(
+                    segment in map_lower for segment in [finding.file_path]
+                ):
+                    # The file IS in the repo (confirmed by map), but we still cannot
+                    # fetch it — try one more explicit fetch with a fallback path
+                    if github_client is not None:
+                        for path_variant in [
+                            finding.file_path,
+                            finding.file_path.lstrip("/"),
+                            finding.file_path.replace("//", "/"),
+                        ]:
+                            try:
+                                fallback_content = await github_client.get_file_content(
+                                    context.repo.owner,
+                                    context.repo.name,
+                                    path_variant,
+                                )
+                                if fallback_content:
+                                    context.relevant_files[finding.file_path] = fallback_content
+                                    target_file_content = fallback_content
+                                    logger.info(
+                                        "Tier-3 map-assisted fetch succeeded for '%s'.",
+                                        finding.file_path,
+                                    )
+                                    break
+                            except Exception:
+                                continue
+
+            # ABORT only if ALL 3 tiers failed
+            if not target_file_content:
+                logger.error(
+                    "ContextMissingError: no file content for '%s' (path='%s') — "
+                    "RAG returned empty, GitHub fetch failed, and project_map "
+                    "could not locate the file. "
+                    "ABORTING generation to prevent blind code hallucination.",
+                    finding.title,
+                    finding.file_path,
+                )
+                raise ContextMissingError(
+                    f"No usable context for target file: {finding.file_path}. "
+                    f"Tier-1 (RAG): miss, Tier-2 (GitHub fetch): failed, "
+                    f"Tier-3 (project_map): could not confirm file location. "
+                    f"Generation is BLOCKED."
+                )
+            # ─────────────────────────────────────────────────────────────────────────────
 
             # 1 & 2: Generate the fix via agentic loop
             prompt = self._build_generation_prompt(finding, context, repo_prefs=repo_prefs)

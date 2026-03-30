@@ -49,5 +49,13 @@ class GenerationError(FarmAgentError):
     """LLM generation output is invalid or unsafe (includes Gag Order violations)."""
 
 
+class ContextMissingError(FarmAgentError):
+    """RAG/context lookup returned no usable context for a target file.
+
+    Raised when ChromaDB returns zero relevant chunks and the agent must
+    NOT proceed with blind code generation.
+    """
+
+
 class PRCreationError(FarmAgentError):
     """Pull request creation failure."""

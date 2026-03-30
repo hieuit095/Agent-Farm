@@ -1099,15 +1099,27 @@ class ContribPipeline:
                 continue
 
             # --- Sandbox Guillotine — Docker-based patch validation ---
-            if self._sandbox is not None:
-                guillotine_passed = False
+            # P0 FIX: Enforce sandbox_validation_enabled — can NEVER be bypassed
+            if not self.config.pipeline.sandbox_validation_enabled:
+                logger.error(
+                    "🚫 SANDBOX GUILLOTINE: sandbox_validation_enabled=False — "
+                    "PR creation BLOCKED. Validation can never be disabled."
+                )
+                continue
+            if self._sandbox is None:
+                # Sandbox required but unavailable — block PR creation
+                logger.error(
+                    "🚫 SANDBOX GUILLOTINE: sandbox unavailable (Docker unavailable) — "
+                    "PR creation BLOCKED."
+                )
+                continue
+            else:
                 max_retries = 3
-                max_sandbox_attempts = max_retries
 
-                for attempt in range(1, max_sandbox_attempts + 1):
+                for attempt in range(1, max_retries + 1):
                     logger.info(
                         "🔬 Sandbox validation attempt %d/%d for '%s'",
-                        attempt, max_sandbox_attempts, contribution.title,
+                        attempt, max_retries, contribution.title,
                     )
                     sandbox_result = await self._sandbox.run_in_sandbox(
                         repo_path=str(repo.clone_url),
@@ -1123,13 +1135,12 @@ class ContribPipeline:
                         error_log = getattr(sandbox_result, "logs", "Validation failed")
 
                     if is_success:
-                        guillotine_passed = True
                         logger.info("✅ Sandbox validated — patch passes CI/tests.")
                         break
 
                     logger.warning(
                         "🚫 Sandbox attempt %d/%d failed for '%s' — invoking self-correction.",
-                        attempt, max_sandbox_attempts, contribution.title,
+                        attempt, max_retries, contribution.title,
                     )
 
                     # Self-Correction: try to fix the broken patch
@@ -1155,12 +1166,12 @@ class ContribPipeline:
                             "🔧 Self-correction attempt %d threw: %s — retrying.",
                             attempt, correction_err,
                         )
-
-                if not guillotine_passed:
+                else:
+                    # for/else: runs only if no break occurred (all retries exhausted)
                     logger.error(
                         "🚫 SANDBOX GUILLOTINE: PR creation blocked — "
                         "patch still failing after %d self-correction attempts.",
-                        max_sandbox_attempts,
+                        max_retries,
                     )
                     continue
             # ----------------------------------------------------------
@@ -1489,6 +1500,69 @@ class ContribPipeline:
                     contribution.title,
                 )
                 continue
+
+            # --- Sandbox Guillotine — Docker-based patch validation (P0 FIX) ---
+            # _process_repo_issues was MISSING sandbox validation — add it here
+            if not self.config.pipeline.sandbox_validation_enabled:
+                logger.error(
+                    "🚫 SANDBOX GUILLOTINE: sandbox_validation_enabled=False — "
+                    "PR creation BLOCKED for issue #%d. Validation can never be disabled.",
+                    issue.number,
+                )
+                continue
+            if self._sandbox is None:
+                logger.error(
+                    "🚫 SANDBOX GUILLOTINE: sandbox unavailable for issue #%d — "
+                    "PR creation BLOCKED.",
+                    issue.number,
+                )
+                continue
+            else:
+                max_retries = 3
+                for attempt in range(1, max_retries + 1):
+                    logger.info(
+                        "🔬 Sandbox validation attempt %d/%d for issue #%d ('%s')",
+                        attempt, max_retries, issue.number, contribution.title,
+                    )
+                    sandbox_result = await self._sandbox.run_in_sandbox(
+                        repo_path=str(repo.clone_url),
+                        command="pytest",
+                    )
+                    if isinstance(sandbox_result, dict):
+                        is_success = sandbox_result.get("is_success", False)
+                        error_log = sandbox_result.get("logs", "Validation failed")
+                    else:
+                        is_success = getattr(sandbox_result, "is_success", False)
+                        error_log = getattr(sandbox_result, "logs", "Validation failed")
+
+                    if is_success:
+                        logger.info("✅ Sandbox validated for issue #%d — patch passes CI/tests.", issue.number)
+                        break
+
+                    logger.warning(
+                        "🚫 Sandbox attempt %d/%d failed for issue #%d — invoking self-correction.",
+                        attempt, max_retries, issue.number,
+                    )
+                    try:
+                        corrected = await self._generator.fix_contribution_from_error(
+                            contribution,
+                            context,
+                            error_log,
+                        )
+                        if corrected is not None:
+                            contribution = corrected
+                            logger.info("🔧 Self-correction succeeded for issue #%d", issue.number)
+                    except Exception as correction_err:
+                        logger.warning("🔧 Self-correction threw for issue #%d: %s", issue.number, correction_err)
+                else:
+                    # for/else: runs only if no break occurred (all retries exhausted)
+                    logger.error(
+                        "🚫 SANDBOX GUILLOTINE: PR creation blocked for issue #%d — "
+                        "patch still failing after %d self-correction attempts.",
+                        issue.number, max_retries,
+                    )
+                    continue
+            # ----------------------------------------------------------
 
             # Create PR with "Closes #N" in body
             try:

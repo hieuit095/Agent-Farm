@@ -154,6 +154,8 @@ class PipelineConfig(BaseModel):
     max_discussion_replies: int = 3
     max_patch_retries: int = 2
     max_review_retries: int = 2
+    # P0 FIX: Sandbox Guillotine — hardcoded ON, never bypassed
+    sandbox_validation_enabled: bool = True
 
 
 class QuotaConfig(BaseModel):

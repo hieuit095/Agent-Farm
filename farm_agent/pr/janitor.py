@@ -70,11 +70,13 @@ class PRJanitor:
             logger.info("PR classification cancelled (shutdown) — re-raising")
             raise  # re-raise immediately — do NOT classify as GARBAGE
         except (json.JSONDecodeError, KeyError, TypeError) as exc:
-            logger.warning("Failed to parse LLM response for '%s': %s. Treating as GARBAGE.", title, exc)
-            return {"classification": "GARBAGE", "reason": f"LLM parse error: {exc}"}
+            # P0 FIX: Parsing error is NOT certainty of GARBAGE — PR survives for review
+            logger.warning("Failed to parse LLM response for '%s': %s. Marking NEEDS_REVIEW.", title, exc)
+            return {"classification": "NEEDS_REVIEW", "reason": f"LLM parse error: {exc}"}
         except Exception as exc:
-            logger.error("LLM call failed for '%s': %s. Treating as GARBAGE.", title, exc)
-            return {"classification": "GARBAGE", "reason": f"LLM call failed: {exc}"}
+            # P0 FIX: LLM failure is NOT certainty of GARBAGE — PR survives for review
+            logger.error("LLM call failed for '%s': %s. Marking NEEDS_REVIEW.", title, exc)
+            return {"classification": "NEEDS_REVIEW", "reason": f"LLM call failed: {exc}"}
 
     async def sweep_and_destroy(self) -> dict:
         """Fetch all open PRs, classify them, destroy garbage ones.
@@ -153,12 +155,24 @@ class PRJanitor:
                         pr_number,
                         comment=f"Reason: {reason}",
                     )
-                    # Also delete the branch if we have a branch name
-                    if head_branch:
-                        try:
-                            await self._github.delete_branch(owner, repo_name, head_branch)
-                        except Exception as exc:
-                            logger.debug("  Branch '%s' already gone or delete failed: %s", head_branch, exc)
+                    # P0 FIX: Gate branch deletion — only delete if LLM explicitly classified
+                    # as GARBAGE with certainty (not on parse errors or infrastructure failures)
+                    if head_branch and classification == "GARBAGE":
+                        # Double-check: reason must NOT indicate a parsing/infrastructure failure
+                        # If the reason contains "LLM parse error" or "LLM call failed",
+                        # the LLM did NOT explicitly confirm GARBAGE — do NOT delete
+                        if "LLM parse error" not in reason and "LLM call failed" not in reason:
+                            try:
+                                await self._github.delete_branch(owner, repo_name, head_branch)
+                                logger.info("  Branch '%s' deleted for GARBAGE PR #%d.", head_branch, pr_number)
+                            except Exception as exc:
+                                logger.debug("  Branch '%s' already gone or delete failed: %s", head_branch, exc)
+                        else:
+                            logger.info(
+                                "  Branch '%s' PRESERVED — LLM could not confirm GARBAGE (reason: %s).",
+                                head_branch,
+                                reason,
+                            )
 
                     summary["garbage_closed"] += 1
                     summary["details"].append({
