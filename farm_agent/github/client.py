@@ -568,7 +568,7 @@ class GitHubClient:
                 })
 
             # GitHub search caps at 1000 results (10 pages of 100)
-            if len(items) < per_page or page >= 10:
+            if len(items) < per_page or page >= 50:
                 break
             page += 1
 
@@ -619,7 +619,7 @@ class GitHubClient:
                     "state": item.get("state", "open"),
                 })
 
-            if len(items) < per_page or page >= 10:
+            if len(items) < per_page or page >= 50:
                 break
             page += 1
 

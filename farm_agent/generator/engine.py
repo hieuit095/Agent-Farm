@@ -1059,13 +1059,20 @@ class ContributionGenerator:
                             # of hallucinated full-function rewrites.
                             search_line_count = len(search.split("\n"))
                             replace_line_count = len(replace.split("\n"))
-                            if replace_line_count > 30 and search_line_count < 5:
+                            MAX_REPLACE_TO_SEARCH_RATIO = 2
+                            if search_line_count > 0 and (replace_line_count / search_line_count) > MAX_REPLACE_TO_SEARCH_RATIO:
                                 logger.warning(
-                                    "Diff Minimizer: replace block too large "
-                                    "(%d lines) for a %d-line search in %s "
-                                    "— rejecting edit",
+                                    "Diff Minimizer blocked: replace/search ratio %.1f exceeds limit %d in %s",
+                                    replace_line_count / search_line_count,
+                                    MAX_REPLACE_TO_SEARCH_RATIO,
+                                    path,
+                                )
+                                continue
+                            if replace_line_count > 50:
+                                logger.warning(
+                                    "Diff Minimizer blocked: replace block too large "
+                                    "(%d lines) in %s",
                                     replace_line_count,
-                                    search_line_count,
                                     path,
                                 )
                                 continue

@@ -91,6 +91,8 @@ class TelegramNotifier:
         await self._register_commands()
 
         logger.info("📡 Bắt đầu lắng nghe lệnh từ Telegram (Long-Polling)...")
+        delay = 5  # initial backoff in seconds
+        max_delay = 60
         while True:
             try:
                 url = f"https://api.telegram.org/bot{self.token}/getUpdates"
@@ -121,18 +123,20 @@ class TelegramNotifier:
                             on_accept_callback=on_accept_callback,
                         )
 
+                delay = 5  # reset on success
+                await asyncio.sleep(1)  # normal polling interval on success
+
             except Exception as e:
-                logger.warning("Telegram polling error: %s", e)
-                await asyncio.sleep(5)
-            
-            await asyncio.sleep(1)
+                logger.warning("Telegram polling error: %s — backing off for %ds", e, delay)
+                await asyncio.sleep(delay)
+                delay = min(delay * 2, max_delay)  # double backoff, cap at 60s
 
     async def _handle_command(self, text: str, memory_instance, on_update_callback=None, on_clean_callback=None, on_accept_callback=None) -> None:
         """Handle incoming C2 commands from Telegram."""
         import time
         from datetime import UTC, datetime
         
-        command = text.split()[0].lower()
+        command = text.strip().split()[0].lower()
         
         if command in ("/start", "/help"):
             msg = (
@@ -148,10 +152,21 @@ class TelegramNotifier:
             await self.send_message("🟢 Bot is online and running.")
         elif command in ("/today", "/rptoday"):
             today_prs_count = await memory_instance.get_today_pr_count()
-            
-            today_prefix = datetime.now(UTC).date().isoformat()
+
+            today_utc = datetime.now(UTC).date()
             recent_prs = await memory_instance.get_prs(limit=50)
-            today_urls = [pr["pr_url"] for pr in recent_prs if pr.get("created_at", "").startswith(today_prefix)]
+            today_urls = []
+            for pr in recent_prs:
+                created_str = pr.get("created_at", "")
+                if created_str:
+                    try:
+                        created_dt = datetime.fromisoformat(created_str.replace("Z", "+00:00"))
+                        if created_dt.tzinfo is None:
+                            created_dt = created_dt.replace(tzinfo=UTC)
+                        if created_dt.date() == today_utc:
+                            today_urls.append(pr["pr_url"])
+                    except (ValueError, TypeError):
+                        pass  # skip malformed dates
             
             msg = f"📊 <b>Report Today:</b>\nYou have generated {today_prs_count} PRs today."
             if today_urls:

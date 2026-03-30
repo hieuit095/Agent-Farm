@@ -7,6 +7,7 @@ and body; closes and deletes anything classified as GARBAGE.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
@@ -65,6 +66,9 @@ class PRJanitor:
                 reason = f"LLM returned unexpected classification: {classification}"
             return {"classification": classification, "reason": reason}
 
+        except asyncio.CancelledError:
+            logger.info("PR classification cancelled (shutdown) — re-raising")
+            raise  # re-raise immediately — do NOT classify as GARBAGE
         except (json.JSONDecodeError, KeyError, TypeError) as exc:
             logger.warning("Failed to parse LLM response for '%s': %s. Treating as GARBAGE.", title, exc)
             return {"classification": "GARBAGE", "reason": f"LLM parse error: {exc}"}

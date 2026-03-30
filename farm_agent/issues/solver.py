@@ -112,6 +112,7 @@ class IssueSolver:
         - Complexity <= max_complexity
         """
         all_issues: list[Issue] = []
+        seen_numbers: set[int] = set()
 
         # Try fetching with preferred labels first
         for label_group in [
@@ -140,8 +141,8 @@ class IssueSolver:
                         state=raw.get("state", "open"),
                         html_url=raw.get("html_url", ""),
                     )
-                    # Deduplicate by number
-                    if not any(i.number == issue.number for i in all_issues):
+                    if issue.number not in seen_numbers:
+                        seen_numbers.add(issue.number)
                         all_issues.append(issue)
             except Exception as e:
                 logger.debug("Failed to fetch issues with labels %s: %s", label_group, e)
@@ -166,7 +167,8 @@ class IssueSolver:
                         state=raw.get("state", "open"),
                         html_url=raw.get("html_url", ""),
                     )
-                    if not any(i.number == issue.number for i in all_issues):
+                    if issue.number not in seen_numbers:
+                        seen_numbers.add(issue.number)
                         all_issues.append(issue)
             except Exception as e:
                 logger.debug("Failed to fetch fallback issues: %s", e)
@@ -299,6 +301,10 @@ class IssueSolver:
 
         # Body length hints at complexity
         body_len = len(issue.body or "")
+        MAX_BODY_LEN = 50000
+        if body_len > MAX_BODY_LEN:
+            logger.warning("Issue body extremely large (%d chars) — capping score", body_len)
+            body_len = MAX_BODY_LEN  # cap for scoring purposes only
         if body_len > 2000:
             score += 1
         if body_len > 5000:
