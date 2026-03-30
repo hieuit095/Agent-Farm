@@ -178,15 +178,20 @@ class LLMProvider(ABC):
                 pass
 
         # Pattern 2: TOOL_CALL: {...} on a single line
-        for match in re.finditer(r"TOOL_CALL:\s*(\{.*?\})", text):
-            try:
-                data = json.loads(match.group(1))
-                calls.append(ToolCallRequest(
-                    tool_name=data.get("name", ""),
-                    arguments=data.get("arguments", {}),
-                ))
-            except (json.JSONDecodeError, AttributeError):
-                pass
+        # Use rfind to correctly handle nested JSON (non-greedy regex fails on nested braces)
+        start_marker = text.rfind("TOOL_CALL: {")
+        if start_marker != -1:
+            start = text.find("{", start_marker)
+            end = text.rfind("}")
+            if start != -1 and end != -1 and end > start:
+                try:
+                    data = json.loads(text[start:end+1])
+                    calls.append(ToolCallRequest(
+                        tool_name=data.get("name", ""),
+                        arguments=data.get("arguments", {}),
+                    ))
+                except (json.JSONDecodeError, AttributeError):
+                    pass
 
         return calls
 

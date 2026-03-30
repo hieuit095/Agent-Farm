@@ -2,7 +2,7 @@
 # Copy this file to config.yaml and fill in your values
 
 github:
-  token: "ghp_your_github_personal_access_token"
+  token: ""  # Leave empty — use GITHUB_TOKEN env var (from .env file)
   max_repos_per_run: 5
   max_prs_per_day: 10
   min_daily_prs: 3
@@ -10,15 +10,15 @@ github:
   rate_limit_buffer: 100
 
 llm:
-  provider: "minimax"
+  provider: "minimax"  # gemini | openai | anthropic | ollama | minimax
   model: "MiniMax-M2.7"
-  api_key: "your_minimax_api_key_here"
-  temperature: 0.3
+  api_key: "YOUR_API_KEY_HERE"
+  temperature: 0.2
   max_tokens: 8192
-
-notifications:
-  telegram_token: ""          # BotFather token (123456:ABC-DEF)
-  telegram_chat_id: ""        # Your Telegram chat ID
+  # For ollama (local models):
+  # provider: "ollama"
+  # model: "codellama:13b"
+  # base_url: "http://localhost:11434"
 
 analysis:
   enabled_analyzers:
@@ -55,6 +55,7 @@ discovery:
     - python
     - javascript
     - typescript
+    - rust
   stars_range: [1000, 20000]
   min_last_activity_days: 30
   require_contributing_guide: false
@@ -69,10 +70,6 @@ storage:
 pipeline:
   max_concurrent_repos: 3         # parallel repo processing
   timeout_per_repo_sec: 300
-  # Fail-safe killswitch limits
-  max_ci_retries: 3               # CI auto-heal attempts before surrendering
-  max_discussion_replies: 3       # PR discussion replies before surrendering
-  max_patch_retries: 2            # LLM patch correction re-prompts
 
 scheduler:
   enabled: false
@@ -91,6 +88,15 @@ quota:
   github_daily_limit: 5000
   llm_daily_limit: 1000
   llm_daily_tokens: 1000000
+
+notifications:
+  slack_webhook: ""
+  discord_webhook: ""
+  telegram_token: "YOUR_TELEGRAM_TOKEN_HERE"
+  telegram_chat_id: "YOUR_TELEGRAM_CHAT_ID_HERE"
+  on_merge: true
+  on_close: true
+  on_run_complete: true
 
 # Multi-model routing - auto-selects best model per task
 multi_model:

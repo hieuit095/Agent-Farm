@@ -1331,7 +1331,6 @@ class ContribPipeline:
 
         except Exception as exc:
             logger.error("Failed to create issue for %s: %s", repo.full_name, exc)
-            result.errors.append(str(exc))
 
     async def _process_repo_issues(
         self, repo: Repository, dry_run: bool, max_prs: int = 3
