@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import signal
 import sys
 
 import click
@@ -373,13 +374,32 @@ def superhuman(ctx, time_warp, dry_run, target_repo):
             target_repo_max_prs=1,
         )
 
+        async def shutdown_hook() -> None:
+            console.print("[yellow]Shutdown signal received — cleaning up...[/yellow]")
+            if hasattr(memory, "checkpoint"):
+                await memory.checkpoint()
+            if hasattr(memory, "close"):
+                await memory.close()
+
+        inner_loop = asyncio.get_running_loop()
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            inner_loop.add_signal_handler(sig, lambda s=sig: _handle_signal(s, shutdown_hook, inner_loop))
+
+        def _handle_signal(sig, hook, l):
+            console.print(f"[yellow]Received {sig.name} — initiating graceful shutdown...[/yellow]")
+            l.create_task(hook())
+            l.stop()
+
         try:
             await loop.run_daily_routine(time_warp=time_warp)
         finally:
-            await memory.close()
+            await shutdown_hook()
 
     try:
-        asyncio.run(_run())
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        loop.run_until_complete(_run())
+        loop.close()
     except KeyboardInterrupt:
         console.print("\n\n🛑 Super Human Mode interrupted by user (Ctrl+C). Goodbye!")
 

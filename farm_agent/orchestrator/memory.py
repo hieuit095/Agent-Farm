@@ -124,6 +124,8 @@ class Memory:
         self._db = await aiosqlite.connect(str(self._db_path))
         # Enable Write-Ahead Logging for concurrent read/write safety
         await self._db.execute("PRAGMA journal_mode=WAL;")
+        # Cap WAL growth to ~1000 pages to prevent unbounded disk usage
+        await self._db.execute("PRAGMA wal_autocheckpoint=1000;")
         # P1-OPSEC-9: Enable foreign key enforcement
         await self._db.execute("PRAGMA foreign_keys = ON;")
         await self._db.executescript(SCHEMA)
@@ -154,11 +156,49 @@ class Memory:
                 logger.error("Unexpected DB error during migration: %s", e)
                 raise
 
+        await self.cleanup_old_records()
         logger.info("Memory initialized at %s", self._db_path)
 
     async def close(self):
         if self._db:
             await self._db.close()
+
+    async def checkpoint(self) -> None:
+        """Checkpoint WAL and truncate if safe. Call this periodically or on shutdown."""
+        if self._db is None:
+            return
+        try:
+            await self._db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        except Exception as e:
+            logger.warning("WAL checkpoint failed: %s", e)
+
+    async def cleanup_old_records(self, days: int = 30) -> dict[str, int]:
+        """Delete records older than `days`. Call on startup or daily.
+
+        Returns dict of table->deleted_count.
+        """
+        deleted: dict[str, int] = {}
+        cutoff = (datetime.now(UTC) - timedelta(days=days)).isoformat()
+
+        try:
+            # api_usage_log: keep 30 days
+            cur = await self._db.execute(
+                "DELETE FROM api_usage_log WHERE timestamp < ?", (cutoff,)
+            )
+            deleted["api_usage_log"] = cur.rowcount
+
+            # task_schedule: delete completed entries older than 7 days
+            task_cutoff = (datetime.now(UTC) - timedelta(days=7)).isoformat()
+            cur = await self._db.execute(
+                "DELETE FROM task_schedule WHERE updated_at < ?", (task_cutoff,)
+            )
+            deleted["task_schedule"] = cur.rowcount
+
+            await self._db.commit()
+            logger.info("TTL cleanup deleted: %s", deleted)
+        except Exception as e:
+            logger.error("TTL cleanup failed: %s", e)
+        return deleted
 
     # ── Repos ──────────────────────────────────────────────────────────────
 
