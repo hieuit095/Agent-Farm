@@ -3,10 +3,24 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 
 import httpx
 
 logger = logging.getLogger(__name__)
+
+FAILED_ALERTS_FILE = Path("failed_alerts.log")
+
+
+async def _persist_failed_alert(message: str, channel: str) -> None:
+    """If all notification channels fail, persist alert locally."""
+    try:
+        with open(FAILED_ALERTS_FILE, "a", encoding="utf-8") as f:
+            from datetime import datetime, timezone
+            timestamp = datetime.now(timezone.utc).isoformat()
+            f.write(f"[{timestamp}] [{channel}] PERSISTED ALERT: {message}\n")
+    except Exception:
+        pass  # last resort — don't fail on this
 
 
 class TelegramNotifier:
@@ -49,7 +63,8 @@ class TelegramNotifier:
             response.raise_for_status()
             logger.debug("Telegram message sent successfully.")
         except Exception as e:
-            logger.warning("Failed to send Telegram notification: %s", e)
+            logger.error("Failed to send Telegram notification: %s", e)
+            await _persist_failed_alert(text, "telegram")
     async def _register_commands(self) -> None:
         """Register the bot's command menu with Telegram."""
         if not self.enabled or not self._client:
@@ -73,7 +88,7 @@ class TelegramNotifier:
             response.raise_for_status()
             logger.debug("Successfully registered Telegram commands menu.")
         except Exception as e:
-            logger.warning("Failed to register Telegram commands menu: %s", e)
+            logger.error("Failed to register Telegram commands menu: %s", e)
 
     async def start_polling(self, memory_instance, on_update_callback=None, on_clean_callback=None, on_accept_callback=None) -> None:
         """Run long-polling loop to receive Telegram commands.
@@ -127,7 +142,7 @@ class TelegramNotifier:
                 await asyncio.sleep(1)  # normal polling interval on success
 
             except Exception as e:
-                logger.warning("Telegram polling error: %s — backing off for %ds", e, delay)
+                logger.critical("All notification channels failed — persisted to %s", FAILED_ALERTS_FILE)
                 await asyncio.sleep(delay)
                 delay = min(delay * 2, max_delay)  # double backoff, cap at 60s
 

@@ -933,20 +933,26 @@ class PRPatrol:
                 sha = None
 
             if not dry_run:
-                # P1-OPSEC-1: Non-blocking skip for long delays
-                # Bimodal distribution: short delays (sleep + work), long delays (schedule + skip)
-                if random.random() < 0.80:
-                    read_delay = random.randint(30, 300)  # Quick response (active coding)
+                # P1-OPSEC-1: Human-like continuous delay distribution
+                # Use expovariate for Poisson-process-like delays (human work patterns)
+                mean_delay = random.uniform(120, 600)  # mean of 2-10 minutes
+                read_delay = max(15, min(random.expovariate(1.0 / mean_delay), 7200))  # cap at 2 hours
+                # Add triangular jitter to further obscure pattern
+                jitter = random.triangular(0.5, 2.0, 1.0)  # 50%-200% of base, mode=100%
+                read_delay = int(read_delay * jitter)
+                # Cap absolute maximum
+                read_delay = min(read_delay, 7200)  # 2 hours absolute max
+
+                if read_delay < 300:
                     logger.info("  Mới check mail thấy có notification từ Maintainer. Bắt đầu đọc... (Simulating notification lag: %ds)", read_delay)
-                    await asyncio.sleep(read_delay)
                 else:
-                    # Long delay — schedule for later instead of blocking the patrol loop
-                    read_delay = random.randint(3600, 28800)  # 1-8 hours
                     from datetime import datetime, timezone as tz
                     next_run = datetime.now(tz.utc) + __import__("datetime").timedelta(seconds=read_delay)
                     await self._memory.set_task_schedule(task_key, next_run.isoformat())
                     logger.info("  Long notification lag (%ds) scheduled for %s — skipping this cycle", read_delay, next_run.isoformat())
                     return False
+
+                await asyncio.sleep(read_delay)
 
                 delay = self._calculate_typing_delay(fixed_content)
                 logger.info("  ⏳ WPM Simulator: 'Typing' code fix for %ds...", delay)

@@ -22,8 +22,10 @@ from farm_agent.core.config import LogConfig
 _SECRET_PATTERNS = re.compile(
     r"(ghp_[A-Za-z0-9]{30,})"  # GitHub PAT
     r"|(sk-[A-Za-z0-9]{30,})"  # OpenAI key
+    r"|(sk-cp-[A-Za-z0-9_-]{30,})"  # MiniMax streaming API key
     r"|(AIza[A-Za-z0-9_-]{30,})"  # Google API key
-    r"|(Bearer\s+[A-Za-z0-9._-]{20,})",  # Bearer tokens
+    r"|(Bearer\s+[A-Za-z0-9._-]{20,})"  # Bearer tokens
+    r"|(\b\d{7,10}:[A-Za-z0-9_-]{35}\b)",  # Telegram Bot Token
     re.IGNORECASE,
 )
 
