@@ -749,3 +749,75 @@ class Memory:
             (task_key, next_run, datetime.now(UTC).isoformat()),
         )
         await self._db.commit()
+
+    # ── VIP Repo Sync Throttle ────────────────────────────────────────────────
+
+    VIP_SYNC_TASK_KEY = "vip_repo_sync"
+
+    async def should_run_vip_sync(self) -> bool:
+        """Check if the VIP repo sync should run.
+
+        Returns True if task_key='vip_repo_sync' has no next_run scheduled
+        or its next_run timestamp is in the past.
+        """
+        next_run = await self.get_task_schedule(self.VIP_SYNC_TASK_KEY)
+        if next_run is None:
+            return True
+        try:
+            run_time = datetime.fromisoformat(next_run)
+            return datetime.now(UTC) >= run_time
+        except ValueError:
+            return True  # Invalid timestamp = treat as overdue
+
+    async def mark_vip_sync_done(self) -> None:
+        """Mark the VIP repo sync as completed, scheduling the next run in 24 hours."""
+        next_run = (datetime.now(UTC) + timedelta(hours=24)).isoformat()
+        await self.set_task_schedule(self.VIP_SYNC_TASK_KEY, next_run)
+        logger.info("VIP repo sync scheduled for next run at %s", next_run)
+
+    async def add_friendly_vip_repos(self, vip_repos: list[dict]) -> int:
+        """Add VIP repos as friendly repos using INSERT OR IGNORE.
+
+        Inserts each VIP repo's merged PR into submitted_prs with
+        status='merged' and type='vip_sync'. Uses INSERT OR IGNORE to
+        prevent TOCTOU races when multiple processes run concurrently.
+
+        Returns the number of new rows inserted.
+        """
+        if not vip_repos:
+            return 0
+
+        now_utc = datetime.now(UTC).isoformat()
+        new_count = 0
+
+        for repo_data in vip_repos:
+            try:
+                cursor = await self._db.execute(
+                    """INSERT OR IGNORE INTO submitted_prs
+                       (repo, pr_number, pr_url, title, type, status, created_at, updated_at)
+                       VALUES (?, ?, ?, ?, 'vip_sync', 'merged', ?, ?)""",
+                    (
+                        repo_data.get("repo", ""),
+                        repo_data.get("pr_number", 0),
+                        repo_data.get("html_url", ""),
+                        repo_data.get("title", ""),
+                        repo_data.get("merged_at", now_utc),
+                        now_utc,
+                    ),
+                )
+                if cursor.rowcount == 1:
+                    new_count += 1
+                    logger.debug(
+                        "VIP friendly repo added: %s (★ %d)",
+                        repo_data.get("repo"),
+                        repo_data.get("stars", 0),
+                    )
+            except Exception as exc:
+                logger.error(
+                    "add_friendly_vip_repos: failed to insert %s: %s",
+                    repo_data.get("repo"),
+                    exc,
+                )
+
+        await self._db.commit()
+        return new_count

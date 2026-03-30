@@ -1075,3 +1075,77 @@ class GitHubClient:
             clone_url=data.get("clone_url", ""),
             has_license=data.get("license") is not None,
         )
+
+    # ── VIP Friendly Repos Discovery ────────────────────────────────────────
+
+    async def discover_vip_friendly_repos(self, username: str, min_stars: int = 1000) -> list[dict]:
+        """Discover repos where the user has merged PRs and repo has > min_stars.
+
+        Fetches all merged PRs via GitHub Search API, deduplicates by repo,
+        then fetches star count for each and filters for repos exceeding
+        the star threshold. Used to populate "Familiar Grounds" with
+        high-impact repos the agent has already succeeded in.
+
+        Args:
+            username: GitHub username to query merged PRs for.
+            min_stars: Minimum star count threshold (default 1000).
+
+        Returns:
+            List of dicts with keys: repo, pr_number, title, html_url,
+            merged_at, stars.
+        """
+        import asyncio
+
+        # Step 1: Fetch all merged PRs authored by the user
+        merged_prs = await self.fetch_user_merged_prs(username)
+        if not merged_prs:
+            logger.info("discover_vip_friendly_repos(%s): no merged PRs found", username)
+            return []
+
+        # Step 2: Deduplicate by repo (keep most recent merged PR)
+        repo_map: dict[str, dict] = {}
+        for pr in merged_prs:
+            repo = pr.get("repo", "")
+            if not repo:
+                continue
+            merged_at = pr.get("merged_at") or ""
+            if repo not in repo_map or merged_at > repo_map[repo].get("merged_at", ""):
+                repo_map[repo] = pr
+
+        # Step 3: Fetch star count for each unique repo and filter
+        semaphore = asyncio.Semaphore(10)  # bounded concurrency
+
+        async def process_one(repo_full_name: str, pr: dict) -> dict | None:
+            async with semaphore:
+                await asyncio.sleep(3.0)  # rate limit between batches
+            owner = repo_full_name.split("/")[0]
+            repo_name = repo_full_name.split("/")[1]
+            try:
+                repo_details = await self.get_repo_details(owner, repo_name)
+                stars = getattr(repo_details, "stars", 0) or 0
+            except Exception as exc:
+                logger.debug("Could not fetch stars for %s: %s", repo_full_name, exc)
+                return None
+
+            if stars < min_stars:
+                logger.debug(
+                    "discover_vip_friendly_repos: skipping %s (stars=%d < %d)",
+                    repo_full_name, stars, min_stars,
+                )
+                return None
+
+            result = dict(pr)
+            result["stars"] = stars
+            return result
+
+        results = await asyncio.gather(*[
+            process_one(repo_full_name, pr)
+            for repo_full_name, pr in repo_map.items()
+        ])
+
+        vip_repos = [r for r in results if r is not None]
+        logger.info(
+            "discover_vip_friendly_repos(%s): found %d VIP repos (>%d stars) out of %d unique repos",
+            username, len(vip_repos), min_stars, len(repo_map),
+        )
+        return vip_repos

@@ -470,6 +470,61 @@ class SuperHumanLoop:
         )
         return new_count
 
+    async def _sync_vip_friendly_repos(self) -> int:
+        """Discover and persist VIP repos (>1000 stars) where the user has merged PRs.
+
+        Uses a 24-hour throttle via the task_schedule table in Memory.
+        If the sync already ran recently, logs and skips silently.
+
+        Returns the number of new VIP repos inserted, or 0 if skipped/throttled.
+        """
+        # Check throttle
+        try:
+            if not await self._memory.should_run_vip_sync():
+                logger.debug("VIP repo sync throttled (24h limit not reached)")
+                return 0
+        except Exception as exc:
+            logger.warning("VIP sync throttle check failed: %s — proceeding anyway", exc)
+
+        # Get authenticated username
+        username = ""
+        try:
+            user: dict = await self._pipeline._github.get_authenticated_user()
+            username = user.get("login", "")
+        except Exception as exc:
+            logger.warning("VIP repo sync: could not get authenticated user: %s", exc)
+            return 0
+
+        if not username:
+            logger.warning("VIP repo sync: empty username")
+            return 0
+
+        logger.info("⭐ VIP Friendly sync: discovering >1000 star repos for @%s ...", username)
+
+        try:
+            vip_repos = await self._pipeline._github.discover_vip_friendly_repos(username)
+        except Exception as exc:
+            logger.warning("VIP repo sync: GitHub API failed: %s", exc)
+            return 0
+
+        if not vip_repos:
+            logger.info("VIP Friendly sync: no VIP repos found (>1000 stars)")
+            await self._memory.mark_vip_sync_done()
+            return 0
+
+        try:
+            new_count = await self._memory.add_friendly_vip_repos(vip_repos)
+            await self._memory.mark_vip_sync_done()
+            logger.info(
+                "⭐ VIP Friendly sync complete: %d new repos inserted (%d total VIP repos found)",
+                new_count,
+                len(vip_repos),
+            )
+            return new_count
+        except Exception as exc:
+            logger.warning("VIP repo sync: DB insert failed: %s", exc)
+            return 0
+
     async def _run_janitor_sweep(self) -> dict:
         """Run the PR Janitor sweep — destroy garbage PRs via LLM evaluation.
 
@@ -654,6 +709,7 @@ class SuperHumanLoop:
                 logger.info("Auth warmup: initializing GitHub client...")
                 await self._pipeline._init_components()
             await self._sync_historical_friendly_repos()
+            await self._sync_vip_friendly_repos()
         except Exception as exc:
             logger.debug("Startup friendly-repos sync failed (non-critical): %s", exc)
         self._last_sync_time = __import__("time").time()
@@ -666,6 +722,7 @@ class SuperHumanLoop:
             if elapsed > 86400:
                 try:
                     await self._sync_historical_friendly_repos()
+                    await self._sync_vip_friendly_repos()
                 except Exception as exc:
                     logger.debug("24h friendly-repos sync failed (non-critical): %s", exc)
                 self._last_sync_time = __import__("time").time()
