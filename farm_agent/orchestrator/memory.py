@@ -6,6 +6,7 @@ to avoid duplicate work and improve over time.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -115,6 +116,7 @@ class Memory:
     def __init__(self, db_path: str | Path):
         self._db_path = Path(db_path).expanduser()
         self._db: aiosqlite.Connection | None = None
+        self._quota_lock = asyncio.Lock()
 
     async def init(self):
         """Initialize database connection and schema."""
@@ -627,65 +629,66 @@ class Memory:
 
         from farm_agent.core.exceptions import LLMRateLimitError
 
-        now = time.time()
+        async with self._quota_lock:
+            now = time.time()
 
-        # Sliding window boundaries
-        five_hours_ago = now - 18_000.0       # 5 * 3600
-        seven_days_ago = now - 604_800.0      # 7 * 24 * 3600
+            # Sliding window boundaries
+            five_hours_ago = now - 18_000.0       # 5 * 3600
+            seven_days_ago = now - 604_800.0      # 7 * 24 * 3600
 
-        # ── Count requests in each window ──────────────────────────────
-        cursor = await self._db.execute(
-            "SELECT COUNT(1) FROM api_usage_log WHERE provider = ? AND timestamp >= ?",
-            (provider, five_hours_ago),
-        )
-        row = await cursor.fetchone()
-        count_5h = row[0] if row else 0
-
-        cursor = await self._db.execute(
-            "SELECT COUNT(1) FROM api_usage_log WHERE provider = ? AND timestamp >= ?",
-            (provider, seven_days_ago),
-        )
-        row = await cursor.fetchone()
-        count_7d = row[0] if row else 0
-
-        # ── Safety thresholds (95% of hard limits) ─────────────────────
-        if count_5h >= 950:
-            logger.warning(
-                "LLM quota BREACHED: %s 5-hour window has %d requests (limit 950).",
-                provider, count_5h,
+            # ── Count requests in each window ──────────────────────────────
+            cursor = await self._db.execute(
+                "SELECT COUNT(1) FROM api_usage_log WHERE provider = ? AND timestamp >= ?",
+                (provider, five_hours_ago),
             )
-            raise LLMRateLimitError(
-                f"{provider} 5-hour quota exhausted: {count_5h}/950 requests"
+            row = await cursor.fetchone()
+            count_5h = row[0] if row else 0
+
+            cursor = await self._db.execute(
+                "SELECT COUNT(1) FROM api_usage_log WHERE provider = ? AND timestamp >= ?",
+                (provider, seven_days_ago),
             )
+            row = await cursor.fetchone()
+            count_7d = row[0] if row else 0
 
-        if count_7d >= 9500:
-            logger.warning(
-                "LLM quota BREACHED: %s 7-day window has %d requests (limit 9500).",
-                provider, count_7d,
-            )
-            raise LLMRateLimitError(
-                f"{provider} 7-day quota exhausted: {count_7d}/9500 requests"
-            )
+            # ── Safety thresholds (95% of hard limits) ─────────────────────
+            if count_5h >= 950:
+                logger.warning(
+                    "LLM quota BREACHED: %s 5-hour window has %d requests (limit 950).",
+                    provider, count_5h,
+                )
+                raise LLMRateLimitError(
+                    f"{provider} 5-hour quota exhausted: {count_5h}/950 requests"
+                )
 
-        # ── Record this request atomically ─────────────────────────────
-        await self._db.execute(
-            "INSERT INTO api_usage_log (timestamp, provider) VALUES (?, ?)",
-            (now, provider),
-        )
+            if count_7d >= 9500:
+                logger.warning(
+                    "LLM quota BREACHED: %s 7-day window has %d requests (limit 9500).",
+                    provider, count_7d,
+                )
+                raise LLMRateLimitError(
+                    f"{provider} 7-day quota exhausted: {count_7d}/9500 requests"
+                )
 
-        # ── Time-based periodic cleanup: purge entries older than 7 days ──
-        # DEBT-06: Replace volatile counter with time-based trigger (hourly cleanup)
-        if not hasattr(self, "_last_quota_cleanup"):
-            self._last_quota_cleanup = 0.0
-
-        if now - self._last_quota_cleanup >= 3600:  # 1 hour
+            # ── Record this request atomically ─────────────────────────────
             await self._db.execute(
-                "DELETE FROM api_usage_log WHERE timestamp < ?",
-                (seven_days_ago,),
+                "INSERT INTO api_usage_log (timestamp, provider) VALUES (?, ?)",
+                (now, provider),
             )
-            self._last_quota_cleanup = now
 
-        await self._db.commit()
+            # ── Time-based periodic cleanup: purge entries older than 7 days ──
+            # DEBT-06: Replace volatile counter with time-based trigger (hourly cleanup)
+            if not hasattr(self, "_last_quota_cleanup"):
+                self._last_quota_cleanup = 0.0
+
+            if now - self._last_quota_cleanup >= 3600:  # 1 hour
+                await self._db.execute(
+                    "DELETE FROM api_usage_log WHERE timestamp < ?",
+                    (seven_days_ago,),
+                )
+                self._last_quota_cleanup = now
+
+            await self._db.commit()
 
     # ── Task Schedule (for non-blocking skip logic) ─────────────────────────
 

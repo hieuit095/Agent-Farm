@@ -869,6 +869,8 @@ class PRPatrol:
                     from datetime import datetime, timezone as tz
                     try:
                         scheduled_dt = datetime.fromisoformat(scheduled)
+                        if scheduled_dt.tzinfo is None:
+                            scheduled_dt = scheduled_dt.replace(tzinfo=tz.utc)
                         if scheduled_dt > datetime.now(tz.utc):
                             logger.info(
                                 "Skipping code fix for task %s — scheduled for %s",
@@ -1304,12 +1306,12 @@ class PRPatrol:
         false positives (e.g., "vercel-fake" must NOT match "vercel").
         For log content, uses substring matching.
         """
-        text_lower = text.lower().strip()
+        text_clean = "".join(text.lower().split())
         # For check names: exact match (vercel, netlify, codecov...)
-        if text_lower in CI_INFRA_IGNORE_NAMES:
+        if text_clean in CI_INFRA_IGNORE_NAMES:
             return True
         # For check names: prefix match (vercel/, netlify/, cla/...)
-        if text_lower.startswith(CI_INFRA_IGNORE_PREFIXES):
+        if text_clean.startswith(CI_INFRA_IGNORE_PREFIXES):
             return True
         # For log content: substring matching still applies
         return any(pattern in text_lower for pattern in CI_INFRA_IGNORE_PATTERNS)
@@ -1707,8 +1709,11 @@ class PRPatrol:
             try:
                 content = await get_file_content(owner, repo, node_path, ref=branch)
             except TypeError:
-                with contextlib.suppress(Exception):
+                try:
                     content = await get_file_content(owner, repo, node_path, branch)
+                except Exception as e:
+                    logger.warning("Validation file fetch failed for %s: %s — cannot validate", node_path, e)
+                    continue
             except Exception:
                 continue
 

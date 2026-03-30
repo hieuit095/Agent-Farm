@@ -6,6 +6,7 @@ file content, forking, branching, committing, and PR creation.
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import logging
 from typing import Any
@@ -727,7 +728,13 @@ class GitHubClient:
             return await self._get(
                 f"/repos/{owner}/{repo}/issues/{issue_number}/timeline",
             )
-        except Exception:
+        except (httpx.HTTPError, asyncio.TimeoutError) as e:
+            logger.error("get_issue_timeline failed for %s/%s: %s — timeline unavailable",
+                         owner, repo, e)
+            return []
+        except Exception as e:
+            logger.critical("Unexpected error in get_issue_timeline for %s/%s: %s",
+                            owner, repo, e, exc_info=True)
             return []
 
     # ── CI / Check Runs ────────────────────────────────────────────────────
@@ -744,8 +751,14 @@ class GitHubClient:
                 f"/repos/{owner}/{repo}/commits/{ref}/check-runs",
                 params={"per_page": 100},
             )
-        except Exception:
-            checks = {"check_runs": []}
+        except (httpx.HTTPError, asyncio.TimeoutError) as e:
+            logger.error("get_combined_status failed for %s/%s: %s — CI status unknown",
+                         owner, repo, e)
+            return None
+        except Exception as e:
+            logger.critical("Unexpected error in get_combined_status for %s/%s: %s",
+                            owner, repo, e, exc_info=True)
+            return None
 
         runs = checks.get("check_runs", [])
         if not runs:
