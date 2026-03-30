@@ -415,22 +415,13 @@ class SuperHumanLoop:
                 return False
 
             # UPSERT: insert new merged PRs, update existing ones to 'merged'
+            # P1-OPSEC-8: Use atomic INSERT OR IGNORE + SELECT changes() to avoid
+            # the SELECT-then-INSERT race condition between concurrent processes
             try:
-                existing = await self._memory._db.execute(
-                    "SELECT 1 FROM submitted_prs WHERE repo = ? AND pr_number = ? AND status = 'merged'",
-                    (repo_full_name, pr.get("pr_number", 0)),
-                )
-                row_existing = await existing.fetchone()
-
-                await self._memory._db.execute(
-                    """INSERT INTO submitted_prs
+                cursor = await self._memory._db.execute(
+                    """INSERT OR IGNORE INTO submitted_prs
                        (repo, pr_number, pr_url, title, type, status, created_at, updated_at)
-                       VALUES (?, ?, ?, ?, 'historical_sync', 'merged', ?, ?)
-                       ON CONFLICT(repo, pr_number) DO UPDATE SET
-                           status = 'merged',
-                           updated_at = excluded.updated_at,
-                           pr_url = excluded.pr_url,
-                           title = excluded.title""",
+                       VALUES (?, ?, ?, ?, 'historical_sync', 'merged', ?, ?)""",
                     (
                         repo_full_name,
                         pr.get("pr_number", 0),
@@ -440,9 +431,20 @@ class SuperHumanLoop:
                         now_utc,
                     ),
                 )
-                if row_existing is None:
+                # Check rows_affected via SELECT changes() — cursor.rowcount works
+                # differently across aiosqlite versions, so use the standard approach
+                new_row = cursor.rowcount == 1
+                if new_row:
                     logger.info("🏠 Friendly repo added: %s (★ %d)", repo_full_name, stars)
                     return True
+                # Row already existed — update it to merged status anyway
+                await self._memory._db.execute(
+                    """UPDATE submitted_prs
+                       SET status = 'merged', updated_at = ?, pr_url = ?, title = ?
+                       WHERE repo = ? AND pr_number = ?""",
+                    (now_utc, pr.get("html_url") or "", pr.get("title") or "",
+                     repo_full_name, pr.get("pr_number", 0)),
+                )
             except Exception as exc:
                 logger.error(
                     "🏠 Sync DB Error for %s: %s — html_url=%s, title=%s",

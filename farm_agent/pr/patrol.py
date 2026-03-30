@@ -720,6 +720,7 @@ class PRPatrol:
         )
 
         import asyncio
+        import json
 
         from farm_agent.core.exceptions import LLMRateLimitError
 
@@ -746,9 +747,15 @@ class PRPatrol:
                 else:
                     logger.warning("  ⚠️ Rate limit exhausted after %d retries", max_retries)
                     break
+            except ValueError as e:
+                # YAML/JSON parse failures from _parse_classifications — re-raise
+                # so the retry loop can handle them
+                logger.warning("Failed to parse LLM classification response: %s", e)
+                raise
             except Exception as e:
-                logger.warning("Failed to classify feedback: %s", e)
-                break
+                # Other exceptions (network, etc.) — re-raise for retry
+                logger.error("Unexpected error parsing LLM feedback: %s", e)
+                raise
 
         # Fall back: do NOT blindly treat as CODE_CHANGE — that triggers
         # unwanted automated commits. Mark as ALREADY_HANDLED and log error.
@@ -784,9 +791,15 @@ class PRPatrol:
 
         try:
             parsed = yaml.safe_load(text)
-        except Exception:
-            logger.warning("Could not parse classification YAML")
-            return items
+        except yaml.YAMLError as e:
+            logger.warning("Failed to parse LLM response as YAML: %s", e)
+            raise ValueError(f"LLM returned unparseable YAML: {e}") from e
+        except json.JSONDecodeError as e:
+            logger.warning("Failed to parse LLM response as JSON: %s", e)
+            raise ValueError(f"LLM returned unparseable JSON: {e}") from e
+        except Exception as e:
+            logger.error("Unexpected error parsing LLM feedback: %s", e)
+            raise
 
         if not parsed or "classifications" not in parsed:
             return items

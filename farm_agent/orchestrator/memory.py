@@ -10,6 +10,8 @@ import logging
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+import sqlite3
+
 import aiosqlite
 
 logger = logging.getLogger(__name__)
@@ -120,6 +122,8 @@ class Memory:
         self._db = await aiosqlite.connect(str(self._db_path))
         # Enable Write-Ahead Logging for concurrent read/write safety
         await self._db.execute("PRAGMA journal_mode=WAL;")
+        # P1-OPSEC-9: Enable foreign key enforcement
+        await self._db.execute("PRAGMA foreign_keys = ON;")
         await self._db.executescript(SCHEMA)
         # DEBT-04: Add index for sliding-window quota queries on (provider, timestamp)
         await self._db.execute(
@@ -138,8 +142,15 @@ class Memory:
                     f"ALTER TABLE submitted_prs ADD COLUMN {col}"
                 )
                 await self._db.commit()
-            except Exception:
-                pass  # column already exists
+            except sqlite3.OperationalError as e:
+                if "already exists" in str(e):
+                    logger.debug("Schema migration skipped: column already exists — %s", e)
+                else:
+                    logger.error("Schema migration failed critically: %s", e)
+                    raise  # re-raise structural failures
+            except Exception as e:
+                logger.error("Unexpected DB error during migration: %s", e)
+                raise
 
         logger.info("Memory initialized at %s", self._db_path)
 
@@ -243,6 +254,18 @@ class Memory:
             (status, datetime.now(UTC).isoformat(), repo, pr_number),
         )
         await self._db.commit()
+
+    async def delete_submitted_prs_for_repo(self, repo_full_name: str) -> int:
+        """Delete all submitted PR records for a repo. Call this when purging a repo.
+
+        Returns the number of rows deleted.
+        """
+        cur = await self._db.execute(
+            "DELETE FROM submitted_prs WHERE repo = ?",
+            (repo_full_name,),
+        )
+        await self._db.commit()
+        return cur.rowcount
 
     async def get_prs(self, status: str | None = None, limit: int = 50) -> list[dict]:
         """Get submitted PRs, optionally filtered by status."""
