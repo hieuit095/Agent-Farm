@@ -1,10 +1,17 @@
-.git
-.venv
-venv/
-__pycache__/
-*.pyc
-.pytest_cache/
-memory.db
-logs/
+# Node Dependencies
+node_modules/
+npm-debug.log
+yarn-error.log
+
+# Git History
+.git/
+.gitignore
+
+# Build outputs
+dist/
+build/
+.next/
+
+# Environment Variables & OPSEC
 .env
-target/
+.env.*

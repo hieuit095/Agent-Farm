@@ -960,7 +960,14 @@ def schedule(ctx, cron):
     )
 
     sched = ContribScheduler(config)
-    sched.start()
+
+    import asyncio
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        loop.run_until_complete(sched.start_async())
+    finally:
+        loop.close()
 
 
 @cli.command("vips")

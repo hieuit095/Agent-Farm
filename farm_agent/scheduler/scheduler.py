@@ -58,8 +58,8 @@ class ContribScheduler:
         except Exception:
             logger.exception("Scheduled pipeline run failed")
 
-    def start(self):
-        """Start the scheduler (blocking)."""
+    async def start_async(self):
+        """Start the scheduler (non-blocking async)."""
         sched_config = self.config.scheduler
 
         if not sched_config.enabled:
@@ -77,37 +77,18 @@ class ContribScheduler:
             replace_existing=True,
         )
 
-        # Graceful shutdown
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-
-        def _shutdown(signum, frame):
-            logger.info("Received signal %s, shutting down...", signum)
-            self._running = False
-            if self._scheduler:
-                self._scheduler.shutdown(wait=False)
-
-        signal.signal(signal.SIGINT, _shutdown)
-        signal.signal(signal.SIGTERM, _shutdown)
-
+        # Attach to the running event loop so scheduler integrates with existing loop
+        loop = asyncio.get_running_loop()
         self._scheduler.start()
+        logger.info("Scheduler started with cron: %s", sched_config.cron)
         self._running = True
-        logger.info(
-            "Scheduler started with cron: %s (tz: %s)",
-            sched_config.cron,
-            sched_config.timezone,
-        )
 
-        try:
-            loop.run_forever()
-        except (KeyboardInterrupt, SystemExit):
-            logger.info("Scheduler stopped.")
-        finally:
-            if self._scheduler and self._scheduler.running:
-                self._scheduler.shutdown()
-            loop.close()
-
-    def stop(self):
+        # Block forever — scheduler jobs fire in background, this keeps the method alive
+        shutdown_event = asyncio.Event()
+        loop.add_signal_handler(signal.SIGINT, lambda: shutdown_event.set())
+        loop.add_signal_handler(signal.SIGTERM, lambda: shutdown_event.set())
+        await shutdown_event.wait()
+        self.stop()
         """Stop the scheduler."""
         self._running = False
         if self._scheduler and self._scheduler.running:
