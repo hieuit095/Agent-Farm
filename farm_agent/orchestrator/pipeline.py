@@ -873,19 +873,50 @@ class ContribPipeline:
                 )
                 continue
 
-            # ── Gate 2: Keyword blacklist — title OR description ───────────
-            # Check both title and description (case-insensitive)
-            # Exception: legitimate contribution types (readme_fix, docs_improve)
-            # should NOT be blocked by the "readme/docs/doc*" farming keywords
-            # since those ARE valid contribution types per the enabled config.
-            ALLOWED_CONTRIB_TYPES = {
+            # ── Gate 2: ABSOLUTE DOCS BAN — README_FIX / DOCS_IMPROVE ──────
+            # Zero-tolerance: documentation contributions are FORBIDDEN.
+            # The agent must NEVER create doc/readme PRs. Nuke on sight.
+            _BANNED_CONTRIB_TYPES = {
                 ContributionType.README_FIX,
                 ContributionType.DOCS_IMPROVE,
+            }
+            if finding.type in _BANNED_CONTRIB_TYPES:
+                logger.info(
+                    "🗑️ Dropped '%s' — type=%s (docs/readme contributions BANNED)",
+                    finding.title,
+                    finding.type.value,
+                )
+                continue
+
+            # ── Gate 3: File-Level Guillotine — non-code paths ─────────────
+            # Drop any finding targeting documentation files or /docs/ paths,
+            # regardless of its declared ContributionType.
+            _GUILLOTINE_EXTENSIONS = {".md", ".txt", ".rst"}
+            fp = finding.file_path or ""
+            fp_lower_g = fp.lower()
+            fp_ext = "." + fp_lower_g.rsplit(".", 1)[-1] if "." in fp_lower_g else ""
+            if fp_ext in _GUILLOTINE_EXTENSIONS:
+                logger.info(
+                    "🗑️ Dropped '%s' — targets doc file %s (non-code extension %s)",
+                    finding.title,
+                    fp,
+                    fp_ext,
+                )
+                continue
+            if "/docs/" in fp_lower_g or fp_lower_g.startswith("docs/") or "\\docs\\" in fp_lower_g or fp_lower_g.startswith("docs\\"):
+                logger.info(
+                    "🗑️ Dropped '%s' — targets docs/ path %s (documentation directory BANNED)",
+                    finding.title,
+                    fp,
+                )
+                continue
+
+            # ── Gate 4: Keyword blacklist — title OR description ───────────
+            # Check both title and description (case-insensitive)
+            ALLOWED_CONTRIB_TYPES = {
                 ContributionType.FEATURE_ADD,
             }
             combined = title_lower + " " + desc_lower
-            # Allowlisted contribution types bypass the farming keyword check entirely
-            # (readme_fix/docs_improve findings ARE valid contributions)
             if finding.type not in ALLOWED_CONTRIB_TYPES:
                 for kw in _FARMING_KEYWORDS:
                     if kw in combined:
@@ -901,11 +932,7 @@ class ContribPipeline:
                     continue
                 # (break above goes here via else-clause)
             else:
-                # Allowlisted type — bypass farming keyword check
-                logger.info(
-                    "🛡️ Allowlisted contrib type %s — bypassing farming keyword check",
-                    finding.type.value,
-                )
+                # FEATURE_ADD bypasses farming keyword check
                 high_impact_findings.append(finding)
 
         if len(high_impact_findings) < pre_farming_count:
@@ -985,7 +1012,11 @@ class ContribPipeline:
             if preferred:
                 preferred.sort(
                     key=lambda finding: (
-                        finding.type == ContributionType.README_FIX,
+                        finding.type not in (
+                            ContributionType.SECURITY_FIX,
+                            ContributionType.CODE_QUALITY,
+                            ContributionType.PERFORMANCE_OPT,
+                        ),
                         -finding.priority_score,
                     )
                 )
