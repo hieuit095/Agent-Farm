@@ -1320,7 +1320,7 @@ class PRPatrol:
         if text_clean.startswith(CI_INFRA_IGNORE_PREFIXES):
             return True
         # For log content: substring matching still applies
-        return any(pattern in text_lower for pattern in CI_INFRA_IGNORE_PATTERNS)
+        return any(pattern in text_clean.lower() for pattern in CI_INFRA_IGNORE_PATTERNS)
 
     @staticmethod
     def _extract_ci_traceback(raw_log: str) -> str:

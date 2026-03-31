@@ -659,22 +659,20 @@ class SuperHumanLoop:
     async def _has_pending_notifications(self) -> bool:
         """Check if there are pending notifications/comments on open PRs.
 
-        Returns True if there are PRs with pending status (indicating maintainer
+        Returns True if there are PRs with open status (indicating maintainer
         feedback that needs response). This ensures patrol is prioritized when
         maintainers are waiting, preventing them from waiting days for updates.
         """
         try:
-            pending_prs = await self._memory.get_prs(status="pending", limit=10)
-            if pending_prs:
+            open_prs = await self._memory.get_prs(status="open", limit=10)
+            if open_prs:
                 logger.info(
-                    "🔔 Pending notifications detected: %d PR(s) with pending feedback. "
+                    "🔔 Pending notifications detected: %d PR(s) with open feedback. "
                     "Prioritizing patrol!",
-                    len(pending_prs),
+                    len(open_prs),
                 )
                 return True
-
-            open_prs = await self._memory.get_prs(status="open", limit=10)
-            return len(open_prs) > 0
+            return False
         except Exception:
             return False
 

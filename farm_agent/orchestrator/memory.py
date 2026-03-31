@@ -325,17 +325,9 @@ class Memory:
         return [dict(zip(cols, row, strict=False)) for row in rows]
 
     async def get_today_pr_count(self) -> int:
-        """Get number of PRs created today (local date, UTC-offset-aware)."""
-        # Use LOCAL date — created_at is stored as UTC ISO string, but represents
-        # a local wall-clock moment. At 01:00 UTC+7, UTC date is yesterday (18:00 UTC
-        # Mar 28), so UTC-based query would miss today's local PRs.
-        # Convert: get current UTC time, shift to local, extract local date.
-        utc_now = datetime.now(UTC)
-        local_now = utc_now.astimezone()  # local timezone from OS
-        today_local = local_now.date().isoformat()
+        """Get number of PRs created today (UTC)."""
         cursor = await self._db.execute(
-            "SELECT COUNT(*) FROM submitted_prs WHERE created_at LIKE ?",
-            (f"{today_local}%",),
+            "SELECT COUNT(*) FROM submitted_prs WHERE date(created_at) = date('now')",
         )
         row = await cursor.fetchone()
         return row[0] if row else 0
