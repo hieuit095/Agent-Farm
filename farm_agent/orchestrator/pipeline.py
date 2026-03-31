@@ -197,6 +197,7 @@ class ContribPipeline:
         self._middleware_chain: list = []
         self._agent_registry = None
         self._tool_registry = None
+        self._clone_cache: dict[str, str] = {}
         
         from farm_agent.core.notifier import TelegramNotifier
         self._notifier = TelegramNotifier(
@@ -297,6 +298,16 @@ class ContribPipeline:
         # Close any notifier attached to sub-components
         if hasattr(self, "_notifier") and self._notifier:
             await self._notifier.close()
+
+        # Clean up temporary clone cache directories
+        if self._clone_cache:
+            for path in self._clone_cache.values():
+                try:
+                    await asyncio.to_thread(shutil.rmtree, path, ignore_errors=True)
+                    logger.debug("Cleaned up temporary clone at %s", path)
+                except Exception as e:
+                    logger.warning("Failed to clean up %s: %s", path, e)
+            self._clone_cache.clear()
 
     # ── Public API ─────────────────────────────────────────────────────────
 
@@ -2079,17 +2090,15 @@ class ContribPipeline:
         # Use a class-level cache to avoid re-cloning the same repo across
         # multiple sandbox calls within the same pipeline run.
         cache_key = clone_url
-        if not hasattr(self, "_clone_cache"):
-            self._clone_cache: dict[str, str] = {}
 
         if cache_key in self._clone_cache:
             clone_path = self._clone_cache[cache_key]
             logger.debug("Reusing cached clone at %s", clone_path)
         else:
-            # Create a unique temp directory for this clone
-            base_temp = tempfile.gettempdir()
-            clone_path = os.path.join(base_temp, f"farm_agent_sandbox_{len(self._clone_cache)}")
-            os.makedirs(clone_path, exist_ok=True)
+            # Securely create a unique temp directory for this clone
+            clone_path = await asyncio.to_thread(
+                tempfile.mkdtemp, prefix="farm_agent_sandbox_"
+            )
 
             def _do_clone() -> None:
                 result = subprocess.run(
