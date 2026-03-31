@@ -123,7 +123,7 @@ class Memory:
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
         self._db = await aiosqlite.connect(str(self._db_path))
         # Enable Write-Ahead Logging for concurrent read/write safety
-        await self._db.execute("PRAGMA journal_mode=TRUNCATE;")
+        await self._db.execute("PRAGMA journal_mode=WAL;")
         # Cap WAL growth to ~1000 pages to prevent unbounded disk usage
         await self._db.execute("PRAGMA wal_autocheckpoint=1000;")
         # P1-OPSEC-9: Enable foreign key enforcement

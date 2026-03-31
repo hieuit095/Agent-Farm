@@ -14,7 +14,7 @@ services:
       - TZ=Asia/Ho_Chi_Minh
     env_file: .env
     volumes:
-      - farm_agent-data:/home/farm_agent/.farm_agent
+      - farm_agent_db:/home/farm_agent/.farm_agent
       - ./data:/home/farm_agent/data:rw
       - ./config.yaml:/home/farm_agent/config.yaml:ro
       - ./logs:/home/farm_agent/logs:rw
@@ -27,7 +27,7 @@ services:
     build: .
     container_name: system_runner_1
     volumes:
-      - farm_agent-data:/home/farm_agent/.farm_agent
+      - farm_agent_db:/home/farm_agent/.farm_agent
       - ./config.yaml:/home/farm_agent/config.yaml:ro
     environment:
       - GITHUB_TOKEN=${GITHUB_TOKEN}
@@ -36,5 +36,4 @@ services:
       - cli
 
 volumes:
-  farm_agent-data:
-    driver: local
+  farm_agent_db:
