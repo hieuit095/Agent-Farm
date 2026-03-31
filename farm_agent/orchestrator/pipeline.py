@@ -1208,7 +1208,7 @@ class ContribPipeline:
                             contribution.changes,
                             contribution.tests_added,
                         ),
-                        command="pytest",
+                        command=None,  # Auto-select via Polyglot Guillotine
                     )
 
                     # Determine success
@@ -1626,7 +1626,7 @@ class ContribPipeline:
                             contribution.changes,
                             contribution.tests_added,
                         ),
-                        command="pytest",
+                        command=None,  # Auto-select via Polyglot Guillotine
                     )
                     if isinstance(sandbox_result, dict):
                         is_success = sandbox_result.get("is_success", False)

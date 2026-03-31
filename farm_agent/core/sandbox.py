@@ -398,7 +398,9 @@ class DockerSandbox:
                 network_disabled=True,
                 cap_drop=["ALL"],
                 pids_limit=128,
-                init=True,
+                init=False,  # P0-FIX: init=False lets `timeout --signal=KILL` kill PID 1 directly.
+                # With init=True (tini), SIGKILL goes to tini which may not forward
+                # to child processes, causing sandbox containers to outlive their timeout.
                 labels=labels,
                 name=container_name,
             )
