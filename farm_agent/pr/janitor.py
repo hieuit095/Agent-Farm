@@ -128,6 +128,9 @@ class PRJanitor:
 
             logger.info("  Evaluating #%d %s — %s", pr_number, repo, title)
 
+            # P1-OPSEC: Pace Janitor LLM calls to prevent quote burn
+            await asyncio.sleep(2.0)
+
             verdict = await self._classify_pr(title, body)
             classification = verdict["classification"]
             reason = verdict["reason"]

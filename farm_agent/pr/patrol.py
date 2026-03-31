@@ -693,6 +693,10 @@ class PRPatrol:
         """Use LLM to classify each feedback item."""
         if not feedback:
             return []
+            
+        # P1-OPSEC: Hard-cap comment ingestion to prevent malicious comment flooding 
+        # from exhausting LLM quota in a single PR cycle.
+        feedback = feedback[-15:]
 
         comments_text = "\n\n".join(
             f"Comment #{i + 1} (by @{f['author']}, "

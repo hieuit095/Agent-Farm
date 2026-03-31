@@ -42,8 +42,10 @@ class GitHubClient:
             # that cause GitHub API to return 403 Forbidden.  Found via
             # live-fire crucible: httpx defaults to trust_env=True which
             # reads Windows system proxy settings that block GitHub API.
+            # reads Windows system proxy settings that block GitHub API.
             trust_env=False,
         )
+        self._sem = asyncio.Semaphore(1)
 
     async def close(self):
         await self._client.aclose()
@@ -77,7 +79,13 @@ class GitHubClient:
             try:
                 response = await self._client.request(method, url, **kwargs)
             except httpx.HTTPError as e:
-                raise GitHubAPIError(f"HTTP error: {e}") from e
+                last_error = GitHubAPIError(f"HTTP error: {e}")
+                if attempt < _retries:
+                    wait = 2.0 * (attempt + 1)
+                    logger.warning("HTTP error on %s %s: %s. Retrying in %.1fs (attempt %d/%d)", method, url, e, wait, attempt, _retries)
+                    await asyncio.sleep(wait)
+                    continue
+                raise last_error from e
 
             # ── 403 Forbidden — distinguish primary vs secondary rate limit ──
             if response.status_code == 403:
@@ -124,9 +132,9 @@ class GitHubClient:
                     status_code=response.status_code,
                 )
                 if attempt < _retries:
-                    wait = 2**attempt  # 2s, 4s, 8s
+                    wait = 2.0 * (attempt + 1)
                     logger.warning(
-                        "GitHub %d error on %s %s, retrying in %ds (attempt %d/%d)",
+                        "GitHub %d error on %s %s, retrying in %.1fs (attempt %d/%d)",
                         response.status_code,
                         method,
                         url,
@@ -889,6 +897,8 @@ class GitHubClient:
         try:
             await self._delete(f"/repos/{owner}/{repo}/git/refs/heads/{branch_name}")
             logger.info("Deleted branch %s on %s/%s", branch_name, owner, repo)
+            import asyncio
+            await asyncio.sleep(2.0)
         except GitHubAPIError as exc:
             if exc.status_code in (404, 422):
                 logger.debug("Branch already deleted or not found: %s/%s/%s", owner, repo, branch_name)
@@ -951,7 +961,8 @@ class GitHubClient:
             url = f"/repos/{owner}/{repo}/issues/comments/{comment_id}/reactions"
 
         try:
-            return await self._post(url, json={"content": reaction})
+            async with self._sem:
+                return await self._post(url, json={"content": reaction})
         except Exception as exc:
             logger.debug(
                 "Could not add %s reaction to comment %d on %s/%s: %s",
