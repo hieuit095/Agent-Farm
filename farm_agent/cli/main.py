@@ -382,8 +382,10 @@ def superhuman(ctx, time_warp, dry_run, target_repo):
                 await memory.close()
 
         inner_loop = asyncio.get_running_loop()
-        for sig in (signal.SIGINT, signal.SIGTERM):
-            inner_loop.add_signal_handler(sig, lambda s=sig: _handle_signal(s, shutdown_hook, inner_loop))
+        import sys
+        if sys.platform != "win32":
+            for sig in (signal.SIGINT, signal.SIGTERM):
+                inner_loop.add_signal_handler(sig, lambda s=sig: _handle_signal(s, shutdown_hook, inner_loop))
 
         def _handle_signal(sig, hook, l):
             console.print(f"[yellow]Received {sig.name} — initiating graceful shutdown...[/yellow]")
@@ -392,6 +394,8 @@ def superhuman(ctx, time_warp, dry_run, target_repo):
 
         try:
             await loop.run_daily_routine(time_warp=time_warp)
+        except (KeyboardInterrupt, asyncio.CancelledError):
+            console.print("[yellow]\nKeyboardInterrupt received — initiating graceful shutdown...[/yellow]")
         finally:
             await shutdown_hook()
 

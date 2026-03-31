@@ -886,8 +886,17 @@ class PRPatrol:
                                 task_key, scheduled,
                             )
                             return False
-                    except Exception:
-                        pass  # corrupted schedule entry — proceed
+                    except Exception as e:
+                        # PHASE 3-FIX: Active DB GC. Strip toxic entropy instantly.
+                        logger.warning("Purging corrupted schedule entry for %s: %s", task_key, e)
+                        try:
+                            await self._memory._db.execute(
+                                "DELETE FROM task_schedule WHERE task_key = ?",
+                                (task_key,)
+                            )
+                            await self._memory._db.commit()
+                        except Exception as db_e:
+                            logger.error("Failed to purge corrupted entry %s: %s", task_key, db_e)
 
             # Get PR diff for context
             try:

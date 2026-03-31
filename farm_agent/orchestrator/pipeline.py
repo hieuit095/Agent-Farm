@@ -123,18 +123,44 @@ SKIP_EXTENSIONS = {
 
 
 def _titles_similar(title_a: str, title_b: str) -> bool:
-    """Check if two finding/PR titles are similar enough to be duplicates.
+    """Check if two finding/PR titles address the EXACT same technical issue.
 
-    Uses keyword overlap: if >50% of significant words match, consider similar.
+    PHASE 3-FIX: Eradicated naive 50% single-word intersection.
+    Now requires strict bigram sequence overlap or near-exact match
+    to prevent blocking separate valid fixes that happen to share
+    generic coding terminology (e.g., 'fix error in').
     """
-    stop_words = {"a", "an", "the", "in", "on", "of", "for", "to", "and", "or", "is"}
-    words_a = {w for w in title_a.lower().split() if w not in stop_words and len(w) > 2}
-    words_b = {w for w in title_b.lower().split() if w not in stop_words and len(w) > 2}
-    if not words_a or not words_b:
+    a = title_a.lower().strip()
+    b = title_b.lower().strip()
+    
+    # Exact or near-exact string match
+    if a == b or a in b or b in a:
+        return True
+        
+    # Strip common git prefixes
+    for prefix in ["fix:", "feat:", "chore:", "docs:", "refactor:", "bugfix:", "fix(core):", "fix(ui):"]:
+        if a.startswith(prefix): a = a[len(prefix):].strip()
+        if b.startswith(prefix): b = b[len(prefix):].strip()
+
+    words_a = a.split()
+    words_b = b.split()
+    
+    if len(words_a) < 3 or len(words_b) < 3:
+        return a == b
+        
+    # Build bigrams to preserve semantic sequence instead of just word salad
+    bigrams_a = {f"{words_a[i]} {words_a[i+1]}" for i in range(len(words_a)-1)}
+    bigrams_b = {f"{words_b[i]} {words_b[i+1]}" for i in range(len(words_b)-1)}
+    
+    if not bigrams_a or not bigrams_b:
         return False
-    overlap = len(words_a & words_b)
-    smaller = min(len(words_a), len(words_b))
-    return overlap / smaller > 0.5
+        
+    overlap = len(bigrams_a & bigrams_b)
+    smaller = min(len(bigrams_a), len(bigrams_b))
+    
+    # Requires 80% contiguous bigram sequence overlap to be considered duplicate
+    # (e.g., "fix race condition in auth" vs "fix race condition in db")
+    return overlap / smaller > 0.8
 
 
 @dataclass
