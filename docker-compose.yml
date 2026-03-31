@@ -1,19 +1,24 @@
 services:
-  scheduler:
+  # ── Super Human Mode — default background daemon ─────────────────────────
+  # Runs farm_agent superhuman as the 24/7 autonomous engine.
+  # Start: docker compose up -d
+  superhuman:
     image: worker-daemon:latest
-    build: .
-    container_name: contribai_scheduler_1
-    volumes:
-      - farm_agent-data:/home/farm_agent/.farm_agent
-      - ./config.yaml:/home/farm_agent/config.yaml:ro
-    environment:
-      - GITHUB_TOKEN=${GITHUB_TOKEN}
-      - GEMINI_API_KEY=${GEMINI_API_KEY}
-      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
+    build:
+      context: .
+      dockerfile: Dockerfile.superhuman
+    container_name: contribai_superhuman_1
     restart: unless-stopped
-    # Uses ENTRYPOINT from Dockerfile: /bin/bash /home/farm_agent/entrypoint.sh
+    environment:
+      - TZ=Asia/Ho_Chi_Minh
+    env_file: .env
+    volumes:
+      - ./data:/app/data:rw
+      - ./config.yaml:/app/config.yaml:ro
+      - ./logs:/app/logs:rw
+      - /var/run/docker.sock:/var/run/docker.sock:rw
 
-  # ── One-shot run ───────────────────────────────────
+  # ── One-shot run ─────────────────────────────────────────────────────────
   # Usage: docker compose run --rm runner run --dry-run
   runner:
     image: worker-daemon:latest

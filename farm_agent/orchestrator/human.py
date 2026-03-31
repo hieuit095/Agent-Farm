@@ -656,6 +656,28 @@ class SuperHumanLoop:
             logger.error("🛡️ Patrol lỗi (không xác định): %s", exc)
             raise
 
+    async def _has_pending_notifications(self) -> bool:
+        """Check if there are pending notifications/comments on open PRs.
+
+        Returns True if there are PRs with pending status (indicating maintainer
+        feedback that needs response). This ensures patrol is prioritized when
+        maintainers are waiting, preventing them from waiting days for updates.
+        """
+        try:
+            pending_prs = await self._memory.get_prs(status="pending", limit=10)
+            if pending_prs:
+                logger.info(
+                    "🔔 Pending notifications detected: %d PR(s) with pending feedback. "
+                    "Prioritizing patrol!",
+                    len(pending_prs),
+                )
+                return True
+
+            open_prs = await self._memory.get_prs(status="open", limit=10)
+            return len(open_prs) > 0
+        except Exception:
+            return False
+
     async def run_daily_routine(self, *, time_warp: bool = False) -> None:
         """Run the continuous Super Human daily routine.
 
@@ -790,6 +812,32 @@ class SuperHumanLoop:
                     limit=self._daily_pr_target,
                     remaining=remaining,
                 ))
+
+                # ── PATROL PRIORITY: maintainers waiting? ──────────────────
+                # If there are pending notifications/comments, ALWAYS patrol first.
+                # This ensures maintainers are never left waiting for days while
+                # the bot is off hunting new repos.
+                if await self._has_pending_notifications():
+                    logger.info(
+                        "🔔 Pending feedback detected — prioritizing patrol over hunt "
+                        "to keep maintainers happy!",
+                    )
+                    try:
+                        await self._do_patrol()
+                    except (GitHubAPIError, FarmAgentError, Exception) as exc:
+                        logger.error("Patrol error (pending-notify): %s", exc)
+                        self._daily_log.log_error("Patrol (pending-notify)", str(exc))
+                        stress_delay = self._pick_stress_delay(time_warp)
+                        mins = max(1, stress_delay // 60)
+                        logger.warning(_thought("API_ERROR", mins=mins))
+                        await asyncio.sleep(stress_delay)
+                        continue
+
+                    delay = self._pick_delay("patrol", time_warp)
+                    mins = max(1, delay // 60)
+                    logger.info(_thought("REST_PATROL", mins=mins))
+                    await asyncio.sleep(delay)
+                    continue
 
                 # ── Smart Fallback: check config-level hard PR limit ──
                 # If the absolute config ceiling (github.max_prs_per_day) is

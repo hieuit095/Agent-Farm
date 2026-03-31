@@ -939,37 +939,6 @@ def serve(ctx, host, port):
     run_server(config)
 
 
-@cli.command("schedule")
-@click.option("--cron", default=None, help="Cron expression")
-@click.pass_context
-def schedule(ctx, cron):
-    """Start the scheduler daemon for automated runs."""
-    config = load_config(ctx.obj["config_path"])
-    config.scheduler.enabled = True
-    if cron:
-        config.scheduler.cron = cron
-
-    console.print(
-        f"[bold]Starting Farm-Agent Scheduler[/bold]\n"
-        f"  Cron: {config.scheduler.cron}\n"
-        f"  Timezone: {config.scheduler.timezone}"
-    )
-
-    from farm_agent.scheduler.scheduler import (
-        ContribScheduler,
-    )
-
-    sched = ContribScheduler(config)
-
-    import asyncio
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    try:
-        loop.run_until_complete(sched.start_async())
-    finally:
-        loop.close()
-
-
 @cli.command("vips")
 @click.option(
     "--no-sync",
