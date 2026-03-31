@@ -168,10 +168,11 @@ class PRPatrol:
         )
         self._sandbox_factory = kwargs.get("sandbox_factory", DockerSandbox)
         self._user: dict | None = None
-        # Configurable safety limits (from config or defaults)
+        # Configurable safety limits — navigate validated Pydantic config path
         config = kwargs.get("config", None)
-        self.MAX_CI_RETRIES = getattr(config, "max_ci_retries", 3) if config else 3
-        self.MAX_DISCUSSION_REPLIES = getattr(config, "max_discussion_replies", 3) if config else 3
+        pipeline_cfg = getattr(config, "pipeline", None) if config else None
+        self.MAX_CI_RETRIES = getattr(pipeline_cfg, "max_ci_retries", 3) if pipeline_cfg else 3
+        self.MAX_DISCUSSION_REPLIES = getattr(pipeline_cfg, "max_discussion_replies", 3) if pipeline_cfg else 3
 
     def _create_sandbox(self) -> DockerSandbox:
         """Create a sandbox instance for local validation."""
@@ -183,10 +184,14 @@ class PRPatrol:
         return self._user
 
     def _calculate_typing_delay(self, text_payload: str) -> int:
-        """WPM Simulator: Calculate realistic typing delay based on payload size."""
+        """WPM Simulator: Calculate realistic typing delay based on payload size.
+
+        Capped at 120 seconds to prevent the SuperHumanLoop from freezing
+        on large payloads (unicode, long diffs, etc.).
+        """
         base_delay = random.randint(30, 90)
         typing_time = len(text_payload) / 3.75
-        return int(min(base_delay + typing_time, 1800))
+        return int(min(base_delay + typing_time, 120))
 
     def _get_contextual_greeting(self) -> str:
         """Contextual Small Talk: Day-of-the-week greetings in UTC."""
@@ -958,22 +963,30 @@ class PRPatrol:
                 logger.info("  ⏳ WPM Simulator: 'Typing' code fix for %ds...", delay)
                 await asyncio.sleep(delay)
 
-            # Push fix
+            # Push fix (guarded against Janitor race condition)
             user = await self._get_user()
             signoff = self._build_signoff(user)
             commit_msg = random.choice(GITHUB_REPLIES["COMMIT_FIX"]).format(
                 summary=feedback.body[:60],
             )
-            await self._github.create_or_update_file(
-                fork_owner,
-                fork_repo,
-                file_path,
-                fixed_content,
-                commit_msg,
-                branch,
-                sha=sha,
-                signoff=signoff,
-            )
+            try:
+                await self._github.create_or_update_file(
+                    fork_owner,
+                    fork_repo,
+                    file_path,
+                    fixed_content,
+                    commit_msg,
+                    branch,
+                    sha=sha,
+                    signoff=signoff,
+                )
+            except GitHubAPIError as exc:
+                logger.warning(
+                    "  ⚠️ PR branch modified/deleted externally (Janitor race) "
+                    "while pushing fix to %s: %s",
+                    file_path, exc,
+                )
+                return False
             logger.info("  Pushed fix for %s: %s", file_path, feedback.body[:60])
 
             # Reply to comment — sound like a real human developer
@@ -1535,16 +1548,24 @@ class PRPatrol:
             commit_msg = random.choice(GITHUB_REPLIES["COMMIT_CI_FIX"]).format(
                 check_name=check_name,
             )
-            await self._github.create_or_update_file(
-                fork_owner,
-                fork_repo,
-                file_path,
-                fixed_content,
-                commit_msg,
-                branch,
-                sha=sha,
-                signoff=signoff,
-            )
+            try:
+                await self._github.create_or_update_file(
+                    fork_owner,
+                    fork_repo,
+                    file_path,
+                    fixed_content,
+                    commit_msg,
+                    branch,
+                    sha=sha,
+                    signoff=signoff,
+                )
+            except GitHubAPIError as exc:
+                logger.warning(
+                    "  ⚠️ PR branch modified/deleted externally (Janitor race) "
+                    "while pushing CI fix to %s: %s",
+                    file_path, exc,
+                )
+                return "failed"
             logger.info("  Pushed CI fix for '%s' on %s", check_name, file_path)
 
             if self._memory and validation_failures == 0:
@@ -1580,11 +1601,21 @@ class PRPatrol:
     ) -> tuple[str | None, dict[str, Any] | None, int]:
         """Generate a CI fix and validate it locally before pushing."""
         if not self._enable_sandbox_validation:
-            response = await self._llm.complete(
-                prompt,
-                system=system_prompt,
-                temperature=0.2,
-            )
+            try:
+                response = await self._llm.complete(
+                    prompt,
+                    system=system_prompt,
+                    temperature=0.2,
+                )
+            except Exception as exc:
+                from farm_agent.core.exceptions import LLMRateLimitError
+                if isinstance(exc, LLMRateLimitError):
+                    logger.warning(
+                        "  ⚠️ LLM quota exhausted during CI auto-heal — aborting fix: %s", exc,
+                    )
+                    raise  # re-raise so _handle_ci_failure / outer loop can cooldown
+                logger.error("  ❌ LLM call failed during CI auto-heal: %s", exc)
+                return None, None, 0
             fixed_content = self._extract_fixed_content(response)
             return fixed_content or None, None, 0
 
@@ -1613,11 +1644,24 @@ class PRPatrol:
             sandbox = self._create_sandbox()
             try:
                 for _ in range(remaining_attempts):
-                    response = await self._llm.complete(
-                        current_prompt,
-                        system=system_prompt,
-                        temperature=0.2,
-                    )
+                    try:
+                        response = await self._llm.complete(
+                            current_prompt,
+                            system=system_prompt,
+                            temperature=0.2,
+                        )
+                    except Exception as llm_exc:
+                        from farm_agent.core.exceptions import LLMRateLimitError
+                        if isinstance(llm_exc, LLMRateLimitError):
+                            logger.warning(
+                                "  ⚠️ LLM quota exhausted during sandbox CI fix — aborting: %s",
+                                llm_exc,
+                            )
+                            raise  # propagate to caller for cooldown
+                        logger.error(
+                            "  ❌ LLM call failed during sandbox CI fix: %s", llm_exc,
+                        )
+                        return None, last_result, validation_failures
                     fixed_content = self._extract_fixed_content(response)
                     if not fixed_content:
                         logger.warning("  LLM returned empty fix for CI failure")
