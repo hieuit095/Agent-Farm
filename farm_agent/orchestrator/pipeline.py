@@ -9,7 +9,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-import re
 import shutil
 import subprocess
 import tempfile
@@ -23,8 +22,10 @@ from farm_agent.core.models import (
     AnalysisResult,
     ContributionType,
     DiscoveryCriteria,
+    Finding,
     ImpactLevel,
     PRResult,
+    RepoContext,
     Repository,
     Severity,
 )
@@ -137,32 +138,43 @@ def _titles_similar(title_a: str, title_b: str) -> bool:
     """
     a = title_a.lower().strip()
     b = title_b.lower().strip()
-    
+
     # Exact or near-exact string match
     if a == b or a in b or b in a:
         return True
-        
+
     # Strip common git prefixes
-    for prefix in ["fix:", "feat:", "chore:", "docs:", "refactor:", "bugfix:", "fix(core):", "fix(ui):"]:
-        if a.startswith(prefix): a = a[len(prefix):].strip()
-        if b.startswith(prefix): b = b[len(prefix):].strip()
+    for prefix in [
+        "fix:",
+        "feat:",
+        "chore:",
+        "docs:",
+        "refactor:",
+        "bugfix:",
+        "fix(core):",
+        "fix(ui):",
+    ]:
+        if a.startswith(prefix):
+            a = a[len(prefix) :].strip()
+        if b.startswith(prefix):
+            b = b[len(prefix) :].strip()
 
     words_a = a.split()
     words_b = b.split()
-    
+
     if len(words_a) < 3 or len(words_b) < 3:
         return a == b
-        
+
     # Build bigrams to preserve semantic sequence instead of just word salad
-    bigrams_a = {f"{words_a[i]} {words_a[i+1]}" for i in range(len(words_a)-1)}
-    bigrams_b = {f"{words_b[i]} {words_b[i+1]}" for i in range(len(words_b)-1)}
-    
+    bigrams_a = {f"{words_a[i]} {words_a[i + 1]}" for i in range(len(words_a) - 1)}
+    bigrams_b = {f"{words_b[i]} {words_b[i + 1]}" for i in range(len(words_b) - 1)}
+
     if not bigrams_a or not bigrams_b:
         return False
-        
+
     overlap = len(bigrams_a & bigrams_b)
     smaller = min(len(bigrams_a), len(bigrams_b))
-    
+
     # Requires 80% contiguous bigram sequence overlap to be considered duplicate
     # (e.g., "fix race condition in auth" vs "fix race condition in db")
     return overlap / smaller > 0.8
@@ -198,8 +210,10 @@ class ContribPipeline:
         self._agent_registry = None
         self._tool_registry = None
         self._clone_cache: dict[str, str] = {}
-        
+        self._background_tasks: set[asyncio.Task] = set()
+
         from farm_agent.core.notifier import TelegramNotifier
+
         self._notifier = TelegramNotifier(
             token=self.config.notifications.telegram_token,
             chat_id=self.config.notifications.telegram_chat_id,
@@ -225,7 +239,7 @@ class ContribPipeline:
         # Memory
         self._memory = Memory(self.config.storage.resolved_db_path)
         await self._memory.init()
-        
+
         # Inject memory into LLM provider for quota tracking (Minimax Overdrive)
         self._llm.memory = self._memory
 
@@ -249,6 +263,7 @@ class ContribPipeline:
 
         # ── Polyglot Sandbox — Docker-based patch validation ─────────────────
         from farm_agent.core.sandbox import DockerSandbox
+
         self._sandbox = DockerSandbox()
         logger.info("DockerSandbox initialised — patches will be validated before PR creation")
 
@@ -480,7 +495,7 @@ class ContribPipeline:
                         )
                         if friendly_data:
                             logger.info(
-                                "🏠 Familiar Grounds: %d friendly repos off cooldown — processing first",
+                                "🏠 Familiar Grounds: %d repos off cooldown — processing first",
                                 len(friendly_data),
                             )
                             for fr in friendly_data:
@@ -532,10 +547,16 @@ class ContribPipeline:
                 targets: list[Repository] = []
                 for repo in friendly_repos:
                     if await self._memory.has_analyzed(repo.full_name):
-                        logger.debug("🏠 Skipping %s (on cooldown or already analyzed)", repo.full_name)
+                        logger.debug(
+                            "🏠 Skipping %s (on cooldown or already analyzed)", repo.full_name
+                        )
                         continue
                     targets.append(repo)
-                    logger.info("🏠 Familiar Grounds: added %s (off cooldown, stars=%d)", repo.full_name, repo.stars)
+                    logger.info(
+                        "🏠 Familiar Grounds: added %s (off cooldown, stars=%d)",
+                        repo.full_name,
+                        repo.stars,
+                    )
                 # ── End friendly repos ──
 
                 for repo in repos:
@@ -619,9 +640,7 @@ class ContribPipeline:
             try:
                 # --- Issues FIRST (higher value: fixes real reported problems) ---
                 if mode in ("issues", "both"):
-                    issue_rr = await self._process_repo_issues(
-                        repo, dry_run, remaining
-                    )
+                    issue_rr = await self._process_repo_issues(repo, dry_run, remaining)
                     rr.repos_analyzed = max(rr.repos_analyzed, issue_rr.repos_analyzed)
                     rr.findings_total += issue_rr.findings_total
                     rr.contributions_generated += issue_rr.contributions_generated
@@ -771,21 +790,19 @@ class ContribPipeline:
                 repo.owner, repo.name
             )
             if comments_context:
-                vibe = await self._analyzer.check_maintainer_vibe(
-                    repo.full_name, comments_context
-                )
+                vibe = await self._analyzer.check_maintainer_vibe(repo.full_name, comments_context)
                 if "HOSTILE" in vibe.upper():
                     logger.warning(
                         "🚫 [VIBE CHECK FAILED] Maintainer dự án %s có lịch sử "
                         "toxic/khó tính. Quay xe để đỡ tốn thời gian!",
                         repo.full_name,
                     )
-                    try:
+                    import contextlib
+
+                    with contextlib.suppress(Exception):
                         await self._memory.add_to_blacklist(
                             repo.full_name, reason="toxic_maintainer"
                         )
-                    except Exception:
-                        pass  # blacklist is best-effort
                     result.repos_analyzed = 1
                     return result
                 else:
@@ -796,7 +813,8 @@ class ContribPipeline:
         except Exception as exc:
             logger.debug(
                 "Vibe check skipped for %s (non-critical): %s",
-                repo.full_name, exc,
+                repo.full_name,
+                exc,
             )
         # ──────────────────────────────────────────────────────────────────
 
@@ -841,7 +859,7 @@ class ContribPipeline:
             fp_lower = fp.lower()
             for protected in PROTECTED_META_FILES:
                 if protected.startswith(".github/workflows/"):
-                    pattern = protected[len(".github/workflows/"):]
+                    pattern = protected[len(".github/workflows/") :]
                     if fp_lower.endswith(pattern) or f"/{pattern}" in fp_lower:
                         logger.debug("⏭️ Pre-filter: skip protected workflow file %s", fp)
                         break
@@ -849,11 +867,18 @@ class ContribPipeline:
                     break
             else:
                 # Also block tsconfig-strict, tsconfig-noImplicitAny, etc.
-                _CONFIG_BOOTSTRAP_KEYWORDS = {
-                    "tsconfig", "eslint", "prettier", "babel", "webpack",
-                    "vite.config", "rollup", "jsconfig", "package.json",
+                config_bootstrap_keywords = {
+                    "tsconfig",
+                    "eslint",
+                    "prettier",
+                    "babel",
+                    "webpack",
+                    "vite.config",
+                    "rollup",
+                    "jsconfig",
+                    "package.json",
                 }
-                if any(kw in fp_lower for kw in _CONFIG_BOOTSTRAP_KEYWORDS):
+                if any(kw in fp_lower for kw in config_bootstrap_keywords):
                     logger.debug("⏭️ Pre-filter: skip config/build file %s", fp)
                     continue
 
@@ -874,25 +899,68 @@ class ContribPipeline:
 
         # --- Anti-Farming Filter (impact-level + keyword gatekeeper) ---
         # ZERO-TOLERANCE: Drop ANY finding that looks like a spam/exploratory PR
-        _FARMING_KEYWORDS = {
+        farming_keywords = {
             # Documentation / comments
-            "docstring", "docs", "documentation", "readme", "comment", "spell",
+            "docstring",
+            "docs",
+            "documentation",
+            "readme",
+            "comment",
+            "spell",
             # Formatting / style
-            "format", "formatting", "whitespace", "indent", "spacing", "style",
-            "styling", "naming convention", "rename", "ordering", "lint",
+            "format",
+            "formatting",
+            "whitespace",
+            "indent",
+            "spacing",
+            "style",
+            "styling",
+            "naming convention",
+            "rename",
+            "ordering",
+            "lint",
             # Exploratory / curiosity
-            "understand", "explore", "exploring", "read the", "reading",
-            "look at", "looking at", "check this", "investigate",
+            "understand",
+            "explore",
+            "exploring",
+            "read the",
+            "reading",
+            "look at",
+            "looking at",
+            "check this",
+            "investigate",
             # Low-effort / testing
-            "test", "testing", "todo", "fixme", "chore",
+            "test",
+            "testing",
+            "todo",
+            "fixme",
+            "chore",
             # Cosmetic
-            "typo", "typo in", "grammar", "misspell",
-            "missing type hint", "type annotation", "unused import",
+            "typo",
+            "typo in",
+            "grammar",
+            "misspell",
+            "missing type hint",
+            "type annotation",
+            "unused import",
             # ── Config / Compiler / Tooling tweaks — NEVER tweak these ──────────
-            "no-explicit-any", "noimplicitany", "strict mode", "strict: true",
-            "compiler flag", "compiler option", "tsconfig", "eslint", "prettier",
-            "babel config", "webpack config", "vite config", "rollup config",
-            "linter rule", "lint rule", "tsconfig.json", "package.json",
+            "no-explicit-any",
+            "noimplicitany",
+            "strict mode",
+            "strict: true",
+            "compiler flag",
+            "compiler option",
+            "tsconfig",
+            "eslint",
+            "prettier",
+            "babel config",
+            "webpack config",
+            "vite config",
+            "rollup config",
+            "linter rule",
+            "lint rule",
+            "tsconfig.json",
+            "package.json",
         }
         pre_farming_count = len(analysis.findings)
         high_impact_findings = []
@@ -918,11 +986,11 @@ class ContribPipeline:
             # ── Gate 2: ABSOLUTE DOCS BAN — README_FIX / DOCS_IMPROVE ──────
             # Zero-tolerance: documentation contributions are FORBIDDEN.
             # The agent must NEVER create doc/readme PRs. Nuke on sight.
-            _BANNED_CONTRIB_TYPES = {
+            banned_contrib_types = {
                 ContributionType.README_FIX,
                 ContributionType.DOCS_IMPROVE,
             }
-            if finding.type in _BANNED_CONTRIB_TYPES:
+            if finding.type in banned_contrib_types:
                 logger.info(
                     "🗑️ Dropped '%s' — type=%s (docs/readme contributions BANNED)",
                     finding.title,
@@ -933,11 +1001,11 @@ class ContribPipeline:
             # ── Gate 3: File-Level Guillotine — non-code paths ─────────────
             # Drop any finding targeting documentation files or /docs/ paths,
             # regardless of its declared ContributionType.
-            _GUILLOTINE_EXTENSIONS = {".md", ".txt", ".rst"}
+            guillotine_extensions = {".md", ".txt", ".rst"}
             fp = finding.file_path or ""
             fp_lower_g = fp.lower()
             fp_ext = "." + fp_lower_g.rsplit(".", 1)[-1] if "." in fp_lower_g else ""
-            if fp_ext in _GUILLOTINE_EXTENSIONS:
+            if fp_ext in guillotine_extensions:
                 logger.info(
                     "🗑️ Dropped '%s' — targets doc file %s (non-code extension %s)",
                     finding.title,
@@ -945,7 +1013,12 @@ class ContribPipeline:
                     fp_ext,
                 )
                 continue
-            if "/docs/" in fp_lower_g or fp_lower_g.startswith("docs/") or "\\docs\\" in fp_lower_g or fp_lower_g.startswith("docs\\"):
+            if (
+                "/docs/" in fp_lower_g
+                or fp_lower_g.startswith("docs/")
+                or "\\docs\\" in fp_lower_g
+                or fp_lower_g.startswith("docs\\")
+            ):
                 logger.info(
                     "🗑️ Dropped '%s' — targets docs/ path %s (documentation directory BANNED)",
                     finding.title,
@@ -955,12 +1028,12 @@ class ContribPipeline:
 
             # ── Gate 4: Keyword blacklist — title OR description ───────────
             # Check both title and description (case-insensitive)
-            ALLOWED_CONTRIB_TYPES = {
+            allowed_contrib_types = {
                 ContributionType.FEATURE_ADD,
             }
             combined = title_lower + " " + desc_lower
-            if finding.type not in ALLOWED_CONTRIB_TYPES:
-                for kw in _FARMING_KEYWORDS:
+            if finding.type not in allowed_contrib_types:
+                for kw in farming_keywords:
                     if kw in combined:
                         logger.info(
                             "🗑️ Dropped '%s' — keyword '%s' matched (spam/farming indicator)",
@@ -1048,13 +1121,15 @@ class ContribPipeline:
         filtered_findings = list(candidate_findings)
         if allow_duplicate_prs:
             preferred = [
-                finding for finding in candidate_findings
+                finding
+                for finding in candidate_findings
                 if finding.file_path and finding.title.strip().lower() != "untitled finding"
             ]
             if preferred:
                 preferred.sort(
                     key=lambda finding: (
-                        finding.type not in (
+                        finding.type
+                        not in (
                             ContributionType.SECURITY_FIX,
                             ContributionType.CODE_QUALITY,
                             ContributionType.PERFORMANCE_OPT,
@@ -1161,9 +1236,10 @@ class ContribPipeline:
             # ── Hybrid Contribution Router ─────────────────────────────────
             # Route A — Direct PR (Firefighter): SECURITY_FIX or CRITICAL/HIGH severity
             # Route B — Issue-First (Polite Senior): everything else
-            is_direct_pr = (
-                finding.type == ContributionType.SECURITY_FIX
-                or finding.severity in (Severity.CRITICAL, Severity.HIGH, Severity.MEDIUM)
+            is_direct_pr = finding.type == ContributionType.SECURITY_FIX or finding.severity in (
+                Severity.CRITICAL,
+                Severity.HIGH,
+                Severity.MEDIUM,
             )
 
             if not is_direct_pr:
@@ -1211,7 +1287,9 @@ class ContribPipeline:
                 for attempt in range(1, max_retries + 1):
                     logger.info(
                         "🔬 Sandbox validation attempt %d/%d for '%s'",
-                        attempt, max_retries, contribution.title,
+                        attempt,
+                        max_retries,
+                        contribution.title,
                     )
                     sandbox_result = await self._sandbox.run_in_sandbox(
                         repo_path=await self._clone_and_patch_repo(
@@ -1236,7 +1314,9 @@ class ContribPipeline:
 
                     logger.warning(
                         "🚫 Sandbox attempt %d/%d failed for '%s' — invoking self-correction.",
-                        attempt, max_retries, contribution.title,
+                        attempt,
+                        max_retries,
+                        contribution.title,
                     )
 
                     # Self-Correction: try to fix the broken patch
@@ -1250,7 +1330,8 @@ class ContribPipeline:
                             contribution = corrected
                             logger.info(
                                 "🔧 Self-correction attempt %d succeeded for '%s'",
-                                attempt, contribution.title,
+                                attempt,
+                                contribution.title,
                             )
                         else:
                             logger.warning(
@@ -1260,7 +1341,8 @@ class ContribPipeline:
                     except Exception as correction_err:
                         logger.warning(
                             "🔧 Self-correction attempt %d threw: %s — retrying.",
-                            attempt, correction_err,
+                            attempt,
+                            correction_err,
                         )
                 else:
                     # for/else: runs only if no break occurred (all retries exhausted)
@@ -1275,8 +1357,11 @@ class ContribPipeline:
             # Create PR
             try:
                 import random
+
                 base_coding_time = random.randint(300, 900)
-                patch_length = len(str(contribution.changes)) if hasattr(contribution, "changes") else 500
+                patch_length = (
+                    len(str(contribution.changes)) if hasattr(contribution, "changes") else 500
+                )
                 typing_time = int(patch_length / 3.75)
                 total_coding_delay = min(base_coding_time + typing_time, 3600)
 
@@ -1284,7 +1369,11 @@ class ContribPipeline:
                 # Parallel repos can "think" simultaneously — only the
                 # actual PR push is serialized.
                 if not dry_run:
-                    logger.info(f"⏳ Bắt đầu code cho {repo.full_name}... (Simulating {total_coding_delay}s of heavy coding)")
+                    logger.info(
+                        "⏳ Bắt đầu code cho %s... (Simulating %ds of heavy coding)",
+                        repo.full_name,
+                        total_coding_delay,
+                    )
                     await asyncio.sleep(total_coding_delay)
 
                 # INSIDE THE LOCK: Sequential PR pushing only
@@ -1297,7 +1386,8 @@ class ContribPipeline:
                             logger.warning(
                                 "🚫 TOCTOU PR LIMIT DEFENSE: Concurrent quota hit "
                                 "(%d). Aborting PR for %s",
-                                curr_prs, repo.full_name
+                                curr_prs,
+                                repo.full_name,
                             )
                             return result
 
@@ -1333,11 +1423,13 @@ class ContribPipeline:
                     )
 
                 if not dry_run and getattr(self, "_notifier", None):
-                    asyncio.create_task(
-                        self._safe_send_notification(
-                            f"🚀 <b>[HUNT]</b> New PR Created!\nRepo: <code>{repo.full_name}</code>\nURL: {pr_result.pr_url}"
-                        )
+                    msg = (
+                        f"🚀 <b>[HUNT]</b> New PR Created!\n"
+                        f"Repo: <code>{repo.full_name}</code>\nURL: {pr_result.pr_url}"
                     )
+                    task = asyncio.create_task(self._safe_send_notification(msg))
+                    self._background_tasks.add(task)
+                    task.add_done_callback(self._background_tasks.discard)
 
                 # 5. Post-PR compliance check & auto-fix
                 try:
@@ -1377,10 +1469,10 @@ class ContribPipeline:
         and other non-critical findings where maintainers prefer discussion
         before seeing a large code diff.
         """
-        from farm_agent.core.models import Contribution, ContributionType
+        from farm_agent.core.models import Contribution
 
         logger.info(
-            "📝 [Route B] Issue-First for '%s' (type=%s, severity=%s) — polite heads-up, no code yet",
+            "📝 [Route B] Issue-First for '%s' (type=%s, severity=%s) — polite heads-up",
             finding.title,
             finding.type.value,
             finding.severity.value,
@@ -1410,12 +1502,13 @@ class ContribPipeline:
             # Inline fallback: lazy senior dev style
             issue_body = (
                 f"Spotted a potential issue in `{finding.file_path}`.\n\n"
-                f"If the team thinks this is worth addressing, I can put together a PR. Happy to help."
+                "If the team thinks this is worth addressing, I can put together a PR."
             )
 
         # Create the issue on GitHub
         try:
             import random
+
             thinking_time = random.randint(10, 30)
             logger.info(f"⏳ Thinking before writing... ({thinking_time}s)")
             await asyncio.sleep(thinking_time)
@@ -1429,7 +1522,9 @@ class ContribPipeline:
             )
 
             issue_number = issue_data.get("number", 0)
-            issue_url = issue_data.get("html_url", f"https://github.com/{repo.full_name}/issues/{issue_number}")
+            issue_url = issue_data.get(
+                "html_url", f"https://github.com/{repo.full_name}/issues/{issue_number}"
+            )
 
             logger.info(
                 "📝 Issue created: %s/%s/#%d — '%s'",
@@ -1629,7 +1724,10 @@ class ContribPipeline:
                 for attempt in range(1, max_retries + 1):
                     logger.info(
                         "🔬 Sandbox validation attempt %d/%d for issue #%d ('%s')",
-                        attempt, max_retries, issue.number, contribution.title,
+                        attempt,
+                        max_retries,
+                        issue.number,
+                        contribution.title,
                     )
                     sandbox_result = await self._sandbox.run_in_sandbox(
                         repo_path=await self._clone_and_patch_repo(
@@ -1647,12 +1745,17 @@ class ContribPipeline:
                         error_log = getattr(sandbox_result, "logs", "Validation failed")
 
                     if is_success:
-                        logger.info("✅ Sandbox validated for issue #%d — patch passes CI/tests.", issue.number)
+                        logger.info(
+                            "✅ Sandbox validated for issue #%d — patch passes CI/tests.",
+                            issue.number,
+                        )
                         break
 
                     logger.warning(
                         "🚫 Sandbox attempt %d/%d failed for issue #%d — invoking self-correction.",
-                        attempt, max_retries, issue.number,
+                        attempt,
+                        max_retries,
+                        issue.number,
                     )
                     try:
                         corrected = await self._generator.fix_contribution_from_error(
@@ -1664,13 +1767,18 @@ class ContribPipeline:
                             contribution = corrected
                             logger.info("🔧 Self-correction succeeded for issue #%d", issue.number)
                     except Exception as correction_err:
-                        logger.warning("🔧 Self-correction threw for issue #%d: %s", issue.number, correction_err)
+                        logger.warning(
+                            "🔧 Self-correction threw for issue #%d: %s",
+                            issue.number,
+                            correction_err,
+                        )
                 else:
                     # for/else: runs only if no break occurred (all retries exhausted)
                     logger.error(
                         "🚫 SANDBOX GUILLOTINE: PR creation blocked for issue #%d — "
                         "patch still failing after %d self-correction attempts.",
-                        issue.number, max_retries,
+                        issue.number,
+                        max_retries,
                     )
                     continue
             # ----------------------------------------------------------
@@ -1678,14 +1786,21 @@ class ContribPipeline:
             # Create PR with "Closes #N" in body
             try:
                 import random
+
                 base_coding_time = random.randint(300, 900)
-                patch_length = len(str(contribution.changes)) if hasattr(contribution, "changes") else 500
+                patch_length = (
+                    len(str(contribution.changes)) if hasattr(contribution, "changes") else 500
+                )
                 typing_time = int(patch_length / 3.75)
                 total_coding_delay = min(base_coding_time + typing_time, 3600)
 
                 # CRIT-04 FIX: Move long coding delay OUTSIDE the lock.
                 if not dry_run:
-                    logger.info(f"⏳ Bắt đầu code cho {repo.full_name}... (Simulating {total_coding_delay}s of heavy coding)")
+                    logger.info(
+                        "⏳ Bắt đầu code cho %s... (Simulating %ds of heavy coding)",
+                        repo.full_name,
+                        total_coding_delay,
+                    )
                     await asyncio.sleep(total_coding_delay)
 
                 # INSIDE THE LOCK: Sequential PR pushing only
@@ -1697,14 +1812,17 @@ class ContribPipeline:
                             logger.warning(
                                 "🚫 TOCTOU PR LIMIT DEFENSE: Concurrent quota hit "
                                 "(%d). Aborting PR for %s",
-                                curr_prs, repo.full_name
+                                curr_prs,
+                                repo.full_name,
                             )
                             return result
 
                         logger.info("⏳ Chuẩn bị push code... (Taking a deep breath)")
                         await asyncio.sleep(random.randint(15, 45))
 
-                    logger.info("📤 Creating PR for issue #%d in %s...", issue.number, repo.full_name)
+                    logger.info(
+                        "📤 Creating PR for issue #%d in %s...", issue.number, repo.full_name
+                    )
                     pr_result = await self._pr_manager.create_pr(
                         contribution,
                         repo,
@@ -1725,11 +1843,13 @@ class ContribPipeline:
                 )
 
                 if not dry_run and getattr(self, "_notifier", None):
-                    asyncio.create_task(
-                        self._safe_send_notification(
-                            f"🚀 <b>[HUNT]</b> New PR Created!\nRepo: <code>{repo.full_name}</code>\nURL: {pr_result.pr_url}"
-                        )
+                    msg = (
+                        f"🚀 <b>[HUNT]</b> New PR Created!\n"
+                        f"Repo: <code>{repo.full_name}</code>\nURL: {pr_result.pr_url}"
                     )
+                    task = asyncio.create_task(self._safe_send_notification(msg))
+                    self._background_tasks.add(task)
+                    task.add_done_callback(self._background_tasks.discard)
 
                 # Post-PR compliance
                 try:
@@ -2096,9 +2216,7 @@ class ContribPipeline:
             logger.debug("Reusing cached clone at %s", clone_path)
         else:
             # Securely create a unique temp directory for this clone
-            clone_path = await asyncio.to_thread(
-                tempfile.mkdtemp, prefix="farm_agent_sandbox_"
-            )
+            clone_path = await asyncio.to_thread(tempfile.mkdtemp, prefix="farm_agent_sandbox_")
 
             def _do_clone() -> None:
                 result = subprocess.run(
@@ -2143,7 +2261,7 @@ class ContribPipeline:
                 else:
                     # Replace original_content snippet with new_content
                     if os.path.exists(file_path):
-                        with open(file_path, "r", encoding="utf-8") as f:
+                        with open(file_path, encoding="utf-8") as f:
                             content = f.read()
                         if change.original_content and change.original_content in content:
                             content = content.replace(
