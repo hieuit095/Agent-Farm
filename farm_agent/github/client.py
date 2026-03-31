@@ -137,6 +137,42 @@ class GitHubClient:
                     status_code=response.status_code,
                 )
 
+            # FIX 2: Header-aware backoff — inspect rate-limit headers before returning
+            remaining = response.headers.get("x-ratelimit-remaining")
+            if remaining is not None:
+                try:
+                    remaining_int = int(remaining)
+                    if remaining_int < 50:
+                        reset_ts = response.headers.get("x-ratelimit-reset", "?")
+                        logger.critical(
+                            "CRITICAL: x-ratelimit-remaining=%d (< 50) on %s %s. "
+                            "Forcing 60s sleep (reset at %s)",
+                            remaining_int, method, url, reset_ts,
+                        )
+                        await asyncio.sleep(60)
+                    # Also honor Retry-After header if present
+                    retry_after = response.headers.get("retry-after")
+                    if retry_after:
+                        wait = int(retry_after)
+                        logger.warning(
+                            "Retry-After header present (%s s) on %s %s. Sleeping %.1fs.",
+                            retry_after, method, url, wait + 1,
+                        )
+                        await asyncio.sleep(wait + 1)
+                except (ValueError, TypeError):
+                    pass  # non-numeric remaining, skip
+
+            # FIX 4: Humanize mutations — sleep after successful write operations
+            if method in ("POST", "PATCH", "PUT", "DELETE"):
+                logger.debug("Mutation %s succeeded on %s — sleeping 2.0s to mimic human pacing", method, url)
+                await asyncio.sleep(2.0)
+
+            # FIX 3: Search API hard-throttle — prevent exceeding 30 req/min limit
+            # /search/ endpoints have a separate 30-req/min cap that is easy to exceed
+            if "/search/" in url:
+                logger.debug("Search API call %s %s — sleeping 3.0s to prevent 30/min throttle", method, url)
+                await asyncio.sleep(3.0)
+
             return response.json() if response.content else None
 
         if last_error is not None:
@@ -1113,7 +1149,7 @@ class GitHubClient:
                 repo_map[repo] = pr
 
         # Step 3: Fetch star count for each unique repo and filter
-        semaphore = asyncio.Semaphore(10)  # bounded concurrency
+        semaphore = asyncio.Semaphore(1)  # strictly serial — no parallel bursts
 
         async def process_one(repo_full_name: str, pr: dict) -> dict | None:
             async with semaphore:
