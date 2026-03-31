@@ -9,8 +9,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-import re
-import shutil
 import subprocess
 import tempfile
 from dataclasses import dataclass, field
@@ -137,11 +135,11 @@ def _titles_similar(title_a: str, title_b: str) -> bool:
     """
     a = title_a.lower().strip()
     b = title_b.lower().strip()
-    
+
     # Exact or near-exact string match
     if a == b or a in b or b in a:
         return True
-        
+
     # Strip common git prefixes
     for prefix in ["fix:", "feat:", "chore:", "docs:", "refactor:", "bugfix:", "fix(core):", "fix(ui):"]:
         if a.startswith(prefix): a = a[len(prefix):].strip()
@@ -149,20 +147,20 @@ def _titles_similar(title_a: str, title_b: str) -> bool:
 
     words_a = a.split()
     words_b = b.split()
-    
+
     if len(words_a) < 3 or len(words_b) < 3:
         return a == b
-        
+
     # Build bigrams to preserve semantic sequence instead of just word salad
     bigrams_a = {f"{words_a[i]} {words_a[i+1]}" for i in range(len(words_a)-1)}
     bigrams_b = {f"{words_b[i]} {words_b[i+1]}" for i in range(len(words_b)-1)}
-    
+
     if not bigrams_a or not bigrams_b:
         return False
-        
+
     overlap = len(bigrams_a & bigrams_b)
     smaller = min(len(bigrams_a), len(bigrams_b))
-    
+
     # Requires 80% contiguous bigram sequence overlap to be considered duplicate
     # (e.g., "fix race condition in auth" vs "fix race condition in db")
     return overlap / smaller > 0.8
@@ -197,7 +195,7 @@ class ContribPipeline:
         self._middleware_chain: list = []
         self._agent_registry = None
         self._tool_registry = None
-        
+
         from farm_agent.core.notifier import TelegramNotifier
         self._notifier = TelegramNotifier(
             token=self.config.notifications.telegram_token,
@@ -224,7 +222,7 @@ class ContribPipeline:
         # Memory
         self._memory = Memory(self.config.storage.resolved_db_path)
         await self._memory.init()
-        
+
         # Inject memory into LLM provider for quota tracking (Minimax Overdrive)
         self._llm.memory = self._memory
 
@@ -760,9 +758,7 @@ class ContribPipeline:
                 repo.owner, repo.name
             )
             if comments_context:
-                vibe = await self._analyzer.check_maintainer_vibe(
-                    repo.full_name, comments_context
-                )
+                vibe = await self._analyzer.check_maintainer_vibe(repo.full_name, comments_context)
                 if "HOSTILE" in vibe.upper():
                     logger.warning(
                         "🚫 [VIBE CHECK FAILED] Maintainer dự án %s có lịch sử "
@@ -785,7 +781,8 @@ class ContribPipeline:
         except Exception as exc:
             logger.debug(
                 "Vibe check skipped for %s (non-critical): %s",
-                repo.full_name, exc,
+                repo.full_name,
+                exc,
             )
         # ──────────────────────────────────────────────────────────────────
 
@@ -907,11 +904,11 @@ class ContribPipeline:
             # ── Gate 2: ABSOLUTE DOCS BAN — README_FIX / DOCS_IMPROVE ──────
             # Zero-tolerance: documentation contributions are FORBIDDEN.
             # The agent must NEVER create doc/readme PRs. Nuke on sight.
-            _BANNED_CONTRIB_TYPES = {
+            banned_contrib_types = {
                 ContributionType.README_FIX,
                 ContributionType.DOCS_IMPROVE,
             }
-            if finding.type in _BANNED_CONTRIB_TYPES:
+            if finding.type in banned_contrib_types:
                 logger.info(
                     "🗑️ Dropped '%s' — type=%s (docs/readme contributions BANNED)",
                     finding.title,
@@ -922,11 +919,11 @@ class ContribPipeline:
             # ── Gate 3: File-Level Guillotine — non-code paths ─────────────
             # Drop any finding targeting documentation files or /docs/ paths,
             # regardless of its declared ContributionType.
-            _GUILLOTINE_EXTENSIONS = {".md", ".txt", ".rst"}
+            guillotine_extensions = {".md", ".txt", ".rst"}
             fp = finding.file_path or ""
             fp_lower_g = fp.lower()
             fp_ext = "." + fp_lower_g.rsplit(".", 1)[-1] if "." in fp_lower_g else ""
-            if fp_ext in _GUILLOTINE_EXTENSIONS:
+            if fp_ext in guillotine_extensions:
                 logger.info(
                     "🗑️ Dropped '%s' — targets doc file %s (non-code extension %s)",
                     finding.title,
@@ -934,7 +931,12 @@ class ContribPipeline:
                     fp_ext,
                 )
                 continue
-            if "/docs/" in fp_lower_g or fp_lower_g.startswith("docs/") or "\\docs\\" in fp_lower_g or fp_lower_g.startswith("docs\\"):
+            if (
+                "/docs/" in fp_lower_g
+                or fp_lower_g.startswith("docs/")
+                or "\\docs\\" in fp_lower_g
+                or fp_lower_g.startswith("docs\\")
+            ):
                 logger.info(
                     "🗑️ Dropped '%s' — targets docs/ path %s (documentation directory BANNED)",
                     finding.title,
@@ -944,7 +946,7 @@ class ContribPipeline:
 
             # ── Gate 4: Keyword blacklist — title OR description ───────────
             # Check both title and description (case-insensitive)
-            ALLOWED_CONTRIB_TYPES = {
+            allowed_contrib_types = {
                 ContributionType.FEATURE_ADD,
             }
             combined = title_lower + " " + desc_lower
@@ -1264,8 +1266,11 @@ class ContribPipeline:
             # Create PR
             try:
                 import random
+
                 base_coding_time = random.randint(300, 900)
-                patch_length = len(str(contribution.changes)) if hasattr(contribution, "changes") else 500
+                patch_length = (
+                    len(str(contribution.changes)) if hasattr(contribution, "changes") else 500
+                )
                 typing_time = int(patch_length / 3.75)
                 total_coding_delay = min(base_coding_time + typing_time, 3600)
 
@@ -1273,7 +1278,10 @@ class ContribPipeline:
                 # Parallel repos can "think" simultaneously — only the
                 # actual PR push is serialized.
                 if not dry_run:
-                    logger.info(f"⏳ Bắt đầu code cho {repo.full_name}... (Simulating {total_coding_delay}s of heavy coding)")
+                    logger.info(
+                        f"⏳ Bắt đầu code cho {repo.full_name}... "
+                        f"(Simulating {total_coding_delay}s of heavy coding)"
+                    )
                     await asyncio.sleep(total_coding_delay)
 
                 # INSIDE THE LOCK: Sequential PR pushing only
@@ -1322,9 +1330,10 @@ class ContribPipeline:
                     )
 
                 if not dry_run and getattr(self, "_notifier", None):
-                    asyncio.create_task(
+                    _ = asyncio.create_task(
                         self._safe_send_notification(
-                            f"🚀 <b>[HUNT]</b> New PR Created!\nRepo: <code>{repo.full_name}</code>\nURL: {pr_result.pr_url}"
+                            f"🚀 <b>[HUNT]</b> New PR Created!\nRepo: <code>{repo.full_name}</code>\n"
+                            f"URL: {pr_result.pr_url}"
                         )
                     )
 
@@ -1360,13 +1369,14 @@ class ContribPipeline:
         repo: Repository,
         context: RepoContext,
     ):
+        from farm_agent.core.models import Finding, RepoContext
         """Route B: Open a polite GitHub Issue instead of generating a PR.
 
         This is used for PERFORMANCE_OPT, REFACTOR, CODE_QUALITY, FEATURE_ADD,
         and other non-critical findings where maintainers prefer discussion
         before seeing a large code diff.
         """
-        from farm_agent.core.models import Contribution, ContributionType
+        from farm_agent.core.models import Contribution
 
         logger.info(
             "📝 [Route B] Issue-First for '%s' (type=%s, severity=%s) — polite heads-up, no code yet",
@@ -1399,7 +1409,8 @@ class ContribPipeline:
             # Inline fallback: lazy senior dev style
             issue_body = (
                 f"Spotted a potential issue in `{finding.file_path}`.\n\n"
-                f"If the team thinks this is worth addressing, I can put together a PR. Happy to help."
+                "If the team thinks this is worth addressing, I can put together a PR. "
+                "Happy to help."
             )
 
         # Create the issue on GitHub
@@ -1636,12 +1647,17 @@ class ContribPipeline:
                         error_log = getattr(sandbox_result, "logs", "Validation failed")
 
                     if is_success:
-                        logger.info("✅ Sandbox validated for issue #%d — patch passes CI/tests.", issue.number)
+                        logger.info(
+                            "✅ Sandbox validated for issue #%d — patch passes CI/tests.",
+                            issue.number,
+                        )
                         break
 
                     logger.warning(
                         "🚫 Sandbox attempt %d/%d failed for issue #%d — invoking self-correction.",
-                        attempt, max_retries, issue.number,
+                        attempt,
+                        max_retries,
+                        issue.number,
                     )
                     try:
                         corrected = await self._generator.fix_contribution_from_error(
@@ -1653,7 +1669,11 @@ class ContribPipeline:
                             contribution = corrected
                             logger.info("🔧 Self-correction succeeded for issue #%d", issue.number)
                     except Exception as correction_err:
-                        logger.warning("🔧 Self-correction threw for issue #%d: %s", issue.number, correction_err)
+                        logger.warning(
+                            "🔧 Self-correction threw for issue #%d: %s",
+                            issue.number,
+                            correction_err,
+                        )
                 else:
                     # for/else: runs only if no break occurred (all retries exhausted)
                     logger.error(
@@ -1667,14 +1687,20 @@ class ContribPipeline:
             # Create PR with "Closes #N" in body
             try:
                 import random
+
                 base_coding_time = random.randint(300, 900)
-                patch_length = len(str(contribution.changes)) if hasattr(contribution, "changes") else 500
+                patch_length = (
+                    len(str(contribution.changes)) if hasattr(contribution, "changes") else 500
+                )
                 typing_time = int(patch_length / 3.75)
                 total_coding_delay = min(base_coding_time + typing_time, 3600)
 
                 # CRIT-04 FIX: Move long coding delay OUTSIDE the lock.
                 if not dry_run:
-                    logger.info(f"⏳ Bắt đầu code cho {repo.full_name}... (Simulating {total_coding_delay}s of heavy coding)")
+                    logger.info(
+                        f"⏳ Bắt đầu code cho {repo.full_name}... "
+                        f"(Simulating {total_coding_delay}s of heavy coding)"
+                    )
                     await asyncio.sleep(total_coding_delay)
 
                 # INSIDE THE LOCK: Sequential PR pushing only
@@ -1686,14 +1712,17 @@ class ContribPipeline:
                             logger.warning(
                                 "🚫 TOCTOU PR LIMIT DEFENSE: Concurrent quota hit "
                                 "(%d). Aborting PR for %s",
-                                curr_prs, repo.full_name
+                                curr_prs,
+                                repo.full_name,
                             )
                             return result
 
                         logger.info("⏳ Chuẩn bị push code... (Taking a deep breath)")
                         await asyncio.sleep(random.randint(15, 45))
 
-                    logger.info("📤 Creating PR for issue #%d in %s...", issue.number, repo.full_name)
+                    logger.info(
+                        "📤 Creating PR for issue #%d in %s...", issue.number, repo.full_name
+                    )
                     pr_result = await self._pr_manager.create_pr(
                         contribution,
                         repo,
@@ -1714,9 +1743,10 @@ class ContribPipeline:
                 )
 
                 if not dry_run and getattr(self, "_notifier", None):
-                    asyncio.create_task(
+                    _ = asyncio.create_task(
                         self._safe_send_notification(
-                            f"🚀 <b>[HUNT]</b> New PR Created!\nRepo: <code>{repo.full_name}</code>\nURL: {pr_result.pr_url}"
+                            f"🚀 <b>[HUNT]</b> New PR Created!\nRepo: <code>{repo.full_name}</code>\n"
+                            f"URL: {pr_result.pr_url}"
                         )
                     )
 
@@ -2089,7 +2119,7 @@ class ContribPipeline:
             # Create a unique temp directory for this clone
             base_temp = tempfile.gettempdir()
             clone_path = os.path.join(base_temp, f"farm_agent_sandbox_{len(self._clone_cache)}")
-            os.makedirs(clone_path, exist_ok=True)
+            await asyncio.to_thread(os.makedirs, clone_path, exist_ok=True)
 
             def _do_clone() -> None:
                 result = subprocess.run(
@@ -2114,51 +2144,63 @@ class ContribPipeline:
 
         # Apply patches (changes + tests_added) to the local clone
         all_changes = list(changes) + list(tests_added)
-        for change in all_changes:
-            file_path = os.path.normpath(os.path.join(clone_path, change.path))
-            # Security: ensure the file path stays within the clone directory
-            if not file_path.startswith(clone_path + os.sep) and file_path != clone_path:
-                logger.warning("Patch path %s escapes clone dir — skipping", change.path)
-                continue
 
-            try:
-                if change.is_new_file:
+        # PERF-OPT: Process file patches using to_thread to avoid blocking event loop
+        # and gather them for potential parallel I/O speedup.
+        patch_tasks = [
+            asyncio.to_thread(self._apply_patch_sync, clone_path, change)
+            for change in all_changes
+        ]
+        await asyncio.gather(*patch_tasks)
+
+        return clone_path
+
+    def _apply_patch_sync(self, clone_path: str, change: FileChange) -> None:
+        from farm_agent.core.models import FileChange
+
+        """Synchronously apply a single FileChange patch to the local clone."""
+        file_path = os.path.normpath(os.path.join(clone_path, change.path))
+        # Security: ensure the file path stays within the clone directory
+        if not file_path.startswith(clone_path + os.sep) and file_path != clone_path:
+            logger.warning("Patch path %s escapes clone dir — skipping", change.path)
+            return
+
+        try:
+            if change.is_new_file:
+                os.makedirs(os.path.dirname(file_path), exist_ok=True)
+                with open(file_path, "w", encoding="utf-8") as f:
+                    f.write(change.new_content)
+                logger.debug("Created new file: %s", change.path)
+            elif change.is_deleted:
+                if os.path.exists(file_path):
+                    os.remove(file_path)
+                logger.debug("Deleted file: %s", change.path)
+            else:
+                # Replace original_content snippet with new_content
+                if os.path.exists(file_path):
+                    with open(file_path, encoding="utf-8") as f:
+                        content = f.read()
+                    if change.original_content and change.original_content in content:
+                        content = content.replace(
+                            change.original_content,
+                            change.new_content,
+                            1,
+                        )
+                    else:
+                        # Fallback: just write new_content (original_content may be
+                        # a partial snippet from the LLM)
+                        content = change.new_content
+                    with open(file_path, "w", encoding="utf-8") as f:
+                        f.write(content)
+                    logger.debug("Patched file: %s", change.path)
+                else:
+                    logger.warning(
+                        "Patch target file does not exist: %s — creating it",
+                        change.path,
+                    )
                     os.makedirs(os.path.dirname(file_path), exist_ok=True)
                     with open(file_path, "w", encoding="utf-8") as f:
                         f.write(change.new_content)
-                    logger.debug("Created new file: %s", change.path)
-                elif change.is_deleted:
-                    if os.path.exists(file_path):
-                        os.remove(file_path)
-                    logger.debug("Deleted file: %s", change.path)
-                else:
-                    # Replace original_content snippet with new_content
-                    if os.path.exists(file_path):
-                        with open(file_path, "r", encoding="utf-8") as f:
-                            content = f.read()
-                        if change.original_content and change.original_content in content:
-                            content = content.replace(
-                                change.original_content,
-                                change.new_content,
-                                1,
-                            )
-                        else:
-                            # Fallback: just write new_content (original_content may be
-                            # a partial snippet from the LLM)
-                            content = change.new_content
-                        with open(file_path, "w", encoding="utf-8") as f:
-                            f.write(content)
-                        logger.debug("Patched file: %s", change.path)
-                    else:
-                        logger.warning(
-                            "Patch target file does not exist: %s — creating it",
-                            change.path,
-                        )
-                        os.makedirs(os.path.dirname(file_path), exist_ok=True)
-                        with open(file_path, "w", encoding="utf-8") as f:
-                            f.write(change.new_content)
-            except Exception as e:
-                logger.warning("Failed to apply patch to %s: %s", change.path, e)
-                # Continue with other patches — don't fail the whole validation
-
-        return clone_path
+        except Exception as e:
+            logger.warning("Failed to apply patch to %s: %s", change.path, e)
+            # Continue with other patches — don't fail the whole validation
