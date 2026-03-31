@@ -7,9 +7,11 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    command: python -m farm_agent.cli.main superhuman
+    entrypoint: []
+    command: ["python", "-m", "farm_agent.cli.main", "superhuman"]
     container_name: contribai_superhuman_1
     restart: unless-stopped
+    user: "0:0"
     environment:
       - TZ=Asia/Ho_Chi_Minh
     env_file: .env
