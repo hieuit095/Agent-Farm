@@ -724,17 +724,30 @@ class Memory:
                 (now, provider),
             )
 
-            # ── Time-based periodic cleanup: purge entries older than 7 days ──
-            # DEBT-06: Replace volatile counter with time-based trigger (hourly cleanup)
-            if not hasattr(self, "_last_quota_cleanup"):
-                self._last_quota_cleanup = 0.0
+            # ── DB-backed periodic cleanup: purge entries older than 7 days ──
+            # P0-FIX (v2): Replaced volatile `self._last_quota_cleanup` with
+            # persistent `task_schedule` table lookup.  Multiple processes or
+            # CLI invocations now coordinate cleanups via the DB, not RAM.
+            last_cleanup_iso = await self.get_task_schedule("quota_cleanup")
+            run_cleanup = False
+            if last_cleanup_iso is None:
+                run_cleanup = True
+            else:
+                try:
+                    last_ts = datetime.fromisoformat(last_cleanup_iso).timestamp()
+                    run_cleanup = now - last_ts >= 3600  # 1 hour
+                except (ValueError, TypeError):
+                    run_cleanup = True  # corrupted entry — force cleanup
 
-            if now - self._last_quota_cleanup >= 3600:  # 1 hour
+            if run_cleanup:
                 await self._db.execute(
                     "DELETE FROM api_usage_log WHERE timestamp < ?",
                     (seven_days_ago,),
                 )
-                self._last_quota_cleanup = now
+                await self.set_task_schedule(
+                    "quota_cleanup",
+                    datetime.now(UTC).isoformat(),
+                )
 
             await self._db.commit()
 

@@ -16,40 +16,41 @@ from farm_agent.github.client import GitHubClient
 
 logger = logging.getLogger(__name__)
 
-# Keywords indicating a checkbox is safe to auto-check
-_SAFE_KEYWORDS = re.compile(
-    r"test|lint|format|build|warning|error|manual review|code review"
-    r"|type.check|ci|pass|style|quality|clean",
-    re.IGNORECASE,
-)
+def auto_check_pr_template(body: str, contrib_type: ContributionType | None = None) -> str:
+    """Auto-check compliance checkboxes strictly based on contribution type.
 
-# Keywords indicating a checkbox must NOT be auto-checked
-_DANGEROUS_KEYWORDS = re.compile(
-    r"breaking|migration|deprecat|screenshot|deploy|release"
-    r"|database|schema|backward|visual|design",
-    re.IGNORECASE,
-)
-
-
-def auto_check_pr_template(body: str) -> str:
-    """Auto-check safe compliance checkboxes in PR template bodies.
-
-    Checks boxes (`- [ ]` → `- [x]`) ONLY when the line matches
-    safe keywords (test, lint, build, etc.) AND does NOT match
-    dangerous keywords (breaking, migration, deploy, etc.).
-
-    This provides a deterministic fallback after the LLM prompt
-    to ensure no unchecked boilerplate boxes slip through.
+    Phase 1 Martial Law: Eradicated naive regex blind-ticking.
+    Now only ticks checkboxes if the exact line expressly matches the
+    bot's actual contribution type. If no type is provided or matched,
+    it ticks nothing, opting for safety over false compliance.
     """
+    if not contrib_type:
+        return body
+
+    # Map ContributionTypes to the literal template terms maintainers usually use
+    type_matches = {
+        ContributionType.SECURITY_FIX: ["security", "vulnerability", "cve", "bug"],
+        ContributionType.CODE_QUALITY: ["bug", "fix", "quality", "lint", "static analysis"],
+        ContributionType.README_FIX: ["doc", "readme", "comment"],
+        ContributionType.UI_UX_FIX: ["ui", "ux", "visual", "frontend"],
+        ContributionType.PERFORMANCE_OPT: ["perf", "speed", "optimiz"],
+        ContributionType.FEATURE_ADD: ["feature", "enhancement", "new"],
+        ContributionType.REFACTOR: ["refactor", "cleanup", "chore"],
+    }
+    
+    allowed_terms = type_matches.get(contrib_type, [])
+    if not allowed_terms:
+        return body
+
     lines = body.split("\n")
     for i, line in enumerate(lines):
-        stripped = line.strip()
-        if (
-            stripped.startswith(("- [ ]", "* [ ]"))
-            and _SAFE_KEYWORDS.search(stripped)
-            and not _DANGEROUS_KEYWORDS.search(stripped)
-        ):
-            lines[i] = line.replace("[ ]", "[x]", 1)
+        stripped = line.strip().lower()
+        if stripped.startswith(("- [ ]", "* [ ]")):
+            if any(term in stripped for term in allowed_terms):
+                # Only check if it safely avoids danger terms
+                if not any(danger in stripped for danger in ["breaking", "release", "deploy", "migration"]):
+                    # Replace the first unmet checkbox
+                    lines[i] = line.replace("[ ]", "[x]", 1)
     return "\n".join(lines)
 
 
@@ -169,7 +170,7 @@ class PRManager:
                     pr_body += f"\n\nCloses #{issue_number}"
 
             # Layer 2: Deterministic checkbox compliance fallback
-            pr_body = auto_check_pr_template(pr_body)
+            pr_body = auto_check_pr_template(pr_body, contribution.finding.type)
 
             # ── Gag Order — sanitize all free-text fields before submission ──
             # PR title
@@ -449,8 +450,11 @@ class PRManager:
                 repo.owner, repo.name, pr_result.pr_number
             )
         except Exception as e:
-            logger.warning("Could not fetch PR comments: %s", e)
-            return True  # Don't block on this
+            # PHASE 1-FIX: Fail-closed on compliance bypass.
+            # Returning True (compliant) on a network exception bypasses CLA
+            # checks and pisses off maintainers. Fail the compliance entirely.
+            logger.error("Could not fetch PR comments — failing compliance check: %s", e)
+            return False
 
         bot_issues = []
         cla_comments = []

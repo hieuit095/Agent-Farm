@@ -260,6 +260,7 @@ class DockerSandbox:
                 repo_dir=repo_dir,
                 container_name=container_name,
                 labels=labels,
+                timeout=timeout,
             )
 
             output_task = asyncio.create_task(
@@ -329,13 +330,26 @@ class DockerSandbox:
         repo_dir: Path,
         container_name: str,
         labels: dict[str, str],
+        timeout: int = 120,
     ) -> Container:
-        """Create and start the sandbox container."""
+        """Create and start the sandbox container.
+
+        Args:
+            timeout: Hard execution cap in seconds. The shell command is wrapped
+                     with the Linux ``timeout`` utility so the process is killed
+                     at the OS level inside the container, regardless of asyncio
+                     loop health or Docker daemon state.
+        """
+        # P0-FIX (v2): Wrap command with OS-level `timeout` utility.
+        # The previous `stop_timeout` kwarg only controlled the grace period
+        # AFTER a manual `docker stop` — it did NOT bound execution time.
+        # `timeout --signal=KILL` guarantees SIGKILL after the deadline.
+        guarded_command = f"timeout --signal=KILL {timeout}s {command}"
 
         def _run_container() -> Container:
             return self.client.containers.run(
                 image,
-                ["/bin/sh", "-lc", command],
+                ["/bin/sh", "-lc", guarded_command],
                 detach=True,
                 # DEBT-05: Removed auto_remove=True — rely on explicit finally cleanup
                 # block for deterministic container removal and to avoid 409 Conflict
@@ -354,10 +368,6 @@ class DockerSandbox:
                 init=True,
                 labels=labels,
                 name=container_name,
-                # P0-FIX: Hard timeout at Docker daemon level — prevents deadlock
-                # if our asyncio polling loop fails or stalls. Docker daemon will
-                # SIGTERM → SIGKILL the container after this many seconds.
-                stop_timeout=timeout,
             )
 
         try:
