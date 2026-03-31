@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from contribai.agents.registry import create_default_registry
 from contribai.analysis.analyzer import CodeAnalyzer
 from contribai.core.config import ContribAIConfig
+from contribai.core.exceptions import GitHubAPIError
 from contribai.core.middleware import build_default_chain
 from contribai.core.models import (
     AnalysisResult,
@@ -889,8 +890,8 @@ class ContribPipeline:
             try:
                 content = await self._github.get_file_content(repo.owner, repo.name, fpath)
                 relevant_files[fpath] = content
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Could not fetch key file %s: %s", fpath, e)
 
         from contribai.core.models import RepoContext
 
@@ -944,8 +945,8 @@ class ContribPipeline:
                         )
                         relevant_files[finding.file_path] = content
                         context.relevant_files[finding.file_path] = content
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug("Could not fetch file for finding %s: %s", finding.file_path, e)
 
             # Generate contributions — first finding is the primary one
             # The generator already handles multi-file via cross-file matching
@@ -1201,31 +1202,38 @@ class ContribPipeline:
                     ]
                     if any(kw in content_lower for kw in ban_keywords):
                         return True
-            except Exception:
-                pass
+            except GitHubAPIError as e:
+                if e.status_code == 404:
+                    logger.debug("AI policy file not found: %s", path)
+                else:
+                    logger.warning("Error fetching AI policy file %s: %s", path, e)
+            except Exception as e:
+                logger.error("Unexpected error checking AI policy path %s: %s", path, e)
 
         # Also check CONTRIBUTING.md for anti-AI language
-        try:
-            for contrib_path in ["CONTRIBUTING.md", ".github/CONTRIBUTING.md"]:
-                try:
-                    content = await self._github.get_file_content(
-                        repo.owner, repo.name, contrib_path
-                    )
-                    if content:
-                        content_lower = content.lower()
-                        ban_phrases = [
-                            "ai-generated contributions",
-                            "no ai pull requests",
-                            "ban on ai-generated",
-                            "do not submit ai",
-                            "see ai_policy",
-                        ]
-                        if any(phrase in content_lower for phrase in ban_phrases):
-                            return True
-                except Exception:
-                    pass
-        except Exception:
-            pass
+        for contrib_path in ["CONTRIBUTING.md", ".github/CONTRIBUTING.md"]:
+            try:
+                content = await self._github.get_file_content(
+                    repo.owner, repo.name, contrib_path
+                )
+                if content:
+                    content_lower = content.lower()
+                    ban_phrases = [
+                        "ai-generated contributions",
+                        "no ai pull requests",
+                        "ban on ai-generated",
+                        "do not submit ai",
+                        "see ai_policy",
+                    ]
+                    if any(phrase in content_lower for phrase in ban_phrases):
+                        return True
+            except GitHubAPIError as e:
+                if e.status_code == 404:
+                    logger.debug("Contributing guidelines not found: %s", contrib_path)
+                else:
+                    logger.warning("Error fetching contributing guidelines %s: %s", contrib_path, e)
+            except Exception as e:
+                logger.error("Unexpected error checking %s for AI policy: %s", contrib_path, e)
 
         return False
 
