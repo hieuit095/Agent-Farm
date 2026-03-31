@@ -34,15 +34,16 @@ class GitHubClient:
                 "Accept": "application/vnd.github+json",
                 "X-GitHub-Api-Version": "2022-11-28",
                 # Sanitized — browser-like UA avoids GitHub abuse detection
-                # (httpx without trust_env=False gets blocked; browser UA helps)
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
             },
-            timeout=30.0,
-            # trust_env=False: prevents reading Windows proxy/VPN env vars
-            # that cause GitHub API to return 403 Forbidden.  Found via
-            # live-fire crucible: httpx defaults to trust_env=True which
-            # reads Windows system proxy settings that block GitHub API.
-            # reads Windows system proxy settings that block GitHub API.
+            # P0-FIX: Granular timeouts prevent infinite hangs on TLS handshakes
+            # and slow reads.  A flat timeout=30.0 does NOT cap the connect phase
+            # independently — Docker containers with DNS but no route will hang
+            # for the full 30s on the TCP/TLS handshake alone.
+            timeout=httpx.Timeout(timeout=15.0, connect=10.0),
+            # trust_env=False: prevents reading Windows/Docker proxy env vars
+            # (HTTP_PROXY, HTTPS_PROXY, NO_PROXY) that cause GitHub API to
+            # return 403 Forbidden or hang on a non-existent proxy.
             trust_env=False,
         )
         self._sem = asyncio.Semaphore(1)
@@ -69,10 +70,15 @@ class GitHubClient:
             try:
                 response = await self._client.request(method, url, **kwargs)
             except httpx.HTTPError as e:
-                last_error = GitHubAPIError(f"HTTP error: {e}")
+                # P0-FIX: Use repr(e) — str(e) for ConnectTimeout, ReadError, etc.
+                # returns an empty string, rendering the log completely blind.
+                last_error = GitHubAPIError(f"HTTP error: {type(e).__name__}: {e!r}")
                 if attempt < _retries:
                     wait = 2.0 * (attempt + 1)
-                    logger.warning("HTTP error on %s %s: %s. Retrying in %.1fs (attempt %d/%d)", method, url, e, wait, attempt, _retries)
+                    logger.warning(
+                        "HTTP error on %s %s: %s. Retrying in %.1fs (attempt %d/%d)",
+                        method, url, f"{type(e).__name__}: {e!r}", wait, attempt, _retries,
+                    )
                     await asyncio.sleep(wait)
                     continue
                 raise last_error from e
@@ -873,8 +879,8 @@ class GitHubClient:
                     "Accept": "application/vnd.github+json",
                 },
                 follow_redirects=True,
-                timeout=60.0,
-                trust_env=False,  # prevent Windows proxy interference
+                timeout=httpx.Timeout(timeout=60.0, connect=10.0),
+                trust_env=False,  # prevent Docker/Windows proxy interference
             ) as client:
                 response = await client.get(url)
 
