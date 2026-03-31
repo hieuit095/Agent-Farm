@@ -122,10 +122,15 @@ class Memory:
         """Initialize database connection and schema."""
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
         self._db = await aiosqlite.connect(str(self._db_path))
-        # Enable Write-Ahead Logging for concurrent read/write safety
-        await self._db.execute("PRAGMA journal_mode=WAL;")
-        # Cap WAL growth to ~1000 pages to prevent unbounded disk usage
-        await self._db.execute("PRAGMA wal_autocheckpoint=1000;")
+        # Enable Write-Ahead Logging for concurrent read/write safety.
+        # Fall back to DELETE journal mode if WAL fails (e.g. on some Docker
+        # volume filesystems that don't support -wal/-shm auxiliary files).
+        try:
+            await self._db.execute("PRAGMA journal_mode=WAL;")
+            await self._db.execute("PRAGMA wal_autocheckpoint=1000;")
+        except sqlite3.OperationalError as e:
+            logger.warning("WAL mode unavailable (%s), falling back to DELETE journal mode", e)
+            await self._db.execute("PRAGMA journal_mode=DELETE;")
         # P1-OPSEC-9: Enable foreign key enforcement
         await self._db.execute("PRAGMA foreign_keys = ON;")
         await self._db.executescript(SCHEMA)
@@ -168,9 +173,13 @@ class Memory:
         if self._db is None:
             return
         try:
-            await self._db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            # WAL checkpoint is only valid when journal_mode=WAL
+            await self._db.execute("PRAGMA journal_mode;")
+            rows = await self._db.execute("PRAGMA journal_mode;").fetchall()
+            if rows and rows[0][0].upper() == "WAL":
+                await self._db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
         except Exception as e:
-            logger.warning("WAL checkpoint failed: %s", e)
+            logger.warning("WAL checkpoint failed (may be in DELETE mode): %s", e)
 
     async def cleanup_old_records(self, days: int = 30) -> dict[str, int]:
         """Delete records older than `days`. Call on startup or daily.
