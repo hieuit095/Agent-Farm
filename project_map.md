@@ -1,398 +1,858 @@
-# Farm-Agent — Project Map
+# 🗺️ Farm-Agent Project Map (v2.5.0)
 
-> **Last updated:** 2026-03-30
-> **Status:** Active development — v2.5.0
-> **Purpose:** This file is the authoritative source of truth for the project's current architecture.
-
----
-
-## 1. PROJECT OVERVIEW
-
-Farm-Agent is an AI-powered autonomous agent that discovers GitHub repositories matching user-defined criteria, analyzes their source code for issues, generates targeted fixes or enhancements, and submits pull requests — all without human intervention. It also continuously patrols its submitted PRs to respond to maintainer review feedback, auto-heals failing CI pipelines, and cleans up low-quality PRs via a "Ruthless Janitor" mode.
-
-**Primary goal:** Maximize meaningful open-source contributions by operating 24/7 with a human-developer operational cadence (Super Human Mode), including daily PR quotas, randomized delays, and adaptive behavior based on review feedback.
+> **Last synchronized:** 2026-03-31 — Derived from exhaustive source code analysis.
+> This document reflects the **raw reality** of the codebase, not idealized designs.
 
 ---
 
-## 2. TECH STACK & INFRASTRUCTURE
+## 1. System Overview & Tech Stack
 
-### Languages & Runtimes
-- **Python 3.12** (primary language)
-- **Docker** (containerized deployment)
+Farm-Agent is an **autonomous AI agent** that discovers open-source GitHub repositories,
+analyzes their code for real bugs and quality issues, generates fixes, submits pull requests,
+monitors maintainer feedback, and auto-responds — all without human intervention.
 
-### Core Dependencies
-| Package | Purpose |
-|---------|---------|
-| `httpx` | Async HTTP client (GitHub API, LLM API) |
-| `pydantic` + `pydantic-settings` | Configuration validation |
-| `aiosqlite` | Async SQLite (persistent memory) |
-| `google-genai` | Minimax LLM API client |
-| `openai` | OpenAI-compatible LLM interface |
-| `anthropic` | Anthropic Claude API |
-| `apscheduler` | Cron-based scheduler for automated runs |
-| `click` | CLI framework |
-| `rich` | Terminal UI / tables / panels |
-| `gitpython` | Git operations (fork management) |
-| `docker` | Docker API for sandbox validation |
-| `chromadb` | Vector store for RAG-based cross-file analysis |
-| `numpy` | Numerical operations |
-| `pyyaml` | YAML config parsing |
+### Active Tech Stack
 
-### Infrastructure
-- **Database:** SQLite with WAL mode (`data/memory.db`)
-- **Cache:** File-based daily logs (`logs/`, `daily_log/`)
-- **Container:** Docker image built from `Dockerfile`; `docker-compose.yml` defines `scheduler` and `runner` services
-- **Notifications:** Telegram bot (push), Slack/Discord webhooks (optional)
+| Layer              | Technology                | Notes                                         |
+|--------------------|---------------------------|-----------------------------------------------|
+| Language           | Python 3.11+              | `from __future__ import annotations` everywhere |
+| Async Runtime      | `asyncio`                 | All I/O is `async/await`                      |
+| HTTP Client        | `httpx` (async)           | Persistent `AsyncClient` with connection reuse |
+| Database           | SQLite via `aiosqlite`    | WAL mode, single-file `memory.db`             |
+| LLM Provider       | Minimax (ABAB models)     | REST API via `httpx`, semaphore-throttled     |
+| GitHub API         | REST v3 via `httpx`       | Semaphore-guarded (concurrency=1)             |
+| CLI Framework      | `click` + `rich`          | Rich console, logging, panels, tables         |
+| Config             | `pydantic` + `PyYAML`     | `config.yaml` → `FarmAgentConfig` dataclass   |
+| Docker             | `docker` (Python SDK)     | Sandbox for patch validation                  |
+| RAG                | `chromadb` (ephemeral)    | In-memory, RAM-only semantic search           |
+| Notifications      | Telegram Bot API          | Long-polling C2 command center                |
+| Tests              | `pytest`                  | 333+ unit tests                               |
+| Linting            | `ruff`                    | 100 char line length                          |
 
 ---
 
-## 3. SYSTEM ARCHITECTURE
-
-### High-Level Data Flow
+## 2. Module Dependency Graph
 
 ```
-CLI Entry Point
-(farm_agent run | hunt | patrol | superhuman)
+cli/main.py                              ← CLI entry point (click commands)
+  └── orchestrator/pipeline.py           ← Core pipeline orchestrator
+        ├── core/config.py               ← Pydantic config (FarmAgentConfig)
+        ├── core/middleware.py            ← 5 ordered middlewares
+        ├── core/sandbox.py              ← Docker-backed patch validation
+        ├── core/rag.py                  ← ChromaDB ephemeral RAG engine
+        ├── core/quotas.py               ← In-memory API quota tracker
+        ├── core/retry.py                ← async_retry decorator + LRU cache
+        ├── core/profiles.py             ← Named contribution profiles (presets)
+        ├── core/leaderboard.py          ← PR merge/close rate tracking
+        ├── core/daily_log.py            ← Append-only daily markdown logger
+        ├── core/notifier.py             ← TelegramNotifier (C2 commands)
+        ├── core/exceptions.py           ← Custom exception hierarchy
+        ├── core/models.py               ← Data models (Repository, Finding, etc.)
+        ├── github/client.py             ← HTTP client (semaphore=1, retry+backoff)
+        ├── github/discovery.py          ← Repo search, filter, prioritize
+        ├── github/guidelines.py         ← CONTRIBUTING.md + PR template parser
+        ├── analysis/analyzer.py         ← CodeAnalyzer (7 analyzer types)
+        │     ├── analysis/skills.py     ← 17 progressive skills (on-demand)
+        │     └── analysis/mapper.py     ← RepoMapper (skeleton generation)
+        ├── generator/engine.py          ← ContributionGenerator (code gen)
+        │     └── generator/scorer.py    ← Quality scoring for contributions
+        ├── pr/manager.py                ← PR lifecycle (fork→branch→commit→PR)
+        ├── pr/patrol.py                 ← PR review monitor + auto-responder
+        ├── pr/janitor.py                ← LLM-powered garbage PR destroyer
+        ├── issues/solver.py             ← Issue-driven contribution engine
+        ├── orchestrator/memory.py       ← SQLite persistence layer (8 tables)
+        ├── orchestrator/human.py        ← SuperHumanLoop (stochastic daily routine)
+        ├── agents/registry.py           ← 5 sub-agents (analyze/generate/patrol/compliance/issue)
+        ├── tools/protocol.py            ← MCP-inspired tool interface + registry
+        └── llm/provider.py              ← LLM abstraction (Minimax primary)
+```
+
+---
+
+## 3. Core Execution Loops
+
+### 3.1 Pipeline Modes
+
+Farm-Agent has **6 entry points** exposed via CLI:
+
+| Command         | Method                               | Purpose                                              |
+|-----------------|--------------------------------------|------------------------------------------------------|
+| `run`           | `ContribPipeline.run()`              | Auto-discover repos → analyze → PR                   |
+| `target <url>`  | `ContribPipeline.run_single()`       | Target a specific repo                               |
+| `hunt`          | `ContribPipeline.hunt()`             | Multi-round aggressive discovery                     |
+| `patrol`        | `PRPatrol.patrol()`                  | Monitor open PRs for feedback                        |
+| `superhuman`    | `SuperHumanLoop.run_daily_routine()` | Organic 24/7 loop (Hunt + Patrol)                    |
+| `janitor`       | `PRJanitor.sweep_and_destroy()`      | LLM-evaluated garbage PR cleanup                     |
+| `solve <url>`   | `IssueSolver.solve_issue()`          | Solve open issues in a repo                          |
+| `analyze <url>` | `ContribPipeline.analyze_only()`     | Analysis without PR creation                         |
+| `status`        | (memory query)                       | Show submitted PR status                             |
+| `stats`         | (memory query)                       | Show aggregate statistics                            |
+| `cleanup`       | (fork cleanup)                       | Delete forks with no open PRs                        |
+
+### 3.2 Primary Pipeline Flow (`_process_repo`)
+
+```
+_process_repo(repo, dry_run, max_prs)
+  │
+  ├── 1. AI Policy Check → skip repos banning AI PRs
+  ├── 2. Blacklist Check → skip blacklisted repos
+  ├── 3. Fetch repo guidelines (CONTRIBUTING.md, PR template)
+  ├── 4. CodeAnalyzer.analyze(repo) → AnalysisResult
+  │     ├── Fetch file tree (recursive)
+  │     ├── Select skills (language + framework detection)
+  │     ├── LLM analysis with progressive skill loading
+  │     └── Return list of Findings
+  ├── 5. Anti-Farming Gate (STRICT):
+  │     ├── Block README_FIX & DOCS_IMPROVE types (hard ban)
+  │     ├── Filter out .md/.yml/.json/.toml file-only changes
+  │     ├── Filter out protected meta files
+  │     ├── Dedup against historical PRs (title similarity)
+  │     ├── Quality score check (min threshold)
+  │     └── Impact-level check
+  ├── 6. ContributionGenerator.generate(finding, context)
+  │     ├── X-Ray Vision: RAG-powered cross-file context
+  │     ├── LLM generates patch (function-calling with read_file tool)
+  │     ├── Quality scoring via ContributionScorer
+  │     └── Return Contribution with Changes
+  ├── 7. DockerSandbox validation (if available)
+  │     ├── Detect language → pick Docker image
+  │     ├── Apply patch in container
+  │     ├── Run test suite with hard timeout (120s)
+  │     └── Grade: pass/fail/inconclusive
+  ├── 8. Atomic PR Quota Check (inside _human_typing_lock):
+  │     ├── Re-check get_today_pr_count() under lock
+  │     ├── Prevent concurrent quota overshoot
+  │     └── Abort if limit reached
+  ├── 9. PRManager.create_contribution_pr()
+  │     ├── Fork repo (or reuse existing fork)
+  │     ├── Create branch
+  │     ├── Commit changes (with DCO signoff)
+  │     ├── Create pull request
+  │     └── Record PR in memory.db
+  └── 10. Post-PR: CLA auto-signing, Telegram notification
+```
+
+### 3.3 Super Human Loop (`orchestrator/human.py`)
+
+The `superhuman` command runs an **infinite stochastic daily routine**:
+
+```
+run_daily_routine():
+  │
+  ├── Startup:
+  │     ├── Sync PR counter from DB (survive restarts)
+  │     ├── Init pipeline components (GitHub, LLM, Memory)
+  │     ├── Start Telegram long-polling (background task)
+  │     ├── Sync Familiar Grounds (historical merged PRs)
+  │     └── Sync VIP repos (>1000 stars, 24h throttle)
+  │
+  └── Main Loop (infinite):
+        ├── New day check → randomize daily PR target (min_daily_prs..max_daily_prs, capped at 12)
+        ├── Mandatory lunch break (12:00-13:01 UTC)
         │
-        ▼
-┌───────────────────────────────────────────────────────┐
-│                  ContribPipeline                       │
-│  discover → analyze → filter → generate → validate    │
-└───────────────┬───────────────────────────────────────┘
-                │
-    ┌───────────┼───────────┐
-    ▼           ▼           ▼
-┌────────┐ ┌─────────┐ ┌──────────┐
-│Discovery│ │Analyzer │ │Generator │◄──── PRManager
-│(GitHub)│ │  (LLM)  │ │          │     (GitHub API)
-└────────┘ └────┬────┘ └────┬────┘
-                │           │
-                │     ┌─────┴─────┐
-                │     ▼           ▼
-                │  ┌────────┐ ┌────────┐
-                │  │Sandbox │ │GitHub  │
-                │  │Docker  │ │Client  │
-                │  └────────┘ └────────┘
-                │
-┌───────────────┴─────────────────────┐
-│          Memory (SQLite)            │
-│  analyzed_repos, submitted_prs,      │
-│  findings_cache, run_log,           │
-│  pr_outcomes, repo_preferences,     │
-│  blacklisted_repos, api_usage_log  │
-└─────────────────────────────────────┘
+        ├── If quota met → Patrol-only mode (long delays: 1-3 hours)
+        │
+        ├── If quota not met:
+        │     ├── Check for pending notifications → prioritize Patrol
+        │     ├── Random roll: 60% Hunt / 40% Patrol
+        │     ├── Hunt:
+        │     │     ├── DB-level quota guard (re-check before starting)
+        │     │     ├── Targeted mode (--target-repo) or Wild discovery
+        │     │     ├── Post-PR cooldown: 15-45 min random sleep
+        │     │     └── Log to daily_log/daily_log_YYYY-MM-DD.md
+        │     └── Patrol:
+        │           ├── Fetch open + pending PRs
+        │           ├── PRPatrol.patrol() with persistent clients
+        │           └── Notify merged PRs via Telegram
+        │
+        ├── Human-like delay between iterations:
+        │     ├── After hunt: 30-90 min
+        │     ├── After hunt (0 repos): 2-5 min quick retry
+        │     ├── After patrol: 10-30 min
+        │     └── After error: 15 min stress break
+        │
+        └── 24-hour cron: re-sync Familiar Grounds + VIP repos
 ```
 
-### Operational Modes
-
-1. **Hunt Mode** — Discovers repos via GitHub Search API, analyzes code with LLM, generates PRs
-2. **Patrol Mode** — Monitors open PRs for maintainer feedback, auto-responds with fixes or answers
-3. **Super Human Mode** — 24/7 stochastic loop alternating between Hunt and Patrol with human-like delays and randomized daily PR quotas (1–5/day)
-4. **Janitor Mode** — Scans all user PRs and destroys low-value ones using LLM classification
-
-### Key Design Patterns
-
-- **Agent Registry** (`agents/registry.py`): Strategy pattern for swappable analysis agents
-- **Tool Registry** (`tools/protocol.py`): Extensible toolset for LLM function calling
-- **Middleware Chain** (`core/middleware.py`): Request/response processing pipeline (DeerFlow pattern)
-- **Hybrid Contribution Router**: SECURITY_FIX / CRITICAL → Direct PR; everything else → Issue-First protocol
-- **Anti-Farming Gate**: Drops findings by MEDIUM/LOW impact or farming keywords before LLM is invoked
-- **Sandbox Guillotine**: Docker-based patch validation before PR creation (self-correction loop)
-- **Familiar Grounds**: Prioritizes previously-merged repos in hunt rounds (higher success rate)
-- **Minimax Overdrive**: Global LLM semaphore (4 concurrent) + sliding-window quota tracking (950 req/5h, 9500/7d)
-
----
-
-## 4. DIRECTORY TREE
+### 3.4 PR Patrol Flow (`pr/patrol.py`)
 
 ```
-ContribAI/
-├── farm_agent/                     # Main package
-│   ├── __init__.py
-│   ├── cli/
-│   │   ├── main.py                 # CLI entry point (Click-based commands)
-│   │   └── tui.py                 # Interactive TUI mode
-│   │
-│   ├── core/
-│   │   ├── config.py               # Pydantic config system + YAML loader
-│   │   ├── models.py               # Shared Pydantic models (Repository, Finding, etc.)
-│   │   ├── logger.py               # Daily rotating file logger
-│   │   ├── middleware.py           # DeerFlow middleware chain
-│   │   ├── exceptions.py           # Custom exception classes
-│   │   ├── notifier.py             # Telegram push notifications
-│   │   ├── quotas.py                # API quota tracking
-│   │   ├── retry.py                # Retry utilities
-│   │   ├── sandbox.py               # Docker sandbox for patch validation
-│   │   ├── rag.py                  # RAG context building
-│   │   ├── daily_log.py            # Markdown daily operation log
-│   │   ├── leaderboard.py           # PR merge-rate statistics
-│   │   └── profiles.py             # Named config profiles
-│   │
-│   ├── agents/
-│   │   └── registry.py             # Agent registry (analysis agents)
-│   │
-│   ├── analysis/
-│   │   ├── analyzer.py             # Main code analyzer (LLM-based)
-│   │   ├── strategies.py           # Analysis strategy definitions
-│   │   ├── mapper.py                # Language-specific finding mappers
-│   │   ├── language_rules.py        # Language-specific analysis rules
-│   │   └── skills.py                # Skill definitions for agents
-│   │
-│   ├── generator/
-│   │   ├── engine.py               # Contribution generation engine
-│   │   ├── reviewer.py             # Self-review of generated code
-│   │   └── scorer.py               # Contribution quality scoring
-│   │
-│   ├── github/
-│   │   ├── client.py               # Async GitHub REST API client
-│   │   ├── discovery.py             # Repo discovery via GitHub Search
-│   │   └── guidelines.py           # CONTRIBUTING.md / PR template parsing
-│   │
-│   ├── llm/
-│   │   ├── provider.py             # Abstract LLM provider + Minimax implementation
-│   │   ├── router.py               # Multi-model task router
-│   │   ├── models.py               # Model definitions & capabilities
-│   │   ├── context.py              # LLM context management
-│   │   └── agents.py              # LLM agent definitions
-│   │
-│   ├── orchestrator/
-│   │   ├── pipeline.py             # Main ContribPipeline orchestrator
-│   │   ├── memory.py              # SQLite-backed persistent memory
-│   │   └── human.py               # SuperHumanLoop (24/7 stochastic ops)
-│   │
-│   ├── pr/
-│   │   ├── manager.py              # PR creation, compliance checks, DCO signing
-│   │   ├── patrol.py               # PRPatrol: review feedback auto-responder
-│   │   └── janitor.py             # PRJanitor: garbage PR destroyer
-│   │
-│   ├── scheduler/
-│   │   └── scheduler.py           # APScheduler-based cron runner
-│   │
-│   ├── issues/
-│   │   └── solver.py               # Issue-driven contribution solver
-│   │
-│   ├── notifications/
-│   │   └── notifier.py            # Slack/Discord/Telegram notifications
-│   │
-│   ├── plugins/
-│   │   └── base.py                # Plugin system base classes
-│   │
-│   ├── templates/
-│   │   └── registry.py            # PR description templates
-│   │
-│   └── tools/
-│       └── protocol.py            # LLM tool/function-calling protocol
-│
-├── tests/                          # Test suite
-├── scripts/                        # Utility scripts (CI trap injection, cleanup)
-├── docs/                          # Documentation
-├── data/                          # Runtime data (memory.db)
-├── logs/                          # Daily rotating log files
-├── daily_log/                     # Markdown daily operation logs
-│
-├── config.yaml                    # Runtime configuration
-├── config.example.yaml           # Configuration template
-├── pyproject.toml                # Python project metadata + dependencies
-├── Dockerfile                    # Container build
-├── docker-compose.yml            # Container orchestration (scheduler + runner)
-├── docker-compose.superhuman.yml  # Superhuman mode composition
-└── Makefile                      # Build/run shortcuts
+patrol(pr_records, dry_run, pr_filter):
+  │
+  ├── For each open PR:
+  │     ├── Check live GitHub status (open/merged/closed)
+  │     ├── Sync status to DB
+  │     ├── Skip if merged/closed (update DB + continue)
+  │     ├── Fetch unread review comments
+  │     ├── Classify each comment via LLM:
+  │     │     ├── CODE_CHANGE → generate fix, push to branch
+  │     │     ├── QUESTION → generate answer, post reply
+  │     │     ├── STYLE_FIX → generate style fix, push
+  │     │     ├── CLA → re-sign CLA
+  │     │     ├── APPROVE → no action (celebrate)
+  │     │     └── SPAM/NOISE → ignore
+  │     ├── Auto-heal CI failures (if enabled):
+  │     │     ├── Fetch failing check runs
+  │     │     ├── LLM generates fix based on CI logs
+  │     │     ├── Push fix to PR branch
+  │     │     └── Cap: max 3 CI fix attempts per PR (RETURNING clause)
+  │     └── Comment ingestion: capped at 15 most recent (P1 OPSEC)
+  │
+  └── Return PatrolResult (checked, skipped, fixes, replies, errors)
+```
+
+### 3.5 PR Janitor Flow (`pr/janitor.py`)
+
+```
+sweep_and_destroy():
+  │
+  ├── Fetch all open PRs by authenticated user (GitHub search API)
+  ├── For each PR:
+  │     ├── Ask LLM: "Is this PR HIGH-VALUE or GARBAGE?"
+  │     ├── GARBAGE → close PR + delete branch + log
+  │     ├── HIGH-VALUE → spare + log
+  │     └── 2.0s delay between evaluations (P1 OPSEC throttle)
+  └── Return summary {total_scanned, garbage_closed, critical_spared}
 ```
 
 ---
 
-## 5. CORE MODULES & RESPONSIBILITIES
+## 4. Database Schema (`orchestrator/memory.py`)
 
-### CLI Layer (`farm_agent/cli/`)
+SQLite database with **WAL mode** + `foreign_keys=ON`. 8 tables:
 
-| File | Responsibility |
-|------|----------------|
-| `main.py` | Click-based CLI with commands: `run`, `hunt`, `target`, `analyze`, `solve`, `patrol`, `superhuman`, `janitor`, `schedule`, `serve`, `status`, `stats`, `cleanup`, `reset-db`, `config`, `templates`, `profile`, `models`, `vips`, `leaderboard`, `notify-test`, `system-status`, `interactive` |
-| `tui.py` | Interactive TUI for browsing and contributing |
+### 4.1 Tables
 
-### Orchestration Layer (`farm_agent/orchestrator/`)
+| Table               | Purpose                                        | Key Columns                                    |
+|---------------------|------------------------------------------------|------------------------------------------------|
+| `analyzed_repos`    | Track which repos have been analyzed           | `full_name` (PK), `analyzed_at`, `findings`    |
+| `submitted_prs`     | All PRs + issue proposals                      | `repo`, `pr_number` (UNIQUE), `status`, `type` |
+| `findings_cache`    | Cached analysis findings                       | `id` (PK), `repo`, `type`, `severity`, `status`|
+| `run_log`           | Pipeline run history                           | `started_at`, `repos_analyzed`, `prs_created`  |
+| `pr_outcomes`       | PR merge/close outcomes + feedback             | `repo`, `pr_number` (UNIQUE), `outcome`        |
+| `repo_preferences`  | Learned per-repo preferences                   | `repo` (PK), `preferred_types`, `merge_rate`   |
+| `blacklisted_repos` | Permanently banned repos                       | `repo` (PK), `reason`, `blacklisted_at`        |
+| `api_usage_log`     | LLM API call tracking (sliding window)         | `timestamp` (REAL), `provider`                 |
+| `task_schedule`     | Cron-like task throttling                      | `task_key` (PK), `next_run`                    |
 
-| File | Responsibility |
-|------|----------------|
-| `pipeline.py` | **ContribPipeline**: Main coordinator — discover → analyze → generate → PR. Implements Anti-Farming Gate, Hybrid Contribution Router (Issue-First vs Direct PR), Sandbox Guillotine (Docker validation + self-correction), AI Policy check, Maintainer Vibe Check, CI auto-close |
-| `memory.py` | **Memory**: SQLite-backed persistent store. Tracks: analyzed repos, submitted PRs, findings cache, run history, PR outcomes, repo preferences, blacklists, API usage quotas, task schedules. Uses WAL mode + periodic checkpointing |
-| `human.py` | **SuperHumanLoop**: 24/7 stochastic operational loop. Sets random daily PR quota (1–5), alternates Hunt/Patrol via dice roll (60/40), injects human-like delays, implements Familiar Grounds (prioritizes merged repos), Telegram polling for remote commands, mandatory lunch break (12:00–13:01 UTC) |
+### 4.2 Critical Indexes
 
-### Code Analysis & Generation (`farm_agent/analysis/`, `farm_agent/generator/`)
-
-| File | Responsibility |
-|------|----------------|
-| `analyzer.py` | **CodeAnalyzer**: LLM-driven code analysis. Fetches repo file tree, reads files, queries LLM for findings. Includes Maintainer Vibe Check, false-positive validation, cross-file RAG via ChromaDB |
-| `engine.py` | **ContributionGenerator**: Takes findings + repo context → generates code patches via LLM. Uses search/replace blocks for edits, self-review, adaptive PR titles from guidelines, Gag Order (blocks AI disclosures), Discipline Protocol (blocks scratchpad/note files), Diff Minimizer (rejects oversized patches) |
-| `reviewer.py` | Self-review of generated code before submission |
-| `scorer.py` | Quality scoring for contributions |
-
-### GitHub Integration (`farm_agent/github/`)
-
-| File | Responsibility |
-|------|----------------|
-| `client.py` | **GitHubClient**: Full async REST API client. Handles: repo metadata, file tree/content, forking, branching, committing, PR creation, issue creation, PR comments/reviews, CI check runs, combined status, rate limit checking, Secondary Rate Limit handling with backoff, interaction limits check, maintainer vibe analysis, style mimicry (recent merged PRs) |
-| `discovery.py` | **RepoDiscovery**: GitHub Search API queries for repo discovery. Filters by language, star range, last activity, topics, requires contributing guide |
-| `guidelines.py` | Parses CONTRIBUTING.md and PR templates, extracts commit conventions, required sections, PR title format |
-
-### LLM Layer (`farm_agent/llm/`)
-
-| File | Responsibility |
-|------|----------------|
-| `provider.py` | **LLMProvider** (abstract) + **MinimaxProvider**: Minimax Chat Completion v2 API. Global semaphore (4 concurrent), proactive 2s think-gap throttling, quota tracking (5h/7d sliding windows), response sanitization (strips `<thinking>` tags) |
-| `router.py` | **TaskRouter**: Routes tasks to optimal models (future multi-model) |
-| `models.py` | Model definitions (capabilities, tiers, pricing) |
-
-### PR Management (`farm_agent/pr/`)
-
-| File | Responsibility |
-|------|----------------|
-| `manager.py` | **PRManager**: Fork creation, branch management, file commits with DCO signoff, PR creation, compliance checks (CI, branch protection), post-PR CI polling, auto-close on failure |
-| `patrol.py` | **PRPatrol**: Scans open PRs, classifies feedback via LLM (CODE_CHANGE, QUESTION, STYLE_FIX, REJECT, HOSTILE_REJECT), generates + pushes fixes, answers questions, handles CI auto-heal (downloads logs, extracts tracebacks, fixes, validates in Docker sandbox), CLA re-sign, issue assignment detection. Uses human-like WPM typing simulation and notification lag delays |
-| `janitor.py` | **PRJanitor**: Evaluates all user PRs via LLM, destroys garbage PRs (docs, formatting, exploratory), spares critical ones |
-
-### Scheduler (`farm_agent/scheduler/`)
-
-| File | Responsibility |
-|------|----------------|
-| `scheduler.py` | **ContribScheduler**: APScheduler-based cron runner. Parses 5-field cron expressions, executes `ContribPipeline.run()` on schedule with graceful SIGINT/SIGTERM shutdown |
-
-### Supporting Systems
-
-| File | Responsibility |
-|------|----------------|
-| `core/config.py` | **FarmAgentConfig**: Pydantic root config. Sub-models: GitHub, LLM, Analysis, Contribution, Discovery, Storage, Scheduler, Web, Pipeline, Quota, Notifications, Logging, MultiModel. Token fallback: config file → env vars → `gh auth token` CLI |
-| `core/models.py` | Pydantic models: Repository, Issue, Finding, Contribution, FileChange, PRResult, AnalysisResult, RepoContext, etc. |
-| `core/notifier.py` | **TelegramNotifier**: Telegram bot polling + push notifications. Handles `/start`, `/status`, `/clean`, `/accept` commands |
-| `core/sandbox.py` | **DockerSandbox**: Runs pytest/npm test in Docker to validate patches before PR creation |
-| `core/rag.py` | **RepoIndexer**: ChromaDB-based RAG for cross-file semantic search |
-| `core/daily_log.py` | **DailyMarkdownLogger**: Appends daily operation logs to `daily_log/` |
-
----
-
-## 6. DATABASES & CACHING
-
-### SQLite Schema (`data/memory.db`)
-
-**Tables:**
-
-| Table | Purpose |
-|-------|---------|
-| `analyzed_repos` | Repos scanned — full_name PK, language, stars, analyzed_at, findings count |
-| `submitted_prs` | PRs created — repo, pr_number (UNIQUE together), pr_url, title, type, status, branch, fork, ci_fix_attempts, discussion_replies |
-| `findings_cache` | Cached analysis findings — id, repo, type, severity, title, file_path, status |
-| `run_log` | Pipeline run history — started_at, finished_at, repos_analyzed, prs_created, findings, errors |
-| `pr_outcomes` | Learning data — outcome (merged/closed/rejected), feedback, time_to_close_hours |
-| `repo_preferences` | Learned per-repo preferences — preferred_types, rejected_types, merge_rate, avg_review_hours |
-| `blacklisted_repos` | Blocked repos — reason, associated PR number, blacklisted_at |
-| `api_usage_log` | LLM quota tracking — timestamp, provider (indexed for sliding-window queries) |
-| `task_schedule` | Non-blocking skip logic — task_key, next_run |
-
-**Operational Details:**
-- WAL mode enabled (`PRAGMA journal_mode=WAL`)
-- WAL auto-checkpoint at 1000 pages
-- 7-day TTL cleanup on `api_usage_log` and `task_schedule`
-- Atomic INSERT OR IGNORE for friendly-repos sync (TOCTOU race prevention)
-- 5% safety buffer on quota thresholds (950/9500 vs 1000/10000 limits)
-
----
-
-## 7. ENTRY POINTS & DEPLOYMENT
-
-### CLI Commands
-
-```bash
-# Auto-discover repos and contribute
-farm_agent run                        # Standard pipeline
-farm_agent hunt                       # Aggressive multi-round discovery (default)
-farm_agent hunt --mode analysis       # Code analysis only
-farm_agent hunt --mode issues        # Issue-solving only
-farm_agent hunt --mode both          # Both (default)
-farm_agent hunt --dry-run             # Analyze without creating PRs
-
-# Single-repo targeting
-farm_agent target <repo_url>          # Target specific repo
-farm_agent analyze <repo_url>        # Analyze without contributing
-farm_agent solve <repo_url>          # Solve open issues
-
-# PR lifecycle management
-farm_agent patrol                     # Check open PRs for review feedback
-farm_agent superhuman                 # 24/7 autonomous operation loop
-farm_agent janitor                    # Destroy garbage PRs
-
-# Utilities
-farm_agent status                     # Show submitted PRs
-farm_agent stats                      # Show overall statistics
-farm_agent leaderboard                # Merge-rate leaderboard
-farm_agent vips                      # VIP roster (merged PR repos)
-farm_agent templates                  # List contribution templates
-farm_agent models                     # List available LLM models
-farm_agent system-status             # Memory, PRs, rate limits
-farm_agent cleanup                    # Delete forks with merged/closed PRs
-farm_agent reset-db                  # Reset run history (keeps submitted_prs)
-farm_agent notify-test                # Send test notification
-farm_agent schedule                   # Start scheduler daemon
-
-# Interactive
-farm_agent interactive                # TUI mode
-farm_agent profile <name>            # Run with named profile
+```sql
+CREATE INDEX IF NOT EXISTS idx_api_usage ON api_usage_log(provider, timestamp);
 ```
 
-### Docker Deployment
+### 4.3 Auto-Migrations
 
-```bash
-# Scheduler daemon (runs on cron schedule)
-docker compose up -d scheduler
+On `Memory.init()`, the system runs `ALTER TABLE` migrations for:
+- `ci_fix_attempts INTEGER DEFAULT 0` on `submitted_prs`
+- `discussion_replies INTEGER DEFAULT 0` on `submitted_prs`
 
-# One-shot run with CLI profile
-docker compose --profile cli run --rm runner run --dry-run
-docker compose --profile cli run --rm runner hunt --time-warp
+Migration failures for "column already exists" are silently suppressed.
 
-# Build image
-docker build -t worker-daemon:latest .
-```
+### 4.4 Record Cleanup (TTL)
 
-### Configuration
-
-Config file search order: explicit path → `./config.yaml` → `~/.farm_agent/config.yaml`
-
-**Environment variable overrides:**
-- `GITHUB_TOKEN` — GitHub API token
-- `MINIMAX_API_KEY` — Minimax LLM API key
-- `MINIMAX_GROUP_ID` — Minimax group ID
-- `TELEGRAM_BOT_TOKEN` — Telegram bot for notifications
+On startup, `cleanup_old_records(days=30)` purges:
+- `api_usage_log` entries older than 30 days
+- `task_schedule` entries older than 7 days
 
 ---
 
-## 8. CRITICAL ARCHITECTURAL NOTES
+## 5. LLM Integration (`llm/provider.py`)
 
-### Security & Safety
+### 5.1 Provider Architecture
 
-- **AI Policy Enforcement**: Repos with `AI_POLICY.md` or anti-AI language in `CONTRIBUTING.md` are automatically skipped
-- **Interaction Limits Check**: Repos restricting to prior contributors are skipped to avoid 422 errors
-- **Maintainer Vibe Check**: LLM-analyzes recent merged-PR comments to detect hostile maintainers; repo is blacklisted on detection
-- **Gag Order**: All generated commit messages, PR bodies, and comments are sanitized to remove AI disclosures before posting
-- **DCO Signoff**: All commits automatically include `Signed-off-by:` trailer
-- **Anti-Farming Gate**: Findings with MEDIUM/LOW/TRIVIAL impact OR farming keywords (docstring, formatting, typo, etc.) are dropped before LLM is invoked — prevents low-value PRs
+```python
+class LLMProvider(ABC):           # Abstract base
+    complete(prompt, system, temperature, max_tokens) -> str
+    chat(messages, system, temperature, max_tokens) -> str
+    complete_with_tools(messages, tools, ...) -> LLMToolResponse  # function-calling
 
-### Rate Limiting & Quotas
+class MinimaxProvider(LLMProvider):  # Primary provider
+    # Minimax Chat Completion v2 endpoint
+    # Semaphore-throttled (global cap: 4 concurrent LLM calls)
+    # 2.0s "human think gap" between calls
+    # 3-retry loop with 10s/20s backoff on timeouts
+    # Reasoning artifact stripping (<think>...</think>)
+```
 
-- **GitHub Secondary Rate Limits**: 403 responses with backoff (60s, 120s), proactive 1.5–3s throttling before every API call
-- **Minimax Overdrive**: Global 4-concurrent semaphore + sliding-window quota (950 req/5h, 9500/7d)
-- **PR Quotas**: Configurable `max_prs_per_day` (default 10), random daily quota 3–10 via SuperHumanLoop
-- **Concurrency Caps**: Repo processing capped at `min(max_concurrent, 5)` for Minimax to prevent GitHub thundering herd
+### 5.2 Quota System (Minimax Overdrive)
 
-### Self-Healing & Auto-Correction
+Sliding-window quota enforcement in `Memory.check_and_record_llm_quota()`:
 
-- **Sandbox Guillotine**: Docker-based pytest/npm test validation before PR creation; up to 3 self-correction attempts
-- **CI Auto-Heal**: Patrol downloads failing CI logs, extracts tracebacks, generates fixes, validates in Docker, pushes
-- **Patch Self-Correction**: LLM receives validation failure output and regenerates with different approach
-- **Discussion Reply Limit**: Max 3 replies per PR per cycle; after limit, bot surrenders/closes
+| Window      | Hard Limit | Safety Threshold (95%) |
+|-------------|------------|----------------------|
+| 5-hour      | 1000       | 950                  |
+| 7-day       | 10000      | 9500                 |
 
-### Known Anti-Patterns Blocked
+- Protected by `asyncio.Lock` (`_quota_lock`) for atomicity
+- Hourly cleanup of entries older than 7 days
+- Raises `LLMRateLimitError` on threshold breach
 
-- **Scratchpad files**: New `.md`/`.txt` files in `src/`/`source/`/`app/`/`lib/` are rejected by Discipline Protocol
-- **Config/tooling files**: `tsconfig.json`, `.eslintrc`, `package.json`, etc. are in `PROTECTED_META_FILES` and never modified
-- **Config/build file findings**: Any finding targeting tsconfig, eslint, webpack, vite, babel, etc. is pre-filtered
-- **Full-function rewrites**: Diff Minimizer blocks patches where replace/search ratio > 2 or > 50 lines
-- **Duplicate PRs**: Title-similarity and file-overlap checks against both local DB and GitHub API history
+### 5.3 Tool/Function Calling
+
+The base `LLMProvider.complete_with_tools()` supports:
+- Native function calling (for providers that support it)
+- Fallback: inline JSON parsing for `\`\`\`tool_call\`\`\`` blocks and `TOOL_CALL: {...}` patterns
+
+---
+
+## 6. GitHub API Client (`github/client.py`)
+
+### 6.1 Rate Limiting & OPSEC
+
+| Guard                    | Mechanism                                             |
+|--------------------------|-------------------------------------------------------|
+| **Global semaphore**     | `asyncio.Semaphore(1)` — max 1 concurrent API call    |
+| **Proactive throttling** | Pre-request sleep: 3.0s (search), 2.0s (mutation), 1.5s (read) |
+| **Retry backoff**        | `2.0 * (attempt + 1)` seconds on failure (P1 OPSEC)   |
+| **403 handling**         | Exponential backoff (60s, 120s) for secondary rate limits |
+| **Post-mutation delay**  | 2.0s sleep after `delete_branch`                      |
+| **Reaction guard**       | `add_comment_reaction()` wrapped in semaphore          |
+
+### 6.2 Key Methods
+
+- `search_repositories()` — GitHub search API with star/language filters
+- `get_repo_details()` → `Repository` model
+- `get_file_content()` — raw file content
+- `create_or_update_file()` — commit changes to a branch
+- `create_pull_request()` — create PR
+- `create_fork()` — fork a repo
+- `delete_branch()` — cleanup with 2.0s post-delay
+- `get_pr_review_comments()` — fetch review feedback
+- `add_comment_reaction()` — react to comments (semaphore-guarded)
+- `fetch_user_merged_prs()` — bulk fetch for Familiar Grounds sync
+- `discover_vip_friendly_repos()` — find >1000-star repos with merged PRs
+
+---
+
+## 7. Analysis Engine (`analysis/`)
+
+### 7.1 Progressive Skills System (`analysis/skills.py`)
+
+17 skills loaded **on-demand** based on language + framework detection:
+
+| Priority | Skill                | Languages              | Frameworks         |
+|----------|----------------------|------------------------|---------------------|
+| 1        | `security`           | (universal)            |                     |
+| 2        | `code_quality`       | (universal)            |                     |
+| 3        | `python_specific`    | Python                 |                     |
+| 3        | `javascript_specific`| JS, TS                 |                     |
+| 3        | `go_specific`        | Go                     |                     |
+| 3        | `rust_specific`      | Rust                   |                     |
+| 3        | `java_specific`      | Java, Kotlin           |                     |
+| 4        | `django_security`    | Python                 | Django              |
+| 4        | `flask_security`     | Python                 | Flask               |
+| 4        | `fastapi_patterns`   | Python                 | FastAPI             |
+| 4        | `react_patterns`     | JS, TS                 | React, Next         |
+| 4        | `express_security`   | JS, TS                 | Express             |
+| 5        | `performance`        | (universal)            |                     |
+| 6        | `docs`               | (universal)            |                     |
+| 7        | `ui_ux`              | JS, TS                 | React, Vue, Svelte  |
+| 8        | `refactor`           | (universal)            |                     |
+
+**Max 5 skills per analysis run**, sorted by priority.
+
+### 7.2 Framework Detection
+
+Auto-detected from file paths and content:
+`django`, `flask`, `fastapi`, `express`, `react`, `next`, `vue`, `svelte`, `angular`, `spring`, `rails`
+
+### 7.3 RAG Engine (`core/rag.py`)
+
+- **ChromaDB EphemeralClient** (RAM-only, no disk persistence)
+- Sliding-window text chunking: 1200 chars/chunk, 200 char overlap
+- Pseudo-embeddings: 128-dim word-frequency vectors (deterministic, local)
+- Auto-destroys collection after use to free RAM
+- File exclusions: `node_modules`, `.git`, minified files, binaries, lock files
+- Max file size for indexing: 200KB
+
+---
+
+## 8. Code Generation Engine (`generator/engine.py`)
+
+### 8.1 Generation Flow
+
+```
+ContributionGenerator.generate(finding, context):
+  ├── Build RAG index (ephemeral ChromaDB)
+  ├── Construct LLM prompt with:
+  │     ├── Project Map (structural skeleton)
+  │     ├── Finding details (type, severity, file, suggestion)
+  │     ├── RAG-retrieved cross-file context
+  │     └── Tool definition (read_file for X-Ray Vision)
+  ├── LLM generates code with function-calling loop:
+  │     ├── Tool call: read_file(filepath) → fetch full file content
+  │     ├── Re-feed content back to LLM
+  │     └── Loop until text response (max iterations)
+  ├── Parse diff/patch from LLM output
+  ├── Quality score via ContributionScorer
+  └── Return Contribution with list of Changes
+```
+
+### 8.2 X-Ray Vision (Tool-Calling Loop)
+
+The generator uses an iterative tool-calling pattern:
+1. LLM sees the Project Map (file signatures)
+2. LLM requests `read_file` for files it needs
+3. Tool fetches file content via GitHub API
+4. Content is fed back to LLM
+5. LLM produces final code changes
+
+**Guards:**
+- Binary/lock/minified files blocked by extension
+- 404 returns a clear error message
+- File content capped at 100KB
+
+---
+
+## 9. Sandbox Validation (`core/sandbox.py`)
+
+### 9.1 Polyglot Docker Sandbox
+
+Supports 11 languages with Docker images:
+
+| Language   | Image                                    |
+|------------|------------------------------------------|
+| Python     | `python:3.11-alpine`                     |
+| JavaScript | `node:20-alpine`                         |
+| TypeScript | `node:20-alpine`                         |
+| Rust       | `rust:1.75-alpine`                       |
+| Go         | `golang:1.21-alpine`                     |
+| Java       | `eclipse-temurin:21-jdk-alpine`          |
+| Ruby       | `ruby:3.3-alpine`                        |
+| PHP        | `php:8.2-cli-alpine`                     |
+| C          | `gcc:14-bookworm`                        |
+| C++        | `gcc:14-bookworm`                        |
+| C#         | `mcr.microsoft.com/dotnet/sdk:8.0-alpine`|
+
+### 9.2 Execution Flow
+
+```
+DockerSandbox.validate(patch, language):
+  ├── Detect language from file extensions
+  ├── Pull Docker image (if not cached)
+  ├── Create container with:
+  │     ├── Network disabled (security isolation)
+  │     ├── Read-only root filesystem
+  │     ├── Memory limit (512MB)
+  │     └── Hard timeout: stop_timeout + API wait timeout (P0 fix)
+  ├── Copy repo code + apply patch
+  ├── Run test command (language-specific)
+  └── Return: pass/fail/inconclusive
+```
+
+**P0 Deadlock Fix:** Hard `stop_timeout` on `containers.run()` + API `wait()` timeout guard.
+
+---
+
+## 10. Middleware Chain (`core/middleware.py`)
+
+5 ordered middlewares, executed sequentially via `MiddlewareChain`:
+
+| Order | Middleware              | Purpose                                      |
+|-------|-------------------------|----------------------------------------------|
+| 1     | `RateLimitMiddleware`   | Check daily PR limit before processing       |
+| 2     | `ValidationMiddleware`  | Validate repo suitability                    |
+| 3     | `RetryMiddleware`       | Wrap downstream with retry (2 retries, 5s+exp backoff) |
+| 4     | `DCOMiddleware`         | Auto-compute DCO signoff from authenticated user |
+| 5     | `QualityGateMiddleware` | Check contribution quality score (min 5.0)   |
+
+Pattern: Each middleware calls `next_mw(ctx)` to pass control. Short-circuits by returning `ctx` directly if conditions fail.
+
+---
+
+## 11. Sub-Agent Architecture (`agents/registry.py`)
+
+5 agents with parallel execution support (max 3 concurrent):
+
+| Agent              | Role              | Wraps                     |
+|--------------------|-------------------|---------------------------|
+| `AnalyzerAgent`    | `analyzer`        | `CodeAnalyzer`            |
+| `GeneratorAgent`   | `generator`       | `ContributionGenerator`   |
+| `PatrolAgent`      | `patrol`          | `PRPatrol`                |
+| `ComplianceAgent`  | `compliance`      | CLA/DCO/CI handling       |
+| `IssueSolverAgent` | `issue_solver`    | `IssueSolver`             |
+
+**Note:** These are lightweight stubs wrapping existing components via `AgentContext.data` dict injection. Parallel execution uses `asyncio.Semaphore`.
+
+---
+
+## 12. Tool Protocol (`tools/protocol.py`)
+
+MCP-inspired tool interface with 2 built-in tools:
+
+| Tool         | Class         | Actions                                        |
+|--------------|---------------|------------------------------------------------|
+| `github`     | `GitHubTool`  | `get_file`, `read_file`, `create_pr`, `get_user` |
+| `llm`        | `LLMTool`     | `complete` (prompt → response)                 |
+
+### `read_file` Tool Schema (for LLM function calling):
+
+```json
+{
+  "name": "read_file",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "filepath": {"type": "string"}
+    },
+    "required": ["filepath"]
+  }
+}
+```
+
+**Guards:** BLOCKED_EXTENSIONS (binary/lock/minified), MAX_FILE_SIZE (100KB), 404 handling.
+
+---
+
+## 13. Issue Solver (`issues/solver.py`)
+
+### 13.1 Classification
+
+6 categories with label-based + keyword-based classification:
+
+| Category        | Labels                                 | Contribution Type     |
+|-----------------|----------------------------------------|-----------------------|
+| `BUG`           | bug, fix, defect                       | `CODE_QUALITY`        |
+| `FEATURE`       | feature, enhancement                   | `FEATURE_ADD`         |
+| `DOCS`          | documentation, docs                    | `README_FIX`          |
+| `SECURITY`      | security, vulnerability                | `SECURITY_FIX`        |
+| `PERFORMANCE`   | performance                            | `PERFORMANCE_OPT`     |
+| `UI_UX`         | ui, ux, accessibility                  | `UI_UX_FIX`           |
+| `GOOD_FIRST_ISSUE` | good first issue, help wanted       | `CODE_QUALITY`        |
+
+### 13.2 Complexity Estimation
+
+Score 1-5 based on:
+- Good-first-issue labels → score 1
+- Body length (>2000 chars → +1, >5000 → +1)
+- File reference count (>3 → +1)
+
+Default `max_complexity=3`.
+
+### 13.3 Deep Multi-File Solving
+
+`solve_issue_deep()` uses:
+1. Issue body + up to 5 comments
+2. RepoMapper skeleton generation
+3. Up to 10 relevant file contents
+4. LLM returns `---FILE---` / `---END---` blocks (max 5 files)
+5. Fallback: single-file `solve_issue()` if deep solve fails
+
+---
+
+## 14. Notification System (`core/notifier.py`)
+
+### 14.1 Telegram Bot Commands
+
+| Command     | Action                                        |
+|-------------|-----------------------------------------------|
+| `/start`    | Welcome message                               |
+| `/help`     | Show help menu                                |
+| `/status`   | Bot heartbeat check                           |
+| `/rptoday`  | Today's PR count + URLs                       |
+| `/quota`    | Minimax API budget (5h + 7d usage)            |
+| `/update`   | Trigger Alumni Sync (historical merged PRs)   |
+| `/clean`    | Trigger PR Janitor sweep                      |
+| `/accept`   | Hall of Fame (merged PRs list)                |
+
+### 14.2 Polling Architecture
+
+- **Long-polling** with 30s timeout on `getUpdates`
+- Exponential backoff on errors (5s → 60s cap)
+- Chat ID validation (ignores unauthorized chats)
+- Failed alerts persisted to `failed_alerts.log`
+
+---
+
+## 15. Anti-Farming Protections
+
+### 15.1 Contribution Type Bans (Hard-Block)
+
+```python
+# ABSOLUTELY FORBIDDEN contribution types
+BANNED_TYPES = {ContributionType.README_FIX, ContributionType.DOCS_IMPROVE}
+```
+
+Any finding with these types is **immediately dropped** before generation.
+
+### 15.2 File-Level Protections
+
+- **SKIP_EXTENSIONS**: `.md`, `.txt`, `.rst`, `.yml`, `.yaml`, `.toml`, `.cfg`, `.ini`, `.json`
+- **PROTECTED_META_FILES**: 50+ governance/config files (LICENSE, CONTRIBUTING.md, tsconfig.json, package.json, etc.)
+- Contributions touching ONLY skipped-extension files are rejected
+
+### 15.3 Duplicate PR Detection
+
+`_titles_similar()` uses keyword overlap (>50% match) to detect duplicates against historical PR titles in `submitted_prs`.
+
+### 15.4 Quality Gate
+
+Middleware enforces minimum quality score (default 5.0). Below-threshold contributions are blocked.
+
+---
+
+## 16. OPSEC & Stealth Hardening
+
+### 16.1 API Pacing (Human Mimicry)
+
+| Context                  | Delay            |
+|--------------------------|------------------|
+| GitHub search API call   | 3.0s             |
+| GitHub mutation (POST)   | 2.0s             |
+| GitHub read (GET)        | 1.5s             |
+| After branch deletion    | 2.0s             |
+| Between LLM calls        | 2.0s (think gap) |
+| Between janitor PRs      | 2.0s             |
+| After PR creation        | 15-45 min        |
+| Hunt between rounds      | 30-90 min        |
+| Patrol between cycles    | 10-30 min        |
+| Patrol-only mode         | 1-3 hours        |
+| Mandatory lunch break    | 12:00-13:01 UTC  |
+
+### 16.2 Security Hardening
+
+- **Prompt Injection Defense:** Commit messages in patrol.py use only structural PR identifiers (repo, PR#), never raw maintainer feedback
+- **CI Name Sanitization:** `_sanitize_check_name()` strips emojis, AI-identity keywords, and injection patterns
+- **LLM Comment Cap:** Patrol ingests max 15 most recent comments (prevents LLM quota burn)
+
+### 16.3 Stealth Identity
+
+- Zero attribution in PR bodies (`_farm_agent_attribution()` returns empty string)
+- PR body tone: "tired senior developer" — no AI fluff, 2-4 sentences max
+- Vietnamese human persona in logs (internal only, never exposed to GitHub)
+
+---
+
+## 17. Configuration System (`core/config.py`)
+
+### 17.1 Config Hierarchy
+
+```yaml
+# config.yaml
+github:
+  token: "ghp_..."
+  max_prs_per_day: 10
+  max_repos_per_run: 5
+  min_daily_prs: 4
+  max_daily_prs: 10
+  rate_limit_buffer: 500
+
+llm:
+  provider: "minimax"
+  model: "abab7-chat-preview"
+  api_key: "..."
+  temperature: 0.1
+  max_tokens: 8192
+  minimax_group_id: "..."
+
+discovery:
+  languages: ["python", "javascript", "typescript"]
+  stars_range: [100, 10000]
+  min_last_activity_days: 7
+  topics: []
+  require_contributing_guide: false
+
+analysis:
+  enabled_analyzers: ["security", "code_quality"]
+  severity_threshold: "medium"
+
+contribution:
+  enabled_types: [...]
+
+pipeline:
+  max_concurrent_repos: 3
+  min_quality_score: 5.0
+
+notifications:
+  telegram_token: "..."
+  telegram_chat_id: "..."
+
+storage:
+  db_path: "~/.farm_agent/memory.db"
+```
+
+### 17.2 Named Profiles (`core/profiles.py`)
+
+4 built-in profiles: `security-focused`, `docs-focused`, `full-scan`, `gentle`
+
+---
+
+## 18. Retry & Caching (`core/retry.py`)
+
+### 18.1 Retry Decorators
+
+| Decorator           | Retries | Base Delay | Max Delay | Target Exceptions         |
+|---------------------|---------|------------|-----------|---------------------------|
+| `async_retry()`     | 3       | 1.0s       | 60s       | Configurable              |
+| `github_retry()`    | 3       | 2.0s       | 60s       | GitHubAPIError, RateLimitError |
+| `llm_retry()`       | 3       | 3.0s       | 60s       | LLMError, LLMRateLimitError |
+| `rate_limit_retry()` | 5      | 10.0s      | 120s      | LLMRateLimitError         |
+
+All use exponential backoff with ±25% jitter.
+
+### 18.2 LRU Cache
+
+Two global caches:
+- `llm_cache`: max 200 entries
+- `github_cache`: max 500 entries
+
+Key generation via SHA-256 hash of args. Thread-safe via `OrderedDict`.
+
+---
+
+## 19. Leaderboard & Outcome Learning
+
+### 19.1 Leaderboard (`core/leaderboard.py`)
+
+Reads from `submitted_prs` table to compute:
+- Per-repo merge rate
+- Per-type merge rate
+- Rankings by merged PR count
+
+### 19.2 Outcome Learning (`orchestrator/memory.py`)
+
+`record_outcome()` tracks:
+- PR merge/close/reject outcomes
+- Maintainer feedback text
+- Time-to-close in hours
+
+`get_repo_preferences()` returns learned preferences:
+- Preferred contribution types
+- Rejected contribution types
+- Average merge rate
+- Average review hours
+
+### 19.3 Repo Blacklisting
+
+Repos that explicitly reject Farm-Agent's PRs or ban AI contributions:
+- Stored in `blacklisted_repos` table
+- Filtered out during discovery (before analysis)
+
+---
+
+## 20. P0/P1/P2 Hardening Summary
+
+### P0 Fixes (Critical Fatalities)
+
+| Fix                      | File                    | What Changed                                          |
+|--------------------------|-------------------------|-------------------------------------------------------|
+| Sandbox Deadlock         | `core/sandbox.py`       | Added `stop_timeout` + API `wait()` timeout guard     |
+| Timezone Quota Bypass    | `orchestrator/memory.py`| Python-generated UTC dates instead of SQLite `date()` |
+| Prompt Injection         | `pr/patrol.py`          | Sanitized commit messages, stripped maintainer feedback|
+| CI Name Identity Leak    | `pr/patrol.py`          | `_sanitize_check_name()` strips AI keywords/emojis    |
+
+### P1 Fixes (OPSEC)
+
+| Fix                      | File                    | What Changed                                          |
+|--------------------------|-------------------------|-------------------------------------------------------|
+| Semaphore on Reactions   | `github/client.py`      | `add_comment_reaction()` wrapped in `self._sem`       |
+| Retry Backoff            | `github/client.py`      | `asyncio.sleep(2.0 * (attempt + 1))` on retry         |
+| Branch Delete Delay      | `github/client.py`      | 2.0s post-mutation sleep                              |
+| LLM Ingestion Cap        | `pr/patrol.py`          | Capped comment ingestion to 15 most recent            |
+| Janitor Throttle         | `pr/janitor.py`         | 2.0s delay between PR evaluations                     |
+
+### P2 Fixes (Architecture)
+
+| Fix                      | File                    | What Changed                                          |
+|--------------------------|-------------------------|-------------------------------------------------------|
+| TOCTOU Database Race     | `orchestrator/memory.py`| `RETURNING` clause for atomic increment+read          |
+| Concurrent Quota Bypass  | `orchestrator/pipeline.py`| Atomic quota check inside `_human_typing_lock`       |
+
+---
+
+## 21. File Organization
+
+```
+farm_agent/
+├── __init__.py                    # Version (__version__)
+├── agents/
+│   └── registry.py                # Sub-agent registry (5 agents)
+├── analysis/
+│   ├── analyzer.py                # CodeAnalyzer (7 analyzer types)
+│   ├── mapper.py                  # RepoMapper (skeleton generation)
+│   └── skills.py                  # 17 progressive analysis skills
+├── cli/
+│   └── main.py                    # Click CLI (11 commands)
+├── core/
+│   ├── config.py                  # FarmAgentConfig (Pydantic)
+│   ├── daily_log.py               # DailyMarkdownLogger
+│   ├── exceptions.py              # Exception hierarchy
+│   ├── leaderboard.py             # PR merge/close tracking
+│   ├── logger.py                  # Daily rotating file logger
+│   ├── middleware.py               # 5 middleware chain
+│   ├── models.py                  # Data models (Repository, Finding, etc.)
+│   ├── notifier.py                # TelegramNotifier
+│   ├── profiles.py                # Named contribution profiles
+│   ├── quotas.py                  # In-memory usage tracker
+│   ├── rag.py                     # ChromaDB ephemeral RAG
+│   ├── retry.py                   # async_retry + LRU cache
+│   └── sandbox.py                 # DockerSandbox (11 languages)
+├── generator/
+│   ├── engine.py                  # ContributionGenerator
+│   └── scorer.py                  # Quality scoring
+├── github/
+│   ├── client.py                  # GitHubClient (semaphore=1)
+│   ├── discovery.py               # RepoDiscovery
+│   └── guidelines.py              # CONTRIBUTING.md parser
+├── issues/
+│   └── solver.py                  # IssueSolver (single + deep multi-file)
+├── llm/
+│   └── provider.py                # LLMProvider + MinimaxProvider
+├── notifications/                 # (additional notification backends)
+├── orchestrator/
+│   ├── human.py                   # SuperHumanLoop (24/7 stochastic loop)
+│   ├── memory.py                  # Memory (SQLite, 8 tables)
+│   └── pipeline.py                # ContribPipeline (main orchestrator)
+├── plugins/                       # (plugin directory)
+├── pr/
+│   ├── janitor.py                 # PRJanitor (garbage PR destroyer)
+│   ├── manager.py                 # PRManager (fork→PR lifecycle)
+│   └── patrol.py                  # PRPatrol (review monitor)
+├── templates/                     # (PR/commit templates)
+└── tools/
+    └── protocol.py                # Tool protocol + GitHubTool + LLMTool
+```
+
+---
+
+## 22. Known Edge Cases & Gotchas
+
+1. **Memory counter vs DB counter:** SuperHumanLoop tracks `_prs_created_today` in RAM but also
+   reads from DB on startup via `get_today_pr_count()`. After restart, DB is authoritative.
+
+2. **Familiar Grounds race:** `process_one_repo()` releases the semaphore before doing the
+   API call (the `async with semaphore` only guards the 5s sleep). This is intentional but
+   means the actual API calls run concurrently without bound.
+
+3. **WAL mode assumption:** TOCTOU fixes assume SQLite WAL serializes writes. The `RETURNING`
+   clause eliminates the separate SELECT, but concurrent readers can still see stale data
+   between the WAL checkpoint.
+
+4. **ChromaDB optional:** If `chromadb` is not installed, RAG falls back silently and returns
+   empty results. The generator still works but without cross-file context.
+
+5. **Docker optional:** If Docker daemon is unavailable, sandbox validation is skipped entirely.
+   Patches go straight to PR without test validation.
+
+6. **Issue proposals reuse `submitted_prs`:** The `record_issue_proposal()` method stores
+   issues in the same table as PRs, with `type='issue_proposal'` and the `fork` column
+   repurposed as `finding_title`. This is a schema hack.
+
+7. **Minimax-specific code paths:** Several places check `config.llm.provider == "minimax"`
+   to cap concurrency or adjust behavior. No other providers are currently registered.
+
+8. **Signal handling (Windows):** `add_signal_handler` in superhuman mode doesn't work on
+   Windows (asyncio limitation). Ctrl+C handling falls back to `KeyboardInterrupt`.
+
+9. **Daily log timezone:** `DailyMarkdownLogger._write()` uses `datetime.now()` (local time)
+   for log timestamps, NOT UTC. This is intentional for human readability but inconsistent
+   with the rest of the codebase which uses UTC.
+
+10. **Profile stale reference:** The `docs-focused` and `gentle` profiles still reference
+    `docs_improve` contribution type, which is now hard-banned in the pipeline. These profiles
+    would produce zero PRs if used.
+
+---
+
+*End of Project Map. This document is the authoritative reference for Farm-Agent's architecture.*
