@@ -910,9 +910,9 @@ def show_config(ctx):
             f"  Timeout/repo: {config.pipeline.timeout_per_repo_sec}s\n\n"
             f"[bold]Web Dashboard[/bold]\n"
             f"  Host: {config.web.host}:{config.web.port}\n\n"
-            f"[bold]Scheduler[/bold]\n"
-            f"  Enabled: {config.scheduler.enabled}\n"
-            f"  Cron: {config.scheduler.cron}",
+            f"[bold]Super Human Mode[/bold]\n"
+            f"  KPI Target: {config.github.min_daily_prs}-{config.github.max_daily_prs} PRs/day\n"
+            f"  Max PRs/day (hard cap): {config.github.max_prs_per_day}",
             title="Farm-Agent Configuration",
         )
     )

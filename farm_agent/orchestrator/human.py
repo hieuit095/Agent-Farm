@@ -147,7 +147,7 @@ class SuperHumanLoop:
     """Orchestrates a stochastically driven daily routine.
 
     Mimics a real human developer by:
-    - Setting a random daily PR target (1-5, capped at 6)
+    - Setting a random daily PR target (4-10, capped at ABSOLUTE_MAX_PRS_PER_DAY)
     - Hunting INFINITELY until the target number of successful PRs is met
     - Shifting to patrol-only mode once the daily PR target is reached
     - Handling errors gracefully with "stress breaks"

@@ -19,7 +19,7 @@ class GitHubConfig(BaseModel):
     token: str = ""
     max_repos_per_run: int = 5
     max_prs_per_day: int = 10
-    min_daily_prs: int = 3
+    min_daily_prs: int = 4
     max_daily_prs: int = 10
     rate_limit_buffer: int = 3  # Stop API calls when remaining < 3 to prevent secondary rate limits
     dco_signoff: bool = True  # Auto-append Signed-off-by to commit messages
@@ -125,13 +125,6 @@ class StorageConfig(BaseModel):
         return Path(self.db_path).expanduser()
 
 
-class SchedulerConfig(BaseModel):
-    """Scheduler configuration for cron-based runs."""
-
-    enabled: bool = False
-    cron: str = "0 */6 * * *"  # every 6 hours
-    timezone: str = "UTC"
-    max_concurrent: int = 3
 
 
 class WebConfig(BaseModel):
@@ -204,7 +197,7 @@ class FarmAgentConfig(BaseModel):
     contribution: ContributionConfig = Field(default_factory=ContributionConfig)
     discovery: DiscoveryConfig = Field(default_factory=DiscoveryConfig)
     storage: StorageConfig = Field(default_factory=StorageConfig)
-    scheduler: SchedulerConfig = Field(default_factory=SchedulerConfig)
+
     web: WebConfig = Field(default_factory=WebConfig)
     pipeline: PipelineConfig = Field(default_factory=PipelineConfig)
     quota: QuotaConfig = Field(default_factory=QuotaConfig)
