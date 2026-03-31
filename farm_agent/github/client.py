@@ -66,15 +66,6 @@ class GitHubClient:
 
         last_error = None
         for attempt in range(1, _retries + 1):
-            # ── PROACTIVE THROTTLING: mimic human pacing ──────────────────
-            # Injects a human-like delay before every API call.
-            # Search APIs are heavily rate-limited — use a longer delay.
-            if attempt == 1:  # Only throttle on first attempt; retries have their own backoff
-                is_search = "/search/" in url
-                is_mutation = method in ("POST", "PATCH", "PUT", "DELETE")
-                delay = 3.0 if is_search else (2.0 if is_mutation else 1.5)
-                await asyncio.sleep(delay)
-            # ─────────────────────────────────────────────────────────────
             try:
                 response = await self._client.request(method, url, **kwargs)
             except httpx.HTTPError as e:
@@ -583,17 +574,19 @@ class GitHubClient:
         # ── P0-FIX: Validate username via GET /user to avoid 422 errors ──
         # The GitHub Search API rejects author: queries for invalid, suspended,
         # or unsearchable usernames with HTTP 422. Fetch the real login first.
+        # Only fall back to validated_login if the original parameter was empty.
         try:
             if not hasattr(self, "_cached_user"):
                 self._cached_user = await self.get_authenticated_user()
             validated_login = self._cached_user.get("login", "")
-            if validated_login:
-                username = validated_login
-            else:
-                logger.warning(
-                    "fetch_user_merged_prs: GET /user returned no login, using provided '%s'",
-                    username,
-                )
+            if not username or not username.strip():
+                if validated_login:
+                    username = validated_login
+                else:
+                    logger.warning(
+                        "fetch_user_merged_prs: GET /user returned no login, using provided '%s'",
+                        username,
+                    )
         except Exception as exc:
             logger.warning(
                 "fetch_user_merged_prs: could not validate username via GET /user: %s — "

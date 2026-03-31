@@ -46,8 +46,8 @@ LANGUAGE_ENVIRONMENTS: dict[str, dict[str, str]] = {
         "install_cmd": "go mod download 2>/dev/null || true",
     },
     "java": {
-        "image": " eclipse-temurin:21-jdk-alpine",
-        "test_cmd": "mvn test -q 2>&1 || gradle test 2>&1 || ./gradlew test 2>&1 || java -version",
+        "image": "eclipse-temurin:21-jdk-alpine",
+        "test_cmd": "mvn test -q 2>&1 || gradle test -q 2>&1 || ./gradlew test -q 2>&1 || mvn compile -q 2>&1",
         "install_cmd": "mvn dependencyresolve 2>/dev/null || true",
     },
     "ruby": {
@@ -479,7 +479,7 @@ class DockerSandbox:
 
         container = self.client.containers.get(container_id)
         deadline = time_module.time() + timeout
-        poll_interval = 5.0
+        poll_interval = 1.0
 
         while time_module.time() < deadline:
             try:
