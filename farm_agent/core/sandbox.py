@@ -10,6 +10,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+import requests
 import docker
 from docker.errors import APIError, ImageNotFound, NotFound
 from docker.models.containers import Container
@@ -108,12 +109,44 @@ EXTENSION_TO_LANGUAGE: dict[str, str] = {
 
 
 def detect_language_from_extensions(repo_path: str | Path) -> str:
-    """Detect the primary language of a repository by scanning file extensions.
+    """Detect the primary language of a repository.
 
-    Counts files per language and returns the most common language.
-    Falls back to 'python' if no recognized extensions are found.
+    PHASE 2-FIX: Manifest-Driven Detection prioritizes root-level package
+    manifests before falling back to the naive extension counting loop.
+    This prevents polyglot/monorepo confusion where JS files might
+    outnumber Python files despite it being a Python backend.
     """
     repo_dir = Path(repo_path)
+    
+    # ── 1. Manifest Priority Layer ──
+    if (repo_dir / "package.json").exists():
+        if (repo_dir / "tsconfig.json").exists():
+            return "typescript"
+        return "javascript"
+    
+    if (repo_dir / "Cargo.toml").exists():
+        return "rust"
+        
+    if (
+        (repo_dir / "requirements.txt").exists() or 
+        (repo_dir / "pyproject.toml").exists() or 
+        (repo_dir / "setup.py").exists()
+    ):
+        return "python"
+        
+    if (repo_dir / "go.mod").exists():
+        return "go"
+        
+    if (repo_dir / "pom.xml").exists() or (repo_dir / "build.gradle").exists():
+        return "java"
+        
+    if (repo_dir / "Gemfile").exists():
+        return "ruby"
+        
+    if (repo_dir / "composer.json").exists():
+        return "php"
+
+    # ── 2. Fallback to Extension Counting ──
     counts: dict[str, int] = {}
 
     skip_dirs = {"node_modules", "target", ".git", "dist", "build", "__pycache__", "vendor", "venv", ".venv", ".pytest_cache", ".mypy_cache"}
@@ -439,12 +472,18 @@ class DockerSandbox:
                 status_code = result.get("StatusCode")
                 return int(status_code) if status_code is not None else None
             return None
-        except Exception as exc:
-            # P0-FIX: Catch any timeout/connection error from Docker API wait()
-            # to prevent indefinite blocking. Log and return timeout exit code.
+        except requests.exceptions.ReadTimeout:
+            # P2-FIX: Strictly catch timeout conditions only.
             logger.warning(
-                "Sandbox wait() timed out or errored for container %s after %ds: %s",
-                container_id, timeout, exc,
+                "Sandbox wait() timed out for container %s after %ds.",
+                container_id, timeout,
+            )
+            return self._TIMEOUT_EXIT_CODE
+        except docker.errors.APIError as exc:
+            # Let Docker API failures log accurately instead of swallowing them.
+            logger.error(
+                "Docker APIError while waiting for container %s: %s",
+                container_id, exc,
             )
             return self._TIMEOUT_EXIT_CODE
 
