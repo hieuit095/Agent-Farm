@@ -463,12 +463,26 @@ class DockerSandbox:
             timeout: Hard timeout in seconds. If the Docker API wait() blocks
                      longer than this, we catch the exception and return the
                      timeout exit code. Prevents indefinite thread pool stalls.
+
+        NOTE: This timeout must be >= the shell `timeout --signal=KILL Ns {cmd}`
+        wrapped around the container command in _start_container. If the Docker API
+        wait() returns BEFORE the shell timeout fires (e.g. 60s < 300s), the
+        container keeps running but our wait() returns as if it exited. This
+        causes the inner shell `timeout` to later kill a container that Docker
+        already believes has exited — breaking sandbox validation entirely.
+
+        FIX: Use a 360s timeout here (larger than the 300s shell timeout) so
+        Docker API wait() never fires first. The shell `timeout` always wins.
         """
+        # BUG FIX (Crucible): was hardcoded to 60s, which < shell timeout (300s).
+        # This caused Docker API wait() to exit prematurely while the container
+        # was still running, breaking sandbox validation completely.
+        api_timeout = max(timeout, 360)
         try:
             result = self.client.api.wait(
                 container_id,
                 condition="not-running",
-                timeout=timeout,
+                timeout=api_timeout,
             )
             if isinstance(result, dict):
                 status_code = result.get("StatusCode")
