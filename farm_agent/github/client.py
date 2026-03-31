@@ -570,17 +570,46 @@ class GitHubClient:
     async def fetch_user_merged_prs(self, username: str, per_page: int = 100) -> list[dict]:
         """Fetch all merged PRs authored by a given user via GitHub search API.
 
-        Uses GET /search/issues?q=author:{username}+is:pr+is:merged
+        Uses GET /search/issues?q=author:{username} is:pr is:merged
         which returns merged PRs across all repos (up to GitHub's search limit).
+
+        Args:
+            username: GitHub login. Dynamically validated via GET /user to
+                      prevent 422 "The listed users cannot be searched" errors.
 
         Returns a list of dicts with keys: repo, pr_number, title, html_url,
         merged_at, state.
         """
+        # ── P0-FIX: Validate username via GET /user to avoid 422 errors ──
+        # The GitHub Search API rejects author: queries for invalid, suspended,
+        # or unsearchable usernames with HTTP 422. Fetch the real login first.
+        try:
+            if not hasattr(self, "_cached_user"):
+                self._cached_user = await self.get_authenticated_user()
+            validated_login = self._cached_user.get("login", "")
+            if validated_login:
+                username = validated_login
+            else:
+                logger.warning(
+                    "fetch_user_merged_prs: GET /user returned no login, using provided '%s'",
+                    username,
+                )
+        except Exception as exc:
+            logger.warning(
+                "fetch_user_merged_prs: could not validate username via GET /user: %s — "
+                "using provided '%s'",
+                exc, username,
+            )
+
+        if not username or not username.strip():
+            logger.error("fetch_user_merged_prs: username is empty — aborting search")
+            return []
+
         results: list[dict] = []
         page = 1
         while True:
             params = {
-                "q": f"author:{username}+is:pr+is:merged",
+                "q": f"author:{username} is:pr is:merged",
                 "per_page": per_page,
                 "page": page,
                 "sort": "updated",

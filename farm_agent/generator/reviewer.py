@@ -105,8 +105,8 @@ OUTPUT STRICT JSON — no markdown, no explanation outside the JSON:
             return self._parse_verdict(response)
 
         except Exception as exc:
-            logger.warning("ReviewerAgent failed: %s — defaulting to APPROVE", exc)
-            return {"decision": "APPROVE", "critique": ""}
+            logger.warning("ReviewerAgent failed: %s — defaulting to REJECT (Fail-Closed)", exc)
+            return {"decision": "REJECT", "critique": f"[Fail-Closed] ReviewerAgent error: {exc}"}
 
     def _build_review_prompt(self, contribution: Contribution, context: RepoContext) -> str:
         """Build the adversarial review prompt from the contribution."""
@@ -171,14 +171,16 @@ you MUST REJECT and provide a detailed, specific critique.
             )
             # Fallback: try to extract decision by keyword search
             upper = response.upper()
-            if '"REJECT"' in upper or "REJECT" in upper.split('\n')[0]:
-                return {"decision": "REJECT", "critique": f"[Parse failed — raw response: {response[:200]}]"}
-            return {"decision": "APPROVE", "critique": ""}
+            if '"APPROVE"' in upper and '"REJECT"' not in upper:
+                # Only APPROVE if explicitly stated and no REJECT found
+                return {"decision": "APPROVE", "critique": ""}
+            # Fail-Closed: any ambiguity or parse failure → REJECT
+            return {"decision": "REJECT", "critique": f"[Fail-Closed — JSON parse failed, raw: {response[:200]}]"}
 
-        decision = parsed.get("decision", "APPROVE").strip().upper()
+        decision = parsed.get("decision", "REJECT").strip().upper()
         if decision not in ("APPROVE", "REJECT"):
-            logger.warning("ReviewerAgent: unknown decision '%s' — defaulting to APPROVE", decision)
-            decision = "APPROVE"
+            logger.warning("ReviewerAgent: unknown decision '%s' — defaulting to REJECT (Fail-Closed)", decision)
+            decision = "REJECT"
 
         return {
             "decision": decision,

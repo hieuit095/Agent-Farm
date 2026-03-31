@@ -214,7 +214,7 @@ class DockerSandbox:
         repo_path: str,
         command: str | None = None,
         image: str | None = None,
-        timeout: int = 60,
+        timeout: int = 300,
         language: str | None = None,
         repo_info: dict | None = None,
     ) -> dict[str, Any]:
