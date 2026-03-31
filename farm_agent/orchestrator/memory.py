@@ -405,14 +405,19 @@ class Memory:
         return row[0] if row else 0
 
     async def increment_ci_fix_attempts(self, repo: str, pr_number: int) -> int:
-        """Increment the CI fix attempt counter for a PR. Returns the new count."""
-        await self._db.execute(
+        """Increment the CI fix attempt counter for a PR. Returns the new count.
+        
+        P2-FIX: Use RETURNING clause to avoid TOCTOU race condition
+        between UPDATE and SELECT in concurrent environments.
+        """
+        cursor = await self._db.execute(
             "UPDATE submitted_prs SET ci_fix_attempts = ci_fix_attempts + 1, updated_at = ? "
-            "WHERE repo = ? AND pr_number = ?",
+            "WHERE repo = ? AND pr_number = ? RETURNING ci_fix_attempts",
             (datetime.now(UTC).isoformat(), repo, pr_number),
         )
+        row = await cursor.fetchone()
         await self._db.commit()
-        return await self.get_ci_fix_attempts(repo, pr_number)
+        return row[0] if row else 0
 
     # ── Discussion Reply Tracking ──────────────────────────────────────────
 
@@ -426,14 +431,18 @@ class Memory:
         return row[0] if row else 0
 
     async def increment_discussion_replies(self, repo: str, pr_number: int) -> int:
-        """Increment the discussion reply counter for a PR. Returns the new count."""
-        await self._db.execute(
+        """Increment the discussion reply counter for a PR. Returns the new count.
+        
+        P2-FIX: Use RETURNING clause to avoid TOCTOU race condition.
+        """
+        cursor = await self._db.execute(
             "UPDATE submitted_prs SET discussion_replies = discussion_replies + 1, updated_at = ? "
-            "WHERE repo = ? AND pr_number = ?",
+            "WHERE repo = ? AND pr_number = ? RETURNING discussion_replies",
             (datetime.now(UTC).isoformat(), repo, pr_number),
         )
+        row = await cursor.fetchone()
         await self._db.commit()
-        return await self.get_discussion_replies(repo, pr_number)
+        return row[0] if row else 0
 
     # ── Run Log ────────────────────────────────────────────────────────────
 

@@ -1244,6 +1244,17 @@ class ContribPipeline:
                 # INSIDE THE LOCK: Sequential PR pushing only
                 async with self._human_typing_lock:
                     if not dry_run:
+                        # P2-FIX: TOCTOU Quota defense. Repos process concurrently,
+                        # so check quota atomically inside the lock before PR generation.
+                        curr_prs = await self._memory.get_today_pr_count()
+                        if curr_prs >= self.config.github.max_prs_per_day:
+                            logger.warning(
+                                "🚫 TOCTOU PR LIMIT DEFENSE: Concurrent quota hit "
+                                "(%d). Aborting PR for %s",
+                                curr_prs, repo.full_name
+                            )
+                            return result
+
                         logger.info("⏳ Chuẩn bị push code... (Taking a deep breath)")
                         await asyncio.sleep(random.randint(15, 45))
 
@@ -1630,6 +1641,16 @@ class ContribPipeline:
                 # INSIDE THE LOCK: Sequential PR pushing only
                 async with self._human_typing_lock:
                     if not dry_run:
+                        # P2-FIX: TOCTOU Quota defense inside lock.
+                        curr_prs = await self._memory.get_today_pr_count()
+                        if curr_prs >= self.config.github.max_prs_per_day:
+                            logger.warning(
+                                "🚫 TOCTOU PR LIMIT DEFENSE: Concurrent quota hit "
+                                "(%d). Aborting PR for %s",
+                                curr_prs, repo.full_name
+                            )
+                            return result
+
                         logger.info("⏳ Chuẩn bị push code... (Taking a deep breath)")
                         await asyncio.sleep(random.randint(15, 45))
 
