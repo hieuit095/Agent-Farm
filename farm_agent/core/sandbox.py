@@ -455,53 +455,59 @@ class DockerSandbox:
             b"".join(stderr_chunks).decode("utf-8", errors="replace"),
         )
 
-    def _wait_for_exit_code(self, container_id: str, timeout: int = 120) -> int | None:
+    def _wait_for_exit_code(self, container_id: str, timeout: int = 300) -> int | None:
         """Wait for the container to stop and return its exit code.
+
+        BUG FIX (Crucible): The Docker SDK's client.api.wait() uses a hardcoded
+        60s HTTP request timeout that cannot be overridden via the `timeout=`
+        parameter (requests library layer). This caused client.api.wait() to
+        return a ReadTimeout exception AFTER exactly 60 seconds, even when
+        container.wait(timeout=360) was passed. The container was still running
+        (the shell timeout hadn't fired yet), but our wait returned as if it
+        exited — completely breaking sandbox validation.
+
+        FIX: Replace client.api.wait() with a polling loop using container.reload()
+        to check status. This avoids the HTTP-level 60s hard limit. The polling
+        loop runs until the container exits or the overall timeout is reached.
 
         Args:
             container_id: Docker container ID to wait on.
-            timeout: Hard timeout in seconds. If the Docker API wait() blocks
-                     longer than this, we catch the exception and return the
-                     timeout exit code. Prevents indefinite thread pool stalls.
-
-        NOTE: This timeout must be >= the shell `timeout --signal=KILL Ns {cmd}`
-        wrapped around the container command in _start_container. If the Docker API
-        wait() returns BEFORE the shell timeout fires (e.g. 60s < 300s), the
-        container keeps running but our wait() returns as if it exited. This
-        causes the inner shell `timeout` to later kill a container that Docker
-        already believes has exited — breaking sandbox validation entirely.
-
-        FIX: Use a 360s timeout here (larger than the 300s shell timeout) so
-        Docker API wait() never fires first. The shell `timeout` always wins.
+            timeout: Maximum seconds to wait. Must be >= shell `timeout Ns` in
+                     _start_container. Defaults to 300s to match run_in_sandbox.
         """
-        # BUG FIX (Crucible): was hardcoded to 60s, which < shell timeout (300s).
-        # This caused Docker API wait() to exit prematurely while the container
-        # was still running, breaking sandbox validation completely.
-        api_timeout = max(timeout, 360)
-        try:
-            result = self.client.api.wait(
-                container_id,
-                condition="not-running",
-                timeout=api_timeout,
-            )
-            if isinstance(result, dict):
-                status_code = result.get("StatusCode")
-                return int(status_code) if status_code is not None else None
-            return None
-        except requests.exceptions.ReadTimeout:
-            # P2-FIX: Strictly catch timeout conditions only.
-            logger.warning(
-                "Sandbox wait() timed out for container %s after %ds.",
-                container_id, timeout,
-            )
-            return self._TIMEOUT_EXIT_CODE
-        except docker.errors.APIError as exc:
-            # Let Docker API failures log accurately instead of swallowing them.
-            logger.error(
-                "Docker APIError while waiting for container %s: %s",
-                container_id, exc,
-            )
-            return self._TIMEOUT_EXIT_CODE
+        import time as time_module
+
+        container = self.client.containers.get(container_id)
+        deadline = time_module.time() + timeout
+        poll_interval = 5.0
+
+        while time_module.time() < deadline:
+            try:
+                container.reload()
+                status = container.status
+                if status == "exited":
+                    exit_code = container.attrs.get("State", {}).get("ExitCode")
+                    return int(exit_code) if exit_code is not None else None
+                elif status in ("running", "created", "restarting", "paused"):
+                    time_module.sleep(poll_interval)
+                    continue
+                else:
+                    logger.warning("Unexpected container status %r for %s", status, container_id)
+                    return None
+            except docker.errors.NotFound:
+                logger.warning("Container %s not found during wait", container_id)
+                return None
+            except Exception as exc:
+                logger.warning("Error polling container %s: %s", container_id, exc)
+                time_module.sleep(poll_interval)
+                continue
+
+        logger.warning(
+            "Container %s did not exit within %ds (timeout). "
+            "The shell `timeout` wrapper will kill it at %ds.",
+            container_id, timeout, timeout,
+        )
+        return self._TIMEOUT_EXIT_CODE
 
     async def _resolve_exit_code(
         self,
