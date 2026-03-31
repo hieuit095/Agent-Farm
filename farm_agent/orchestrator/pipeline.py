@@ -19,10 +19,14 @@ from farm_agent.core.config import FarmAgentConfig
 from farm_agent.core.middleware import build_default_chain
 from farm_agent.core.models import (
     AnalysisResult,
+    Contribution,
     ContributionType,
     DiscoveryCriteria,
+    FileChange,
+    Finding,
     ImpactLevel,
     PRResult,
+    RepoContext,
     Repository,
     Severity,
 )
@@ -141,9 +145,20 @@ def _titles_similar(title_a: str, title_b: str) -> bool:
         return True
 
     # Strip common git prefixes
-    for prefix in ["fix:", "feat:", "chore:", "docs:", "refactor:", "bugfix:", "fix(core):", "fix(ui):"]:
-        if a.startswith(prefix): a = a[len(prefix):].strip()
-        if b.startswith(prefix): b = b[len(prefix):].strip()
+    for prefix in [
+        "fix:",
+        "feat:",
+        "chore:",
+        "docs:",
+        "refactor:",
+        "bugfix:",
+        "fix(core):",
+        "fix(ui):",
+    ]:
+        if a.startswith(prefix):
+            a = a[len(prefix) :].strip()
+        if b.startswith(prefix):
+            b = b[len(prefix) :].strip()
 
     words_a = a.split()
     words_b = b.split()
@@ -152,8 +167,8 @@ def _titles_similar(title_a: str, title_b: str) -> bool:
         return a == b
 
     # Build bigrams to preserve semantic sequence instead of just word salad
-    bigrams_a = {f"{words_a[i]} {words_a[i+1]}" for i in range(len(words_a)-1)}
-    bigrams_b = {f"{words_b[i]} {words_b[i+1]}" for i in range(len(words_b)-1)}
+    bigrams_a = {f"{words_a[i]} {words_a[i + 1]}" for i in range(len(words_a) - 1)}
+    bigrams_b = {f"{words_b[i]} {words_b[i + 1]}" for i in range(len(words_b) - 1)}
 
     if not bigrams_a or not bigrams_b:
         return False
@@ -197,6 +212,7 @@ class ContribPipeline:
         self._tool_registry = None
 
         from farm_agent.core.notifier import TelegramNotifier
+
         self._notifier = TelegramNotifier(
             token=self.config.notifications.telegram_token,
             chat_id=self.config.notifications.telegram_chat_id,
@@ -256,6 +272,7 @@ class ContribPipeline:
 
         # ── Polyglot Sandbox — Docker-based patch validation ─────────────────
         from farm_agent.core.sandbox import DockerSandbox
+
         self._sandbox = DockerSandbox()
         logger.info("DockerSandbox initialised — patches will be validated before PR creation")
 
@@ -472,7 +489,8 @@ class ContribPipeline:
                         )
                         if friendly_data:
                             logger.info(
-                                "🏠 Familiar Grounds: %d friendly repos off cooldown — processing first",
+                                "🏠 Familiar Grounds: %d friendly repos off cooldown "
+                                "— processing first",
                                 len(friendly_data),
                             )
                             for fr in friendly_data:
@@ -524,10 +542,16 @@ class ContribPipeline:
                 targets: list[Repository] = []
                 for repo in friendly_repos:
                     if await self._memory.has_analyzed(repo.full_name):
-                        logger.debug("🏠 Skipping %s (on cooldown or already analyzed)", repo.full_name)
+                        logger.debug(
+                            "🏠 Skipping %s (on cooldown or already analyzed)", repo.full_name
+                        )
                         continue
                     targets.append(repo)
-                    logger.info("🏠 Familiar Grounds: added %s (off cooldown, stars=%d)", repo.full_name, repo.stars)
+                    logger.info(
+                        "🏠 Familiar Grounds: added %s (off cooldown, stars=%d)",
+                        repo.full_name,
+                        repo.stars,
+                    )
                 # ── End friendly repos ──
 
                 for repo in repos:
@@ -606,9 +630,7 @@ class ContribPipeline:
             try:
                 # --- Issues FIRST (higher value: fixes real reported problems) ---
                 if mode in ("issues", "both"):
-                    issue_rr = await self._process_repo_issues(
-                        repo, dry_run, remaining
-                    )
+                    issue_rr = await self._process_repo_issues(repo, dry_run, remaining)
                     rr.repos_analyzed = max(rr.repos_analyzed, issue_rr.repos_analyzed)
                     rr.findings_total += issue_rr.findings_total
                     rr.contributions_generated += issue_rr.contributions_generated
@@ -765,12 +787,12 @@ class ContribPipeline:
                         "toxic/khó tính. Quay xe để đỡ tốn thời gian!",
                         repo.full_name,
                     )
-                    try:
+                    import contextlib
+
+                    with contextlib.suppress(Exception):
                         await self._memory.add_to_blacklist(
                             repo.full_name, reason="toxic_maintainer"
                         )
-                    except Exception:
-                        pass  # blacklist is best-effort
                     result.repos_analyzed = 1
                     return result
                 else:
@@ -827,7 +849,7 @@ class ContribPipeline:
             fp_lower = fp.lower()
             for protected in PROTECTED_META_FILES:
                 if protected.startswith(".github/workflows/"):
-                    pattern = protected[len(".github/workflows/"):]
+                    pattern = protected[len(".github/workflows/") :]
                     if fp_lower.endswith(pattern) or f"/{pattern}" in fp_lower:
                         logger.debug("⏭️ Pre-filter: skip protected workflow file %s", fp)
                         break
@@ -835,11 +857,18 @@ class ContribPipeline:
                     break
             else:
                 # Also block tsconfig-strict, tsconfig-noImplicitAny, etc.
-                _CONFIG_BOOTSTRAP_KEYWORDS = {
-                    "tsconfig", "eslint", "prettier", "babel", "webpack",
-                    "vite.config", "rollup", "jsconfig", "package.json",
+                config_bootstrap_keywords = {
+                    "tsconfig",
+                    "eslint",
+                    "prettier",
+                    "babel",
+                    "webpack",
+                    "vite.config",
+                    "rollup",
+                    "jsconfig",
+                    "package.json",
                 }
-                if any(kw in fp_lower for kw in _CONFIG_BOOTSTRAP_KEYWORDS):
+                if any(kw in fp_lower for kw in config_bootstrap_keywords):
                     logger.debug("⏭️ Pre-filter: skip config/build file %s", fp)
                     continue
 
@@ -860,25 +889,68 @@ class ContribPipeline:
 
         # --- Anti-Farming Filter (impact-level + keyword gatekeeper) ---
         # ZERO-TOLERANCE: Drop ANY finding that looks like a spam/exploratory PR
-        _FARMING_KEYWORDS = {
+        farming_keywords = {
             # Documentation / comments
-            "docstring", "docs", "documentation", "readme", "comment", "spell",
+            "docstring",
+            "docs",
+            "documentation",
+            "readme",
+            "comment",
+            "spell",
             # Formatting / style
-            "format", "formatting", "whitespace", "indent", "spacing", "style",
-            "styling", "naming convention", "rename", "ordering", "lint",
+            "format",
+            "formatting",
+            "whitespace",
+            "indent",
+            "spacing",
+            "style",
+            "styling",
+            "naming convention",
+            "rename",
+            "ordering",
+            "lint",
             # Exploratory / curiosity
-            "understand", "explore", "exploring", "read the", "reading",
-            "look at", "looking at", "check this", "investigate",
+            "understand",
+            "explore",
+            "exploring",
+            "read the",
+            "reading",
+            "look at",
+            "looking at",
+            "check this",
+            "investigate",
             # Low-effort / testing
-            "test", "testing", "todo", "fixme", "chore",
+            "test",
+            "testing",
+            "todo",
+            "fixme",
+            "chore",
             # Cosmetic
-            "typo", "typo in", "grammar", "misspell",
-            "missing type hint", "type annotation", "unused import",
+            "typo",
+            "typo in",
+            "grammar",
+            "misspell",
+            "missing type hint",
+            "type annotation",
+            "unused import",
             # ── Config / Compiler / Tooling tweaks — NEVER tweak these ──────────
-            "no-explicit-any", "noimplicitany", "strict mode", "strict: true",
-            "compiler flag", "compiler option", "tsconfig", "eslint", "prettier",
-            "babel config", "webpack config", "vite config", "rollup config",
-            "linter rule", "lint rule", "tsconfig.json", "package.json",
+            "no-explicit-any",
+            "noimplicitany",
+            "strict mode",
+            "strict: true",
+            "compiler flag",
+            "compiler option",
+            "tsconfig",
+            "eslint",
+            "prettier",
+            "babel config",
+            "webpack config",
+            "vite config",
+            "rollup config",
+            "linter rule",
+            "lint rule",
+            "tsconfig.json",
+            "package.json",
         }
         pre_farming_count = len(analysis.findings)
         high_impact_findings = []
@@ -950,8 +1022,8 @@ class ContribPipeline:
                 ContributionType.FEATURE_ADD,
             }
             combined = title_lower + " " + desc_lower
-            if finding.type not in ALLOWED_CONTRIB_TYPES:
-                for kw in _FARMING_KEYWORDS:
+            if finding.type not in allowed_contrib_types:
+                for kw in farming_keywords:
                     if kw in combined:
                         logger.info(
                             "🗑️ Dropped '%s' — keyword '%s' matched (spam/farming indicator)",
@@ -1039,13 +1111,15 @@ class ContribPipeline:
         filtered_findings = list(candidate_findings)
         if allow_duplicate_prs:
             preferred = [
-                finding for finding in candidate_findings
+                finding
+                for finding in candidate_findings
                 if finding.file_path and finding.title.strip().lower() != "untitled finding"
             ]
             if preferred:
                 preferred.sort(
                     key=lambda finding: (
-                        finding.type not in (
+                        finding.type
+                        not in (
                             ContributionType.SECURITY_FIX,
                             ContributionType.CODE_QUALITY,
                             ContributionType.PERFORMANCE_OPT,
@@ -1152,9 +1226,10 @@ class ContribPipeline:
             # ── Hybrid Contribution Router ─────────────────────────────────
             # Route A — Direct PR (Firefighter): SECURITY_FIX or CRITICAL/HIGH severity
             # Route B — Issue-First (Polite Senior): everything else
-            is_direct_pr = (
-                finding.type == ContributionType.SECURITY_FIX
-                or finding.severity in (Severity.CRITICAL, Severity.HIGH, Severity.MEDIUM)
+            is_direct_pr = finding.type == ContributionType.SECURITY_FIX or finding.severity in (
+                Severity.CRITICAL,
+                Severity.HIGH,
+                Severity.MEDIUM,
             )
 
             if not is_direct_pr:
@@ -1202,7 +1277,9 @@ class ContribPipeline:
                 for attempt in range(1, max_retries + 1):
                     logger.info(
                         "🔬 Sandbox validation attempt %d/%d for '%s'",
-                        attempt, max_retries, contribution.title,
+                        attempt,
+                        max_retries,
+                        contribution.title,
                     )
                     sandbox_result = await self._sandbox.run_in_sandbox(
                         repo_path=await self._clone_and_patch_repo(
@@ -1227,7 +1304,9 @@ class ContribPipeline:
 
                     logger.warning(
                         "🚫 Sandbox attempt %d/%d failed for '%s' — invoking self-correction.",
-                        attempt, max_retries, contribution.title,
+                        attempt,
+                        max_retries,
+                        contribution.title,
                     )
 
                     # Self-Correction: try to fix the broken patch
@@ -1241,7 +1320,8 @@ class ContribPipeline:
                             contribution = corrected
                             logger.info(
                                 "🔧 Self-correction attempt %d succeeded for '%s'",
-                                attempt, contribution.title,
+                                attempt,
+                                contribution.title,
                             )
                         else:
                             logger.warning(
@@ -1251,7 +1331,8 @@ class ContribPipeline:
                     except Exception as correction_err:
                         logger.warning(
                             "🔧 Self-correction attempt %d threw: %s — retrying.",
-                            attempt, correction_err,
+                            attempt,
+                            correction_err,
                         )
                 else:
                     # for/else: runs only if no break occurred (all retries exhausted)
@@ -1294,7 +1375,8 @@ class ContribPipeline:
                             logger.warning(
                                 "🚫 TOCTOU PR LIMIT DEFENSE: Concurrent quota hit "
                                 "(%d). Aborting PR for %s",
-                                curr_prs, repo.full_name
+                                curr_prs,
+                                repo.full_name,
                             )
                             return result
 
@@ -1330,11 +1412,9 @@ class ContribPipeline:
                     )
 
                 if not dry_run and getattr(self, "_notifier", None):
-                    _ = asyncio.create_task(
-                        self._safe_send_notification(
-                            f"🚀 <b>[HUNT]</b> New PR Created!\nRepo: <code>{repo.full_name}</code>\n"
-                            f"URL: {pr_result.pr_url}"
-                        )
+                    self._create_notification_task(
+                        f"🚀 <b>[HUNT]</b> New PR Created!\nRepo: <code>{repo.full_name}</code>\n"
+                        f"URL: {pr_result.pr_url}"
                     )
 
                 # 5. Post-PR compliance check & auto-fix
@@ -1369,17 +1449,16 @@ class ContribPipeline:
         repo: Repository,
         context: RepoContext,
     ):
-        from farm_agent.core.models import Finding, RepoContext
         """Route B: Open a polite GitHub Issue instead of generating a PR.
 
         This is used for PERFORMANCE_OPT, REFACTOR, CODE_QUALITY, FEATURE_ADD,
         and other non-critical findings where maintainers prefer discussion
         before seeing a large code diff.
         """
-        from farm_agent.core.models import Contribution
 
         logger.info(
-            "📝 [Route B] Issue-First for '%s' (type=%s, severity=%s) — polite heads-up, no code yet",
+            "📝 [Route B] Issue-First for '%s' (type=%s, severity=%s) "
+            "— polite heads-up, no code yet",
             finding.title,
             finding.type.value,
             finding.severity.value,
@@ -1416,6 +1495,7 @@ class ContribPipeline:
         # Create the issue on GitHub
         try:
             import random
+
             thinking_time = random.randint(10, 30)
             logger.info(f"⏳ Thinking before writing... ({thinking_time}s)")
             await asyncio.sleep(thinking_time)
@@ -1429,7 +1509,9 @@ class ContribPipeline:
             )
 
             issue_number = issue_data.get("number", 0)
-            issue_url = issue_data.get("html_url", f"https://github.com/{repo.full_name}/issues/{issue_number}")
+            issue_url = issue_data.get(
+                "html_url", f"https://github.com/{repo.full_name}/issues/{issue_number}"
+            )
 
             logger.info(
                 "📝 Issue created: %s/%s/#%d — '%s'",
@@ -1629,7 +1711,10 @@ class ContribPipeline:
                 for attempt in range(1, max_retries + 1):
                     logger.info(
                         "🔬 Sandbox validation attempt %d/%d for issue #%d ('%s')",
-                        attempt, max_retries, issue.number, contribution.title,
+                        attempt,
+                        max_retries,
+                        issue.number,
+                        contribution.title,
                     )
                     sandbox_result = await self._sandbox.run_in_sandbox(
                         repo_path=await self._clone_and_patch_repo(
@@ -1679,7 +1764,8 @@ class ContribPipeline:
                     logger.error(
                         "🚫 SANDBOX GUILLOTINE: PR creation blocked for issue #%d — "
                         "patch still failing after %d self-correction attempts.",
-                        issue.number, max_retries,
+                        issue.number,
+                        max_retries,
                     )
                     continue
             # ----------------------------------------------------------
@@ -1743,11 +1829,9 @@ class ContribPipeline:
                 )
 
                 if not dry_run and getattr(self, "_notifier", None):
-                    _ = asyncio.create_task(
-                        self._safe_send_notification(
-                            f"🚀 <b>[HUNT]</b> New PR Created!\nRepo: <code>{repo.full_name}</code>\n"
-                            f"URL: {pr_result.pr_url}"
-                        )
+                    self._create_notification_task(
+                        f"🚀 <b>[HUNT]</b> New PR Created!\nRepo: <code>{repo.full_name}</code>\n"
+                        f"URL: {pr_result.pr_url}"
                     )
 
                 # Post-PR compliance
@@ -2148,16 +2232,13 @@ class ContribPipeline:
         # PERF-OPT: Process file patches using to_thread to avoid blocking event loop
         # and gather them for potential parallel I/O speedup.
         patch_tasks = [
-            asyncio.to_thread(self._apply_patch_sync, clone_path, change)
-            for change in all_changes
+            asyncio.to_thread(self._apply_patch_sync, clone_path, change) for change in all_changes
         ]
         await asyncio.gather(*patch_tasks)
 
         return clone_path
 
     def _apply_patch_sync(self, clone_path: str, change: FileChange) -> None:
-        from farm_agent.core.models import FileChange
-
         """Synchronously apply a single FileChange patch to the local clone."""
         file_path = os.path.normpath(os.path.join(clone_path, change.path))
         # Security: ensure the file path stays within the clone directory
