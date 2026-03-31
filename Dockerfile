@@ -41,5 +41,5 @@ USER farm_agent
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
     CMD python -c "import httpx; httpx.get('http://localhost:8787/api/health')" || exit 1
 
-# Default: run entrypoint script (DB init + scheduler)
-ENTRYPOINT ["/bin/bash", "/home/farm_agent/entrypoint.sh"]
+# Default: run superhuman loop
+CMD ["python", "-m", "farm_agent.cli.main", "superhuman"]

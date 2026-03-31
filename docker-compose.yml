@@ -6,16 +6,18 @@ services:
     image: worker-daemon:latest
     build:
       context: .
-      dockerfile: Dockerfile.superhuman
+      dockerfile: Dockerfile
+    command: python -m farm_agent.cli.main superhuman
     container_name: contribai_superhuman_1
     restart: unless-stopped
     environment:
       - TZ=Asia/Ho_Chi_Minh
     env_file: .env
     volumes:
-      - ./data:/app/data:rw
-      - ./config.yaml:/app/config.yaml:ro
-      - ./logs:/app/logs:rw
+      - farm_agent-data:/home/farm_agent/.farm_agent
+      - ./data:/home/farm_agent/data:rw
+      - ./config.yaml:/home/farm_agent/config.yaml:ro
+      - ./logs:/home/farm_agent/logs:rw
       - /var/run/docker.sock:/var/run/docker.sock:rw
 
   # ── One-shot run ─────────────────────────────────────────────────────────
