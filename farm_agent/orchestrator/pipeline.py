@@ -205,6 +205,16 @@ class ContribPipeline:
         )
         self._human_typing_lock = asyncio.Lock()
 
+    def _get_max_concurrency(self) -> int:
+        """Get max concurrent repos, capped for specific providers."""
+        max_conc = self.config.pipeline.max_concurrent_repos
+        if self.config.llm.provider == "minimax":
+            # CRIT-03 FIX: Cap parallel repos to 5 to prevent GitHub
+            # secondary rate limit thundering herd.
+            max_conc = min(max_conc, 5)
+            logger.info("Minimax mode: capped concurrency to %d", max_conc)
+        return max_conc
+
     async def _init_components(self):
         """Initialize all pipeline components."""
         # LLM — with optional multi-model routing
@@ -342,12 +352,7 @@ class ContribPipeline:
             repos = repos[: self.config.github.max_repos_per_run]
 
             # 2. Process repos in parallel with semaphore
-            max_conc = self.config.pipeline.max_concurrent_repos
-            if self.config.llm.provider == "minimax":
-                # CRIT-03 FIX: Cap parallel repos to 5 to prevent GitHub
-                # secondary rate limit thundering herd.
-                max_conc = min(max_conc, 5)
-                logger.info("Minimax mode: capped concurrency to %d", max_conc)
+            max_conc = self._get_max_concurrency()
             sem = asyncio.Semaphore(max_conc)
             logger.info(
                 "Processing %d repos (max %d concurrent)",
@@ -546,12 +551,7 @@ class ContribPipeline:
                 )
 
                 max_targets = self.config.github.max_repos_per_run
-                max_conc = self.config.pipeline.max_concurrent_repos
-                if self.config.llm.provider == "minimax":
-                    # CRIT-03 FIX: Cap parallel repos to 5 to prevent GitHub
-                    # secondary rate limit thundering herd.
-                    max_conc = min(max_conc, 5)
-                    logger.info("Minimax mode: capped concurrency to %d", max_conc)
+                max_conc = self._get_max_concurrency()
                 sem = asyncio.Semaphore(max_conc)
                 selected = targets[:max_targets]
 
