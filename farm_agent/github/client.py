@@ -262,11 +262,18 @@ class GitHubClient:
         sort: str = "stars",
         order: str = "desc",
         per_page: int = 30,
+        page: int = 1,
     ) -> list[Repository]:
         """Search GitHub repositories."""
         data = await self._get(
             "/search/repositories",
-            params={"q": query, "sort": sort, "order": order, "per_page": per_page},
+            params={
+                "q": query,
+                "sort": sort,
+                "order": order,
+                "per_page": per_page,
+                "page": page,
+            },
         )
         return [self._parse_repo(item) for item in data.get("items", [])]
 

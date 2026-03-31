@@ -7,6 +7,7 @@ that are good candidates for contributions.
 from __future__ import annotations
 
 import logging
+import random
 from datetime import UTC, datetime, timedelta
 
 from farm_agent.core.config import DiscoveryConfig
@@ -66,13 +67,35 @@ class RepoDiscovery:
         )
 
     async def _search(self, criteria: DiscoveryCriteria) -> list[Repository]:
-        """Build and execute GitHub search query."""
+        """Build and execute GitHub search query with stochastic entropy.
+
+        Entropy injections to break deterministic stagnation:
+        1. Random star sub-window (100-star slice within the configured range)
+        2. Randomized sort parameter (stars/updated/help-wanted-issues)
+        3. Randomized order (desc/asc)
+        4. Random pagination jitter (page 1-5)
+        """
         all_repos: list[Repository] = []
 
         for language in criteria.languages:
+            # ── Entropy 1: Random star sub-window ──────────────────────
+            # Instead of the full range (e.g., stars:2000..12000), pick a
+            # random 100-star slice to reach repos beyond the top-30.
+            star_span = criteria.stars_max - criteria.stars_min
+            if star_span > 100:
+                window_start = random.randint(
+                    criteria.stars_min,
+                    criteria.stars_max - 100,
+                )
+                window_end = window_start + 100
+            else:
+                # Range is already narrow — use it as-is
+                window_start = criteria.stars_min
+                window_end = criteria.stars_max
+
             query_parts = [
                 f"language:{language}",
-                f"stars:{criteria.stars_min}..{criteria.stars_max}",
+                f"stars:{window_start}..{window_end}",
                 "archived:false",
                 "is:public",
             ]
@@ -87,10 +110,34 @@ class RepoDiscovery:
                 query_parts.append(f"topic:{topic}")
 
             query = " ".join(query_parts)
-            logger.debug("Search query: %s", query)
+
+            # ── Entropy 2: Randomize sort parameter ───────────────────
+            sort_choices = ["stars", "updated", "help-wanted-issues"]
+            sort_weights = [0.4, 0.4, 0.2]
+            random_sort = random.choices(sort_choices, weights=sort_weights, k=1)[0]
+
+            # ── Entropy 3: Randomize order ────────────────────────────
+            random_order = random.choices(
+                ["desc", "asc"], weights=[0.8, 0.2], k=1
+            )[0]
+
+            # ── Entropy 4: Pagination jitter ──────────────────────────
+            random_page = random.randint(1, 5)
+
+            logger.info(
+                "🎲 Stochastic search: lang=%s, ★ %d-%d (window from %d-%d), "
+                "sort=%s, order=%s, page=%d",
+                language, window_start, window_end,
+                criteria.stars_min, criteria.stars_max,
+                random_sort, random_order, random_page,
+            )
 
             repos = await self._client.search_repositories(
-                query=query, sort="stars", per_page=min(30, criteria.max_results * 2)
+                query=query,
+                sort=random_sort,
+                order=random_order,
+                per_page=min(30, criteria.max_results * 2),
+                page=random_page,
             )
             all_repos.extend(repos)
 
