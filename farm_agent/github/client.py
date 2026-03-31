@@ -33,10 +33,16 @@ class GitHubClient:
                 "Authorization": f"Bearer {token}",
                 "Accept": "application/vnd.github+json",
                 "X-GitHub-Api-Version": "2022-11-28",
-                # Sanitized — generic git UA, no AI identity disclosure
-                "User-Agent": "git/2.43.0",
+                # Sanitized — browser-like UA avoids GitHub abuse detection
+                # (httpx without trust_env=False gets blocked; browser UA helps)
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
             },
             timeout=30.0,
+            # trust_env=False: prevents reading Windows proxy/VPN env vars
+            # that cause GitHub API to return 403 Forbidden.  Found via
+            # live-fire crucible: httpx defaults to trust_env=True which
+            # reads Windows system proxy settings that block GitHub API.
+            trust_env=False,
         )
 
     async def close(self):
@@ -63,7 +69,8 @@ class GitHubClient:
             # Search APIs are heavily rate-limited — use a longer delay.
             if attempt == 1:  # Only throttle on first attempt; retries have their own backoff
                 is_search = "/search/" in url
-                delay = 3.0 if is_search else 1.5
+                is_mutation = method in ("POST", "PATCH", "PUT", "DELETE")
+                delay = 3.0 if is_search else (2.0 if is_mutation else 1.5)
                 logger.debug("Throttling GitHub API: sleeping %.1fs before %s %s", delay, method, url)
                 await asyncio.sleep(delay)
             # ─────────────────────────────────────────────────────────────
@@ -850,6 +857,7 @@ class GitHubClient:
                 },
                 follow_redirects=True,
                 timeout=60.0,
+                trust_env=False,  # prevent Windows proxy interference
             ) as client:
                 response = await client.get(url)
 

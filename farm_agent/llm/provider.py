@@ -230,7 +230,7 @@ class MinimaxProvider(LLMProvider):
         self._chat_url = (config.base_url or self.API_URL).rstrip("/")
         self._client = httpx.AsyncClient(
             headers=headers,
-            timeout=120.0,
+            timeout=300.0,  # [FIX] Increased from 120s to 300s for complex analysis
             follow_redirects=True,
         )
         # ── PROACTIVE LLM THROTTLING: cap concurrent API calls ─────────────
@@ -279,35 +279,50 @@ class MinimaxProvider(LLMProvider):
             "stream": False,
         }
 
-        try:
-            import asyncio as _asyncio
-            # ── PROACTIVE THROTTLING: wait for semaphore slot + pace ─────────
-            async with self._semaphore:
-                await _asyncio.sleep(2.0)  # human-like think gap between LLM calls
-                response = await self._client.post(self._chat_url, json=payload)
-            response.raise_for_status()
-            data = response.json()
+        # ── Retry loop for transient errors ─────────────────────────────────
+        # [FIX] Live-fire crucible: added retry with backoff for timeouts
+        last_error: Exception | None = None
+        for attempt in range(3):
+            try:
+                import asyncio as _asyncio
+                # ── PROACTIVE THROTTLING: wait for semaphore slot + pace ─────────
+                async with self._semaphore:
+                    await _asyncio.sleep(2.0)  # human-like think gap between LLM calls
+                    response = await self._client.post(self._chat_url, json=payload)
+                response.raise_for_status()
+                data = response.json()
 
-            # Minimax v2 response: {"choices": [{"message": {"content": "..."}}]}
-            choices = data.get("choices", [])
-            if not choices:
-                raise LLMError(f"Minimax returned empty choices: {data}")
-            content = choices[0].get("message", {}).get("content", "")
-            return _strip_reasoning_artifacts(content)
+                # Minimax v2 response: {"choices": [{"message": {"content": "..."}}]}
+                choices = data.get("choices", [])
+                if not choices:
+                    # Treat empty choices as retriable (upstream rate limit or overload)
+                    last_error = LLMError(f"Minimax returned empty choices (attempt {attempt+1}/3)")
+                    if attempt < 2:
+                        import asyncio as _asyncio
+                        await _asyncio.sleep(10 * (attempt + 1))
+                        continue
+                    raise last_error
+                content = choices[0].get("message", {}).get("content", "")
+                return _strip_reasoning_artifacts(content)
 
-        except httpx.TimeoutException as e:
-            raise LLMError(f"Minimax timeout: {e}") from e
-        except httpx.HTTPStatusError as e:
-            status = e.response.status_code
-            if status == 429:
-                raise LLMRateLimitError(f"Minimax rate limit (429): {e}") from e
-            if status == 401:
-                raise LLMError("Minimax auth failed (401): check api_key") from e
-            raise LLMError(f"Minimax HTTP {status}: {e}") from e
-        except (LLMError, LLMRateLimitError):
-            raise
-        except Exception as e:
-            raise LLMError(f"Minimax error: {e}") from e
+            except httpx.TimeoutException as e:
+                last_error = LLMError(f"Minimax timeout (attempt {attempt+1}/3): {e}")
+                if attempt < 2:
+                    import asyncio as _asyncio
+                    await _asyncio.sleep(10 * (attempt + 1))  # 10s, 20s backoff
+                    continue
+                raise last_error from e
+            except httpx.HTTPStatusError as e:
+                status = e.response.status_code
+                if status == 429:
+                    raise LLMRateLimitError(f"Minimax rate limit (429): {e}") from e
+                if status == 401:
+                    raise LLMError("Minimax auth failed (401): check api_key") from e
+                raise LLMError(f"Minimax HTTP {status}: {e}") from e
+            except (LLMError, LLMRateLimitError):
+                raise
+            except Exception as e:
+                raise LLMError(f"Minimax error: {e}") from e
 
     async def close(self):
         await self._client.aclose()

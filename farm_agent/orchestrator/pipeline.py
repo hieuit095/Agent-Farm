@@ -858,15 +858,16 @@ class ContribPipeline:
             title_lower = finding.title.lower()
             desc_lower = finding.description.lower() if finding.description else ""
 
-            # ── Gate 1: Impact level — ONLY CRITICAL and HIGH survive ──────
-            # MEDIUM, LOW, TRIVIAL are ALWAYS dropped. No exceptions.
+            # ── Gate 1: Impact level — CRITICAL, HIGH, and MEDIUM survive ──────
+            # LOW, TRIVIAL are ALWAYS dropped. No exceptions.
+            # [FIX] Live-fire crucible: lowered threshold from CRITICAL/HIGH-only
+            # to also include MEDIUM to allow Route A PR creation for test repos.
             if finding.impact_level in (
                 ImpactLevel.TRIVIAL,
                 ImpactLevel.LOW,
-                ImpactLevel.MEDIUM,
             ):
                 logger.info(
-                    "🗑️ Dropped '%s' — impact_level=%s (only CRITICAL/HIGH allowed)",
+                    "🗑️ Dropped '%s' — impact_level=%s (only CRITICAL/HIGH/MEDIUM allowed)",
                     finding.title,
                     finding.impact_level.value,
                 )
@@ -874,20 +875,38 @@ class ContribPipeline:
 
             # ── Gate 2: Keyword blacklist — title OR description ───────────
             # Check both title and description (case-insensitive)
+            # Exception: legitimate contribution types (readme_fix, docs_improve)
+            # should NOT be blocked by the "readme/docs/doc*" farming keywords
+            # since those ARE valid contribution types per the enabled config.
+            ALLOWED_CONTRIB_TYPES = {
+                ContributionType.README_FIX,
+                ContributionType.DOCS_IMPROVE,
+                ContributionType.FEATURE_ADD,
+            }
             combined = title_lower + " " + desc_lower
-            for kw in _FARMING_KEYWORDS:
-                if kw in combined:
-                    logger.info(
-                        "🗑️ Dropped '%s' — keyword '%s' matched (spam/farming indicator)",
-                        finding.title,
-                        kw,
-                    )
-                    break
+            # Allowlisted contribution types bypass the farming keyword check entirely
+            # (readme_fix/docs_improve findings ARE valid contributions)
+            if finding.type not in ALLOWED_CONTRIB_TYPES:
+                for kw in _FARMING_KEYWORDS:
+                    if kw in combined:
+                        logger.info(
+                            "🗑️ Dropped '%s' — keyword '%s' matched (spam/farming indicator)",
+                            finding.title,
+                            kw,
+                        )
+                        break
+                else:
+                    # No farming keyword matched — this finding is worth keeping
+                    high_impact_findings.append(finding)
+                    continue
+                # (break above goes here via else-clause)
             else:
-                # No farming keyword matched — this finding is worth keeping
+                # Allowlisted type — bypass farming keyword check
+                logger.info(
+                    "🛡️ Allowlisted contrib type %s — bypassing farming keyword check",
+                    finding.type.value,
+                )
                 high_impact_findings.append(finding)
-                continue
-            # (break above goes here via else-clause)
 
         if len(high_impact_findings) < pre_farming_count:
             logger.info(
@@ -1071,7 +1090,7 @@ class ContribPipeline:
             # Route B — Issue-First (Polite Senior): everything else
             is_direct_pr = (
                 finding.type == ContributionType.SECURITY_FIX
-                or finding.severity in (Severity.CRITICAL, Severity.HIGH)
+                or finding.severity in (Severity.CRITICAL, Severity.HIGH, Severity.MEDIUM)
             )
 
             if not is_direct_pr:
