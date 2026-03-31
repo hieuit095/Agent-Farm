@@ -176,7 +176,7 @@ class PRJanitor:
                             await self._github.delete_branch(owner, repo_name, head_branch)
                             logger.info("  Branch '%s' deleted for GARBAGE PR #%d.", head_branch, pr_number)
                         except Exception as exc:
-                            logger.debug("  Branch '%s' already gone or delete failed: %s", head_branch, exc)
+                            pass
                     elif head_branch:
                         logger.info(
                             "  Branch '%s' PRESERVED — LLM did not explicitly confirm GARBAGE "

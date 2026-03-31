@@ -337,7 +337,6 @@ class PRManager:
         """
         finding = contribution.finding
 
-        # Map contribution type to issue label
         type_labels = {
             ContributionType.SECURITY_FIX: "bug",
             ContributionType.CODE_QUALITY: "bug",
@@ -348,7 +347,6 @@ class PRManager:
             ContributionType.REFACTOR: "enhancement",
         }
 
-        # Use conventional commit style title for issue
         type_map = {
             ContributionType.SECURITY_FIX: "fix",
             ContributionType.CODE_QUALITY: "fix",
@@ -361,7 +359,6 @@ class PRManager:
 
         prefix = type_map.get(finding.type, "fix")
 
-        # Extract scope from file path
         scope = ""
         if finding.file_path:
             parts = finding.file_path.split("/")

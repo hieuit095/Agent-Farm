@@ -342,8 +342,6 @@ class SuperHumanLoop:
         for attempt in range(3):
             try:
                 if self._pipeline._github is None:
-                    if attempt == 0:
-                        logger.debug("Auth not ready, retrying in 2 seconds... (attempt 1/3)")
                     await asyncio.sleep(2)
                     continue
                 user: dict = await self._pipeline._github.get_authenticated_user()
@@ -351,7 +349,6 @@ class SuperHumanLoop:
                 break
             except Exception as exc:
                 if attempt < 2:
-                    logger.debug("Auth attempt %d/3 failed: %s — retrying in 2 seconds...", attempt + 1, exc)
                     await asyncio.sleep(2)
                 else:
                     logger.warning("Cannot sync friendly repos — auth failed after 3 attempts: %s", exc)
@@ -401,17 +398,9 @@ class SuperHumanLoop:
                     repo_details = await self._pipeline._github.get_repo_details(owner, repo_full_name.split("/")[1])
                     stars = getattr(repo_details, "stars", 0) or 0
                 except Exception:
-                    logger.debug("Could not fetch stars for %s — skipping", repo_full_name)
                     return False
 
                 if not (min_stars <= stars <= max_stars):
-                    logger.debug(
-                        "🏠 Skipping %s (stars=%d outside range %d-%d)",
-                        repo_full_name,
-                        stars,
-                        min_stars,
-                        max_stars,
-                    )
                     return False
 
                 # UPSERT: insert new merged PRs, update existing ones to 'merged'
@@ -481,7 +470,6 @@ class SuperHumanLoop:
         # Check throttle
         try:
             if not await self._memory.should_run_vip_sync():
-                logger.debug("VIP repo sync throttled (24h limit not reached)")
                 return 0
         except Exception as exc:
             logger.warning("VIP sync throttle check failed: %s — proceeding anyway", exc)
@@ -731,7 +719,7 @@ class SuperHumanLoop:
             await self._sync_historical_friendly_repos()
             await self._sync_vip_friendly_repos()
         except Exception as exc:
-            logger.debug("Startup friendly-repos sync failed (non-critical): %s", exc)
+            pass
         self._last_sync_time = __import__("time").time()
 
         while True:
@@ -744,7 +732,7 @@ class SuperHumanLoop:
                     await self._sync_historical_friendly_repos()
                     await self._sync_vip_friendly_repos()
                 except Exception as exc:
-                    logger.debug("24h friendly-repos sync failed (non-critical): %s", exc)
+                    pass
                 self._last_sync_time = __import__("time").time()
 
             # ── Time-warp exit gate ─────────────────────────────────────

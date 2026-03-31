@@ -73,7 +73,6 @@ class GitHubClient:
                 is_search = "/search/" in url
                 is_mutation = method in ("POST", "PATCH", "PUT", "DELETE")
                 delay = 3.0 if is_search else (2.0 if is_mutation else 1.5)
-                logger.debug("Throttling GitHub API: sleeping %.1fs before %s %s", delay, method, url)
                 await asyncio.sleep(delay)
             # ─────────────────────────────────────────────────────────────
             try:
@@ -179,13 +178,11 @@ class GitHubClient:
 
             # FIX 4: Humanize mutations — sleep after successful write operations
             if method in ("POST", "PATCH", "PUT", "DELETE"):
-                logger.debug("Mutation %s succeeded on %s — sleeping 2.0s to mimic human pacing", method, url)
                 await asyncio.sleep(2.0)
 
             # FIX 3: Search API hard-throttle — prevent exceeding 30 req/min limit
             # /search/ endpoints have a separate 30-req/min cap that is easy to exceed
             if "/search/" in url:
-                logger.debug("Search API call %s %s — sleeping 3.0s to prevent 30/min throttle", method, url)
                 await asyncio.sleep(3.0)
 
             return response.json() if response.content else None
@@ -235,10 +232,6 @@ class GitHubClient:
             # 204 No Content → no limits
             return False
         except Exception as exc:
-            logger.debug(
-                "Could not check interaction limits for %s/%s: %s",
-                owner, repo, exc,
-            )
             return False
 
     # ── Rate Limit ─────────────────────────────────────────────────────────
@@ -418,15 +411,10 @@ class GitHubClient:
                     params={"ref": branch},
                 )
                 sha = existing.get("sha")
-                logger.debug(
-                    "Fetched existing blob SHA for %s: %s",
-                    path,
-                    sha[:12] if sha else "None",
-                )
             except GitHubAPIError as exc:
                 if getattr(exc, "status_code", None) == 404:
                     # File does not exist yet — this is a creation, no SHA needed
-                    logger.debug("File %s does not exist on %s — creating new", path, branch)
+                    pass
                 else:
                     raise
 
@@ -846,7 +834,6 @@ class GitHubClient:
             )
             return data.get("check_runs", [])
         except Exception as exc:
-            logger.debug("Could not fetch check runs for %s/%s@%s: %s", owner, repo, ref, exc)
             return []
 
     async def download_check_run_log(self, owner: str, repo: str, check_run_id: int) -> str:
@@ -870,10 +857,6 @@ class GitHubClient:
                 response = await client.get(url)
 
             if response.status_code in (404, 410):
-                logger.debug(
-                    "CI log unavailable (HTTP %d) for job %d on %s/%s",
-                    response.status_code, check_run_id, owner, repo,
-                )
                 return ""
 
             response.raise_for_status()
@@ -901,7 +884,7 @@ class GitHubClient:
             await asyncio.sleep(2.0)
         except GitHubAPIError as exc:
             if exc.status_code in (404, 422):
-                logger.debug("Branch already deleted or not found: %s/%s/%s", owner, repo, branch_name)
+                pass
             else:
                 raise
 
@@ -964,10 +947,6 @@ class GitHubClient:
             async with self._sem:
                 return await self._post(url, json={"content": reaction})
         except Exception as exc:
-            logger.debug(
-                "Could not add %s reaction to comment %d on %s/%s: %s",
-                reaction, comment_id, owner, repo, exc,
-            )
             return None
 
     # ── Style Mimicry ──────────────────────────────────────────────────────
@@ -995,7 +974,6 @@ class GitHubClient:
                 },
             )
         except Exception as exc:
-            logger.debug("Could not fetch merged PRs for %s/%s: %s", owner, repo, exc)
             return []
 
         merged: list[dict] = []
@@ -1016,10 +994,6 @@ class GitHubClient:
             if len(merged) >= limit:
                 break
 
-        logger.debug(
-            "Style mimicry: found %d merged human PRs for %s/%s",
-            len(merged), owner, repo,
-        )
         return merged
 
     # ── Maintainer Vibe Check ─────────────────────────────────────────────
@@ -1052,9 +1026,6 @@ class GitHubClient:
                 },
             )
         except Exception as exc:
-            logger.debug(
-                "Vibe check: could not fetch PRs for %s/%s: %s", owner, repo, exc
-            )
             return ""
 
         comments_parts: list[str] = []
@@ -1105,10 +1076,6 @@ class GitHubClient:
             words = words[-1500:]
             full_context = " ".join(words)
 
-        logger.debug(
-            "Vibe check: collected %d comment(s) (%d words) from %d PR(s) for %s/%s",
-            len(comments_parts), len(words), sampled, owner, repo,
-        )
         return full_context
 
     @staticmethod
@@ -1179,14 +1146,9 @@ class GitHubClient:
                 repo_details = await self.get_repo_details(owner, repo_name)
                 stars = getattr(repo_details, "stars", 0) or 0
             except Exception as exc:
-                logger.debug("Could not fetch stars for %s: %s", repo_full_name, exc)
                 return None
 
             if stars < min_stars:
-                logger.debug(
-                    "discover_vip_friendly_repos: skipping %s (stars=%d < %d)",
-                    repo_full_name, stars, min_stars,
-                )
                 return None
 
             result = dict(pr)
