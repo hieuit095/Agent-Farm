@@ -354,6 +354,10 @@ class DockerSandbox:
                 init=True,
                 labels=labels,
                 name=container_name,
+                # P0-FIX: Hard timeout at Docker daemon level — prevents deadlock
+                # if our asyncio polling loop fails or stalls. Docker daemon will
+                # SIGTERM → SIGKILL the container after this many seconds.
+                stop_timeout=timeout,
             )
 
         try:
@@ -406,13 +410,33 @@ class DockerSandbox:
             b"".join(stderr_chunks).decode("utf-8", errors="replace"),
         )
 
-    def _wait_for_exit_code(self, container_id: str) -> int | None:
-        """Wait for the container to stop and return its exit code."""
-        result = self.client.api.wait(container_id, condition="not-running")
-        if isinstance(result, dict):
-            status_code = result.get("StatusCode")
-            return int(status_code) if status_code is not None else None
-        return None
+    def _wait_for_exit_code(self, container_id: str, timeout: int = 120) -> int | None:
+        """Wait for the container to stop and return its exit code.
+
+        Args:
+            container_id: Docker container ID to wait on.
+            timeout: Hard timeout in seconds. If the Docker API wait() blocks
+                     longer than this, we catch the exception and return the
+                     timeout exit code. Prevents indefinite thread pool stalls.
+        """
+        try:
+            result = self.client.api.wait(
+                container_id,
+                condition="not-running",
+                timeout=timeout,
+            )
+            if isinstance(result, dict):
+                status_code = result.get("StatusCode")
+                return int(status_code) if status_code is not None else None
+            return None
+        except Exception as exc:
+            # P0-FIX: Catch any timeout/connection error from Docker API wait()
+            # to prevent indefinite blocking. Log and return timeout exit code.
+            logger.warning(
+                "Sandbox wait() timed out or errored for container %s after %ds: %s",
+                container_id, timeout, exc,
+            )
+            return self._TIMEOUT_EXIT_CODE
 
     async def _resolve_exit_code(
         self,

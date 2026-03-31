@@ -966,8 +966,14 @@ class PRPatrol:
             # Push fix (guarded against Janitor race condition)
             user = await self._get_user()
             signoff = self._build_signoff(user)
+            # P0-FIX: Never pass raw maintainer text into commit messages.
+            # Maintainer text (feedback.body) can contain prompt injection
+            # sequences. Use only structural identifiers (PR# + file path).
+            commit_summary = f"PR #{pr_data['number']}"
+            if file_path:
+                commit_summary += f" ({file_path.rsplit('/', 1)[-1]})"
             commit_msg = random.choice(GITHUB_REPLIES["COMMIT_FIX"]).format(
-                summary=feedback.body[:60],
+                summary=commit_summary,
             )
             try:
                 await self._github.create_or_update_file(
@@ -1273,7 +1279,7 @@ class PRPatrol:
 
         # Pick the first fixable run
         failed = fixable_runs[0]
-        check_name = failed.get("name", "CI")
+        check_name = self._sanitize_check_name(failed.get("name", "CI"))
         check_run_id = failed.get("id", 0)
 
         logger.info(
@@ -1334,6 +1340,40 @@ class PRPatrol:
             return True
         # For log content: substring matching still applies
         return any(pattern in text_clean.lower() for pattern in CI_INFRA_IGNORE_PATTERNS)
+
+    @staticmethod
+    def _sanitize_check_name(raw_name: str) -> str:
+        """Sanitize a CI check name from the GitHub API.
+
+        P0-FIX: CI check names are untrusted external input. Maintainers
+        can craft check names containing emojis (🤖), AI-identity keywords
+        (bot, AI), or prompt-injection patterns. This method strips:
+        1. Emojis and non-ASCII characters (except basic punctuation)
+        2. AI identity keywords that would violate the Gag Order
+        3. Prompt injection sequences (ignore, instruction, system prompt)
+
+        Returns a safe, ASCII-only check name suitable for commits/PR bodies.
+        """
+        import re as _re
+        # Strip emojis and non-ASCII (keep alphanumeric, spaces, hyphens, underscores, dots, slashes)
+        sanitized = _re.sub(r'[^\x20-\x7E]', '', raw_name)
+        # Strip AI identity keywords (Gag Order)
+        _GAG_KEYWORDS = _re.compile(
+            r'\b(bot|ai|automated|robot|artificial|intelligence|machine.?learning|'
+            r'openai|anthropic|gemini|minimax|contribai|farm.?agent)\b',
+            _re.IGNORECASE,
+        )
+        sanitized = _GAG_KEYWORDS.sub('', sanitized)
+        # Strip prompt injection patterns
+        _INJECTION_RE = _re.compile(
+            r'\b(ignore|instruction|system.?prompt|override|disregard|forget)\b',
+            _re.IGNORECASE,
+        )
+        sanitized = _INJECTION_RE.sub('', sanitized)
+        # Collapse whitespace and trim
+        sanitized = _re.sub(r'\s+', ' ', sanitized).strip()
+        # Fallback if everything was stripped
+        return sanitized or "CI"
 
     @staticmethod
     def _extract_ci_traceback(raw_log: str) -> str:

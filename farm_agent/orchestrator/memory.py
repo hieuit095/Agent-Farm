@@ -325,9 +325,16 @@ class Memory:
         return [dict(zip(cols, row, strict=False)) for row in rows]
 
     async def get_today_pr_count(self) -> int:
-        """Get number of PRs created today (UTC)."""
+        """Get number of PRs created today (UTC).
+
+        P0-FIX: Generate UTC date in Python instead of relying on SQLite's
+        date('now') which uses the system timezone. This ensures quota counts
+        strictly align with UTC midnights regardless of server locale.
+        """
+        today_utc = datetime.now(UTC).date().isoformat()
         cursor = await self._db.execute(
-            "SELECT COUNT(*) FROM submitted_prs WHERE date(created_at) = date('now')",
+            "SELECT COUNT(*) FROM submitted_prs WHERE date(created_at) = ?",
+            (today_utc,),
         )
         row = await cursor.fetchone()
         return row[0] if row else 0
