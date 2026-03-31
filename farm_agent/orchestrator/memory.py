@@ -8,10 +8,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import sqlite3
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-
-import sqlite3
 
 import aiosqlite
 
@@ -147,9 +146,7 @@ class Memory:
             "discussion_replies INTEGER DEFAULT 0",
         ):
             try:
-                await self._db.execute(
-                    f"ALTER TABLE submitted_prs ADD COLUMN {col}"
-                )
+                await self._db.execute(f"ALTER TABLE submitted_prs ADD COLUMN {col}")
                 await self._db.commit()
             except sqlite3.OperationalError as e:
                 if "already exists" in str(e) or "duplicate column name" in str(e).lower():
@@ -191,9 +188,7 @@ class Memory:
 
         try:
             # api_usage_log: keep 30 days
-            cur = await self._db.execute(
-                "DELETE FROM api_usage_log WHERE timestamp < ?", (cutoff,)
-            )
+            cur = await self._db.execute("DELETE FROM api_usage_log WHERE timestamp < ?", (cutoff,))
             deleted["api_usage_log"] = cur.rowcount
 
             # task_schedule: delete completed entries older than 7 days
@@ -369,9 +364,7 @@ class Memory:
         Cooldown = repo must NOT have been analyzed in the last cooldown_days
         to avoid spamming maintainers who trusted us.
         """
-        cutoff = (
-            datetime.now(UTC) - timedelta(days=cooldown_days)
-        ).isoformat()
+        cutoff = (datetime.now(UTC) - timedelta(days=cooldown_days)).isoformat()
 
         cursor = await self._db.execute(
             """
@@ -415,7 +408,7 @@ class Memory:
 
     async def increment_ci_fix_attempts(self, repo: str, pr_number: int) -> int:
         """Increment the CI fix attempt counter for a PR. Returns the new count.
-        
+
         P2-FIX: Use RETURNING clause to avoid TOCTOU race condition
         between UPDATE and SELECT in concurrent environments.
         """
@@ -441,7 +434,7 @@ class Memory:
 
     async def increment_discussion_replies(self, repo: str, pr_number: int) -> int:
         """Increment the discussion reply counter for a PR. Returns the new count.
-        
+
         P2-FIX: Use RETURNING clause to avoid TOCTOU race condition.
         """
         cursor = await self._db.execute(
@@ -658,7 +651,8 @@ class Memory:
 
     async def get_blacklisted_repos(self) -> list[dict]:
         """Get all blacklisted repositories."""
-        async with self._db.execute("SELECT repo, reason, pr_number, blacklisted_at FROM blacklisted_repos") as cursor:
+        query = "SELECT repo, reason, pr_number, blacklisted_at FROM blacklisted_repos"
+        async with self._db.execute(query) as cursor:
             rows = await cursor.fetchall()
             return [
                 {
@@ -690,8 +684,8 @@ class Memory:
             now = time.time()
 
             # Sliding window boundaries
-            five_hours_ago = now - 18_000.0       # 5 * 3600
-            seven_days_ago = now - 604_800.0      # 7 * 24 * 3600
+            five_hours_ago = now - 18_000.0  # 5 * 3600
+            seven_days_ago = now - 604_800.0  # 7 * 24 * 3600
 
             # ── Count requests in each window ──────────────────────────────
             cursor = await self._db.execute(
@@ -712,7 +706,8 @@ class Memory:
             if count_5h >= 950:
                 logger.warning(
                     "LLM quota BREACHED: %s 5-hour window has %d requests (limit 950).",
-                    provider, count_5h,
+                    provider,
+                    count_5h,
                 )
                 raise LLMRateLimitError(
                     f"{provider} 5-hour quota exhausted: {count_5h}/950 requests"
@@ -721,7 +716,8 @@ class Memory:
             if count_7d >= 9500:
                 logger.warning(
                     "LLM quota BREACHED: %s 7-day window has %d requests (limit 9500).",
-                    provider, count_7d,
+                    provider,
+                    count_7d,
                 )
                 raise LLMRateLimitError(
                     f"{provider} 7-day quota exhausted: {count_7d}/9500 requests"

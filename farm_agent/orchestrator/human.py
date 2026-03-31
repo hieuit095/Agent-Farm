@@ -26,13 +26,13 @@ logger = logging.getLogger(__name__)
 ABSOLUTE_MAX_PRS_PER_DAY = 12
 
 # Delay ranges (seconds) for real operation
-HUNT_DELAY_MIN = 1800   # 30 minutes
-HUNT_DELAY_MAX = 5400   # 90 minutes
-DRY_HUNT_DELAY_MIN = 120   # 2 minutes — retry quickly when no repos scanned
-DRY_HUNT_DELAY_MAX = 300   # 5 minutes
+HUNT_DELAY_MIN = 1800  # 30 minutes
+HUNT_DELAY_MAX = 5400  # 90 minutes
+DRY_HUNT_DELAY_MIN = 120  # 2 minutes — retry quickly when no repos scanned
+DRY_HUNT_DELAY_MAX = 300  # 5 minutes
 PATROL_DELAY_MIN = 600  # 10 minutes
-PATROL_DELAY_MAX = 1800 # 30 minutes
-PATROL_ONLY_DELAY_MIN = 3600   # 1 hour
+PATROL_DELAY_MAX = 1800  # 30 minutes
+PATROL_ONLY_DELAY_MIN = 3600  # 1 hour
 PATROL_ONLY_DELAY_MAX = 10800  # 3 hours
 STRESS_BREAK_SEC = 900  # 15 minutes
 
@@ -261,7 +261,8 @@ class SuperHumanLoop:
             logger.warning(
                 "🛑 DB check caught quota limit inside _do_hunt "
                 "(DB=%d >= target=%d). Aborting hunt.",
-                actual_db_count, self._daily_pr_target,
+                actual_db_count,
+                self._daily_pr_target,
             )
             return 0, 0
         logger.info(_thought("START_HUNT"))
@@ -287,15 +288,21 @@ class SuperHumanLoop:
                     dry_run=self._dry_run,
                     mode="both",
                 )
-            logger.info(_thought(
-                "HUNT_DONE",
-                repos=result.repos_analyzed,
-                prs=result.prs_created,
-            ))
-            
+            logger.info(
+                _thought(
+                    "HUNT_DONE",
+                    repos=result.repos_analyzed,
+                    prs=result.prs_created,
+                )
+            )
+
             if result.prs_created > 0:
                 rest_time = random.randint(900, 2700)
-                logger.info(f"Mới nộp PR xong, căng não quá. Đi hút điếu thuốc / dạo bộ 30 phút rồi mới làm tiếp. (Sleeping {rest_time}s)")
+                logger.info(
+                    "Mới nộp PR xong, căng não quá. Đi hút điếu thuốc / dạo bộ 30 phút "
+                    "rồi mới làm tiếp. (Sleeping %ds)",
+                    rest_time,
+                )
                 await asyncio.sleep(rest_time)
 
             # ── Daily log: record hunt outcome ──
@@ -308,7 +315,9 @@ class SuperHumanLoop:
                     self._daily_log.log_hunt_success(repo, pr_num, url)
             elif result.prs_created > 0:
                 self._daily_log.log_hunt_success(
-                    "repo", result.prs_created, "(no URL available)",
+                    "repo",
+                    result.prs_created,
+                    "(no URL available)",
                 )
             else:
                 self._daily_log.log_hunt_no_result(result.repos_analyzed)
@@ -337,7 +346,7 @@ class SuperHumanLoop:
 
         min_stars, max_stars = self._pipeline.config.discovery.stars_range
 
-        # Get the authenticated username — retry up to 3× if auth not ready yet
+        # Get the authenticated username — retry up to 3x if auth not ready yet
         username = ""
         for attempt in range(3):
             try:
@@ -351,7 +360,9 @@ class SuperHumanLoop:
                 if attempt < 2:
                     await asyncio.sleep(2)
                 else:
-                    logger.warning("Cannot sync friendly repos — auth failed after 3 attempts: %s", exc)
+                    logger.warning(
+                        "Cannot sync friendly repos — auth failed after 3 attempts: %s", exc
+                    )
                     return 0
 
         if not username:
@@ -367,7 +378,12 @@ class SuperHumanLoop:
             logger.warning("GitHub search API failed during friendly-repos sync: %s", exc)
             return 0
 
-        logger.info("🏠 Familiar Grounds sync: fetched %d merged PRs, filtering by ★ %d-%d ...", len(merged_prs), min_stars, max_stars)
+        logger.info(
+            "🏠 Familiar Grounds sync: fetched %d merged PRs, filtering by ★ %d-%d ...",
+            len(merged_prs),
+            min_stars,
+            max_stars,
+        )
 
         # Deduplicate by repo (one entry per repo, take the most recent merged PR)
         repo_map: dict[str, dict] = {}
@@ -395,7 +411,9 @@ class SuperHumanLoop:
 
                 # Check repo stars to respect the configured star range
                 try:
-                    repo_details = await self._pipeline._github.get_repo_details(owner, repo_full_name.split("/")[1])
+                    repo_details = await self._pipeline._github.get_repo_details(
+                        owner, repo_full_name.split("/")[1]
+                    )
                     stars = getattr(repo_details, "stars", 0) or 0
                 except Exception:
                     return False
@@ -431,8 +449,13 @@ class SuperHumanLoop:
                         """UPDATE submitted_prs
                            SET status = 'merged', updated_at = ?, pr_url = ?, title = ?
                            WHERE repo = ? AND pr_number = ?""",
-                        (now_utc, pr.get("html_url") or "", pr.get("title") or "",
-                         repo_full_name, pr.get("pr_number", 0)),
+                        (
+                            now_utc,
+                            pr.get("html_url") or "",
+                            pr.get("title") or "",
+                            repo_full_name,
+                            pr.get("pr_number", 0),
+                        ),
                     )
                 except Exception as exc:
                     logger.error(
@@ -444,10 +467,9 @@ class SuperHumanLoop:
                     )
                 return False
 
-        results = await asyncio.gather(*[
-            process_one_repo(repo_full_name, pr)
-            for repo_full_name, pr in repo_map.items()
-        ])
+        results = await asyncio.gather(
+            *[process_one_repo(repo_full_name, pr) for repo_full_name, pr in repo_map.items()]
+        )
         new_count = sum(1 for r in results if r)
         await self._memory._db.commit()
         elapsed = time_module.time() - start
@@ -562,8 +584,7 @@ class SuperHumanLoop:
 
         if not merged:
             return (
-                "Chưa có PR nào được gộp vào Bảng Vàng Sếp ạ. "
-                "Em vẫn đang cố gắng đi săn đây! 🏃‍♂️"
+                "Chưa có PR nào được gộp vào Bảng Vàng Sếp ạ. Em vẫn đang cố gắng đi săn đây! 🏃‍♂️"
             )
 
         lines = ["🏆 <b>BẢNG VÀNG DANH DỰ</b> 🏆\n"]
@@ -571,14 +592,10 @@ class SuperHumanLoop:
             title = pr.get("title") or pr.get("pr_title") or "(untitled)"
             pr_num = pr.get("pr_number") or pr.get("pr_num") or "?"
             url = pr.get("pr_url") or pr.get("url") or ""
-            repo = pr.get("repo", "").split("/")[-1] if pr.get("repo") else ""
 
             title_escaped = title.replace("<", "&lt;").replace(">", "&gt;")
             if url:
-                lines.append(
-                    f"{i}. <code>{title_escaped}</code> (#{pr_num}) "
-                    f"🔗 {url}"
-                )
+                lines.append(f"{i}. <code>{title_escaped}</code> (#{pr_num}) 🔗 {url}")
             else:
                 lines.append(f"{i}. <code>{title_escaped}</code> (#{pr_num})")
 
@@ -604,7 +621,9 @@ class SuperHumanLoop:
             github = self._pipeline._github
             llm = self._pipeline._llm
 
-            patrol_engine = PRPatrol(github=github, llm=llm, memory=self._memory, notifier=self._notifier)
+            patrol_engine = PRPatrol(
+                github=github, llm=llm, memory=self._memory, notifier=self._notifier
+            )
             result = await patrol_engine.patrol(
                 pr_records,
                 dry_run=self._dry_run,
@@ -620,12 +639,14 @@ class SuperHumanLoop:
                 )
                 await self._pipeline._safe_send_notification(message)
 
-            logger.info(_thought(
-                "PATROL_DONE",
-                checked=result.prs_checked,
-                fixes=result.fixes_pushed,
-                replies=result.replies_sent,
-            ))
+            logger.info(
+                _thought(
+                    "PATROL_DONE",
+                    checked=result.prs_checked,
+                    fixes=result.fixes_pushed,
+                    replies=result.replies_sent,
+                )
+            )
             # ── Daily log: record patrol outcome ──
             if result.prs_checked > 0:
                 self._daily_log.log_patrol_result(
@@ -718,7 +739,7 @@ class SuperHumanLoop:
                 await self._pipeline._init_components()
             await self._sync_historical_friendly_repos()
             await self._sync_vip_friendly_repos()
-        except Exception as exc:
+        except Exception:
             pass
         self._last_sync_time = __import__("time").time()
 
@@ -731,7 +752,7 @@ class SuperHumanLoop:
                 try:
                     await self._sync_historical_friendly_repos()
                     await self._sync_vip_friendly_repos()
-                except Exception as exc:
+                except Exception:
                     pass
                 self._last_sync_time = __import__("time").time()
 
@@ -765,14 +786,17 @@ class SuperHumanLoop:
                 # ── TARGET MET — Patrol-only mode ──────────────────────
                 if not self._quota_logged_today:
                     self._daily_log.log_quota_met(
-                        self._prs_created_today, self._daily_pr_target,
+                        self._prs_created_today,
+                        self._daily_pr_target,
                     )
                     self._quota_logged_today = True
-                logger.info(_thought(
-                    "QUOTA_MET",
-                    today=self._prs_created_today,
-                    limit=self._daily_pr_target,
-                ))
+                logger.info(
+                    _thought(
+                        "QUOTA_MET",
+                        today=self._prs_created_today,
+                        limit=self._daily_pr_target,
+                    )
+                )
                 try:
                     await self._do_patrol()
                 except (GitHubAPIError, FarmAgentError, Exception) as exc:
@@ -791,13 +815,15 @@ class SuperHumanLoop:
 
             else:
                 # ── UNDER TARGET — Stochastic action selection ─────────
-                logger.info(_thought(
-                    "ITERATION",
-                    iter=self._iteration,
-                    today=self._prs_created_today,
-                    limit=self._daily_pr_target,
-                    remaining=remaining,
-                ))
+                logger.info(
+                    _thought(
+                        "ITERATION",
+                        iter=self._iteration,
+                        today=self._prs_created_today,
+                        limit=self._daily_pr_target,
+                        remaining=remaining,
+                    )
+                )
 
                 # ── PATROL PRIORITY: maintainers waiting? ──────────────────
                 # If there are pending notifications/comments, ALWAYS patrol first.
@@ -858,11 +884,13 @@ class SuperHumanLoop:
                 # ── Normal stochastic dice roll ───────────────────────
                 random_val = random.random()
                 chosen_action = "HUNT 🦅" if random_val < HUNT_WEIGHT else "PATROL 🛡️"
-                logger.info(_thought(
-                    "ACTION_ROLL",
-                    roll=random_val,
-                    action=chosen_action,
-                ))
+                logger.info(
+                    _thought(
+                        "ACTION_ROLL",
+                        roll=random_val,
+                        action=chosen_action,
+                    )
+                )
 
                 if random_val >= HUNT_WEIGHT:
                     # ── PATROL selected by dice ───────────────────────
@@ -908,10 +936,12 @@ class SuperHumanLoop:
                             "Ngân sách Minimax đã chạm đỉnh (Quota exhausted). "
                             "Tắt máy đi ngủ 1 tiếng để hồi mana... "
                             "(sleeping %ds, error: %s)",
-                            quota_cooldown, exc,
+                            quota_cooldown,
+                            exc,
                         )
                         self._daily_log.log_error(
-                            "HUNT (LLM Quota)", str(exc),
+                            "HUNT (LLM Quota)",
+                            str(exc),
                         )
                         await asyncio.sleep(quota_cooldown)
                         continue
@@ -956,7 +986,7 @@ class SuperHumanLoop:
                 exc,
             )
             # Schedule restart without blocking
-            asyncio.create_task(self._restart_poller())
+            self._restart_poller_task = asyncio.create_task(self._restart_poller())
 
     async def _restart_poller(self) -> None:
         """Restart the Telegram poller after an unexpected crash."""
