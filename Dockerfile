@@ -16,6 +16,12 @@ FROM python:3.12-slim
 LABEL maintainer="DevTools Team"
 LABEL description="Automation daemon for repository maintenance"
 
+# Install system dependencies including git for repo cloning
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
 # Create non-root user
 RUN useradd --create-home --shell /bin/bash farm_agent
 WORKDIR /home/farm_agent
