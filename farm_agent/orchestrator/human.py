@@ -571,7 +571,6 @@ class SuperHumanLoop:
             title = pr.get("title") or pr.get("pr_title") or "(untitled)"
             pr_num = pr.get("pr_number") or pr.get("pr_num") or "?"
             url = pr.get("pr_url") or pr.get("url") or ""
-            repo = pr.get("repo", "").split("/")[-1] if pr.get("repo") else ""
 
             title_escaped = title.replace("<", "&lt;").replace(">", "&gt;")
             if url:
@@ -718,7 +717,7 @@ class SuperHumanLoop:
                 await self._pipeline._init_components()
             await self._sync_historical_friendly_repos()
             await self._sync_vip_friendly_repos()
-        except Exception as exc:
+        except Exception:
             pass
         self._last_sync_time = __import__("time").time()
 
@@ -731,7 +730,7 @@ class SuperHumanLoop:
                 try:
                     await self._sync_historical_friendly_repos()
                     await self._sync_vip_friendly_repos()
-                except Exception as exc:
+                except Exception:
                     pass
                 self._last_sync_time = __import__("time").time()
 
