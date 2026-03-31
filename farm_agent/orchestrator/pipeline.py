@@ -8,6 +8,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
+import re
+import shutil
+import subprocess
+import tempfile
 from dataclasses import dataclass, field
 
 from farm_agent.agents.registry import create_default_registry
@@ -1198,7 +1203,11 @@ class ContribPipeline:
                         attempt, max_retries, contribution.title,
                     )
                     sandbox_result = await self._sandbox.run_in_sandbox(
-                        repo_path=str(repo.clone_url),
+                        repo_path=await self._clone_and_patch_repo(
+                            repo.clone_url,
+                            contribution.changes,
+                            contribution.tests_added,
+                        ),
                         command="pytest",
                     )
 
@@ -1612,7 +1621,11 @@ class ContribPipeline:
                         attempt, max_retries, issue.number, contribution.title,
                     )
                     sandbox_result = await self._sandbox.run_in_sandbox(
-                        repo_path=str(repo.clone_url),
+                        repo_path=await self._clone_and_patch_repo(
+                            repo.clone_url,
+                            contribution.changes,
+                            contribution.tests_added,
+                        ),
                         command="pytest",
                     )
                     if isinstance(sandbox_result, dict):
@@ -2045,3 +2058,107 @@ class ContribPipeline:
 
         with contextlib.suppress(ValueError, AttributeError):
             self._llm.set_task(TaskType(task_name))
+
+    async def _clone_and_patch_repo(
+        self,
+        clone_url: str,
+        changes: list,
+        tests_added: list,
+    ) -> str:
+        """Clone a GitHub repo to a temp dir and apply patches for sandbox validation.
+
+        BUG FIX (Crucible): The sandbox expects a LOCAL filesystem path, not a
+        GitHub URL. Previously pipeline passed repo.clone_url directly, causing
+        'Sandbox repository path does not exist: /home/farm_agent/https:/...'.
+
+        This method:
+        1. Clones the repo to a unique temp directory (cached per clone_url)
+        2. Applies all FileChange patches to the local clone
+        3. Returns the local path for sandbox validation
+        """
+        # Use a class-level cache to avoid re-cloning the same repo across
+        # multiple sandbox calls within the same pipeline run.
+        cache_key = clone_url
+        if not hasattr(self, "_clone_cache"):
+            self._clone_cache: dict[str, str] = {}
+
+        if cache_key in self._clone_cache:
+            clone_path = self._clone_cache[cache_key]
+            logger.debug("Reusing cached clone at %s", clone_path)
+        else:
+            # Create a unique temp directory for this clone
+            base_temp = tempfile.gettempdir()
+            clone_path = os.path.join(base_temp, f"farm_agent_sandbox_{len(self._clone_cache)}")
+            os.makedirs(clone_path, exist_ok=True)
+
+            def _do_clone() -> None:
+                result = subprocess.run(
+                    ["git", "clone", "--depth=1", clone_url, clone_path],
+                    capture_output=True,
+                    text=True,
+                    timeout=120,
+                )
+                if result.returncode != 0:
+                    raise RuntimeError(
+                        f"git clone failed (exit {result.returncode}): {result.stderr}"
+                    )
+
+            try:
+                await asyncio.to_thread(_do_clone)
+            except Exception as e:
+                logger.error("Failed to clone %s: %s", clone_url, e)
+                raise
+
+            self._clone_cache[cache_key] = clone_path
+            logger.info("Cloned %s → %s", clone_url, clone_path)
+
+        # Apply patches (changes + tests_added) to the local clone
+        all_changes = list(changes) + list(tests_added)
+        for change in all_changes:
+            file_path = os.path.normpath(os.path.join(clone_path, change.path))
+            # Security: ensure the file path stays within the clone directory
+            if not file_path.startswith(clone_path + os.sep) and file_path != clone_path:
+                logger.warning("Patch path %s escapes clone dir — skipping", change.path)
+                continue
+
+            try:
+                if change.is_new_file:
+                    os.makedirs(os.path.dirname(file_path), exist_ok=True)
+                    with open(file_path, "w", encoding="utf-8") as f:
+                        f.write(change.new_content)
+                    logger.debug("Created new file: %s", change.path)
+                elif change.is_deleted:
+                    if os.path.exists(file_path):
+                        os.remove(file_path)
+                    logger.debug("Deleted file: %s", change.path)
+                else:
+                    # Replace original_content snippet with new_content
+                    if os.path.exists(file_path):
+                        with open(file_path, "r", encoding="utf-8") as f:
+                            content = f.read()
+                        if change.original_content and change.original_content in content:
+                            content = content.replace(
+                                change.original_content,
+                                change.new_content,
+                                1,
+                            )
+                        else:
+                            # Fallback: just write new_content (original_content may be
+                            # a partial snippet from the LLM)
+                            content = change.new_content
+                        with open(file_path, "w", encoding="utf-8") as f:
+                            f.write(content)
+                        logger.debug("Patched file: %s", change.path)
+                    else:
+                        logger.warning(
+                            "Patch target file does not exist: %s — creating it",
+                            change.path,
+                        )
+                        os.makedirs(os.path.dirname(file_path), exist_ok=True)
+                        with open(file_path, "w", encoding="utf-8") as f:
+                            f.write(change.new_content)
+            except Exception as e:
+                logger.warning("Failed to apply patch to %s: %s", change.path, e)
+                # Continue with other patches — don't fail the whole validation
+
+        return clone_path
