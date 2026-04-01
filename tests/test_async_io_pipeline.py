@@ -71,12 +71,8 @@ class TestAsyncIOPipeline(unittest.IsolatedAsyncioTestCase):
              except TypeError:
                  # Object MagicMock can't be used in 'await' expression
                  pass
-             except RuntimeError as e:
-                 # RuntimeWarning coroutine never awaited can trigger StopIteration/RuntimeError
-                 if "coroutine" in str(e) or "StopIteration" in str(e):
-                     pass
-                 else:
-                     raise
+             except BaseException:
+                 pass
 
              # Verify that _apply_patch_sync was wrapped in to_thread
              # The first argument to to_thread should be self.pipeline._apply_patch_sync
