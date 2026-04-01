@@ -218,6 +218,7 @@ class MinimaxProvider(LLMProvider):
     def __init__(self, config: LLMConfig):
         super().__init__(config)
         import asyncio
+
         import httpx
 
         headers = {

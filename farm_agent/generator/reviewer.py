@@ -15,7 +15,7 @@ import json
 import logging
 import re
 
-from farm_agent.core.models import Contribution, Finding, RepoContext
+from farm_agent.core.models import Contribution, RepoContext
 from farm_agent.llm.provider import LLMProvider
 
 logger = logging.getLogger(__name__)
@@ -135,7 +135,7 @@ OUTPUT STRICT JSON — no markdown, no explanation outside the JSON:
 
 """
         prompt += "\n\n".join(file_blocks)
-        prompt += f"""
+        prompt += """
 
 ## YOUR TASK
 

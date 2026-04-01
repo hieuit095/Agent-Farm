@@ -228,7 +228,7 @@ class GitHubClient:
                     return True
             # 204 No Content → no limits
             return False
-        except Exception as exc:
+        except Exception:
             return False
 
     # ── Rate Limit ─────────────────────────────────────────────────────────
@@ -434,8 +434,8 @@ class GitHubClient:
         author_email = "unknown@contrib.ai"
         author_name = "ContribAI"
         try:
-            from datetime import datetime, timedelta, UTC
             import random
+            from datetime import UTC, datetime, timedelta
             if not hasattr(self, "_cached_user"):
                 self._cached_user = await self.get_authenticated_user()
 
@@ -802,7 +802,7 @@ class GitHubClient:
             return await self._get(
                 f"/repos/{owner}/{repo}/issues/{issue_number}/timeline",
             )
-        except (httpx.HTTPError, asyncio.TimeoutError) as e:
+        except (TimeoutError, httpx.HTTPError) as e:
             logger.error("get_issue_timeline failed for %s/%s: %s — timeline unavailable",
                          owner, repo, e)
             return []
@@ -825,7 +825,7 @@ class GitHubClient:
                 f"/repos/{owner}/{repo}/commits/{ref}/check-runs",
                 params={"per_page": 100},
             )
-        except (httpx.HTTPError, asyncio.TimeoutError) as e:
+        except (TimeoutError, httpx.HTTPError) as e:
             logger.error("get_combined_status failed for %s/%s: %s — CI status unknown",
                          owner, repo, e)
             return None
@@ -868,7 +868,7 @@ class GitHubClient:
                 params={"per_page": 100},
             )
             return data.get("check_runs", [])
-        except Exception as exc:
+        except Exception:
             return []
 
     async def download_check_run_log(self, owner: str, repo: str, check_run_id: int) -> str:
@@ -981,7 +981,7 @@ class GitHubClient:
         try:
             async with self._sem:
                 return await self._post(url, json={"content": reaction})
-        except Exception as exc:
+        except Exception:
             return None
 
     # ── Style Mimicry ──────────────────────────────────────────────────────
@@ -1008,7 +1008,7 @@ class GitHubClient:
                     "per_page": min(limit * 6, 100),  # over-fetch to survive filtering
                 },
             )
-        except Exception as exc:
+        except Exception:
             return []
 
         merged: list[dict] = []
@@ -1060,7 +1060,7 @@ class GitHubClient:
                     "per_page": min(limit * 2, 10),
                 },
             )
-        except Exception as exc:
+        except Exception:
             return ""
 
         comments_parts: list[str] = []
@@ -1180,7 +1180,7 @@ class GitHubClient:
             try:
                 repo_details = await self.get_repo_details(owner, repo_name)
                 stars = getattr(repo_details, "stars", 0) or 0
-            except Exception as exc:
+            except Exception:
                 return None
 
             if stars < min_stars:

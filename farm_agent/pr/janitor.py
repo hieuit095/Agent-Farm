@@ -12,9 +12,9 @@ import json
 import logging
 import re
 
+from farm_agent.core.config import LLMConfig
 from farm_agent.github.client import GitHubClient
 from farm_agent.llm.provider import MinimaxProvider
-from farm_agent.core.config import LLMConfig
 
 logger = logging.getLogger(__name__)
 
@@ -175,7 +175,7 @@ class PRJanitor:
                         try:
                             await self._github.delete_branch(owner, repo_name, head_branch)
                             logger.info("  Branch '%s' deleted for GARBAGE PR #%d.", head_branch, pr_number)
-                        except Exception as exc:
+                        except Exception:
                             pass
                     elif head_branch:
                         logger.info(

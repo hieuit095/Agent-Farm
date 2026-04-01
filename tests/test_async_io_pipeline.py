@@ -2,9 +2,19 @@
 import asyncio
 import os
 import unittest
-from unittest.mock import MagicMock, patch, call
-from farm_agent.orchestrator.pipeline import ContribPipeline
+from unittest.mock import MagicMock, patch
+import sys
+
+sys.modules["git"] = MagicMock()
+sys.modules["pydantic"] = MagicMock()
+sys.modules["yaml"] = MagicMock()
+sys.modules["httpx"] = MagicMock()
+sys.modules["pydantic_settings"] = MagicMock()
+sys.modules["aiosqlite"] = MagicMock()
+
 from farm_agent.core.models import FileChange
+from farm_agent.orchestrator.pipeline import ContribPipeline
+
 
 class TestAsyncIOPipeline(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
@@ -24,11 +34,21 @@ class TestAsyncIOPipeline(unittest.IsolatedAsyncioTestCase):
         async def mock_to_thread_func(func, *args, **kwargs):
             if func == os.makedirs:
                 return None
+            elif func == self.pipeline._apply_patch_sync:
+                return None
             return await asyncio.to_thread(func, *args, **kwargs)
 
         mock_to_thread.side_effect = mock_to_thread_func
 
-        changes = [FileChange(path="test.py", new_content="print(1)", is_new_file=True)]
+        class DummyFileChange:
+            def __init__(self, path, new_content, is_new_file=False, is_deleted=False, original_content=None):
+                self.path = path
+                self.new_content = new_content
+                self.is_new_file = is_new_file
+                self.is_deleted = is_deleted
+                self.original_content = original_content
+
+        changes = [DummyFileChange(path="test.py", new_content="print(1)", is_new_file=True)]
         tests_added = []
 
         # We need to mock _apply_patch_sync because it's called via to_thread
@@ -37,13 +57,19 @@ class TestAsyncIOPipeline(unittest.IsolatedAsyncioTestCase):
         # Also need to mock _do_clone inside the function or just mock the whole to_thread
         # Let's simplify and just check calls to mock_to_thread
 
-        with patch("farm_agent.orchestrator.pipeline.asyncio.gather", new_callable=unittest.IsolatedAsyncioTestCase.async_mock) as mock_gather:
+        with patch("farm_agent.orchestrator.pipeline.asyncio.gather", new_callable=unittest.mock.AsyncMock) as mock_gather:
              # Reset mock to avoid noise from previous setups
              mock_to_thread.reset_mock()
+
+             # Instead of testing mock_to_thread side effect which may raise warnings because of awaited un-awaited asyncio task logic,
+             # let's test if asyncio.to_thread was called with expected arguments.
+             mock_to_thread.return_value = asyncio.Future()
+             mock_to_thread.return_value.set_result(None)
 
              # Mock _clone_cache
              self.pipeline._clone_cache = {"url": "/tmp/clone"}
 
+             # Mock awaitable object for mock_to_thread_func when it returns from _apply_patch_sync
              await self.pipeline._clone_and_patch_repo("url", changes, tests_added)
 
              # Verify that _apply_patch_sync was wrapped in to_thread
@@ -57,11 +83,20 @@ class TestAsyncIOPipeline(unittest.IsolatedAsyncioTestCase):
              self.assertTrue(found, "Expected _apply_patch_sync to be called via to_thread")
 
     @patch("farm_agent.orchestrator.pipeline.os.makedirs")
-    @patch("farm_agent.orchestrator.pipeline.open", create=True)
+    @patch("farm_agent.orchestrator.pipeline.open", new_callable=unittest.mock.mock_open, create=True)
     @patch("farm_agent.orchestrator.pipeline.os.path.exists")
     def test_apply_patch_sync_correctness(self, mock_exists, mock_open, mock_makedirs):
         clone_path = "/tmp/clone"
-        change = FileChange(path="new.py", new_content="print('hello')", is_new_file=True)
+
+        class DummyFileChange:
+            def __init__(self, path, new_content, is_new_file=False, is_deleted=False, original_content=None):
+                self.path = path
+                self.new_content = new_content
+                self.is_new_file = is_new_file
+                self.is_deleted = is_deleted
+                self.original_content = original_content
+
+        change = DummyFileChange(path="new.py", new_content="print('hello')", is_new_file=True)
 
         # Mock os.path.normpath to return a predictable path
         with patch("farm_agent.orchestrator.pipeline.os.path.normpath", side_effect=lambda x: x):
@@ -70,5 +105,7 @@ class TestAsyncIOPipeline(unittest.IsolatedAsyncioTestCase):
 
                 # Check if makedirs and open were called
                 mock_makedirs.assert_called()
-                mock_open.assert_called_with("new.py", "w", encoding="utf-8")
+                # normpath is mocked to return the argument, so os.path.join(clone_path, change.path) is used
+                expected_path = os.path.join(clone_path, "new.py")
+                mock_open.assert_called_with(expected_path, "w", encoding="utf-8")
                 mock_open().write.assert_called_with("print('hello')")

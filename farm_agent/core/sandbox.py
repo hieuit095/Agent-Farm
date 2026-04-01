@@ -5,12 +5,10 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-import re
 import uuid
 from pathlib import Path
 from typing import Any
 
-import requests
 import docker
 from docker.errors import APIError, ImageNotFound, NotFound
 from docker.models.containers import Container
@@ -117,32 +115,32 @@ def detect_language_from_extensions(repo_path: str | Path) -> str:
     outnumber Python files despite it being a Python backend.
     """
     repo_dir = Path(repo_path)
-    
+
     # ── 1. Manifest Priority Layer ──
     if (repo_dir / "package.json").exists():
         if (repo_dir / "tsconfig.json").exists():
             return "typescript"
         return "javascript"
-    
+
     if (repo_dir / "Cargo.toml").exists():
         return "rust"
-        
+
     if (
-        (repo_dir / "requirements.txt").exists() or 
-        (repo_dir / "pyproject.toml").exists() or 
+        (repo_dir / "requirements.txt").exists() or
+        (repo_dir / "pyproject.toml").exists() or
         (repo_dir / "setup.py").exists()
     ):
         return "python"
-        
+
     if (repo_dir / "go.mod").exists():
         return "go"
-        
+
     if (repo_dir / "pom.xml").exists() or (repo_dir / "build.gradle").exists():
         return "java"
-        
+
     if (repo_dir / "Gemfile").exists():
         return "ruby"
-        
+
     if (repo_dir / "composer.json").exists():
         return "php"
 
@@ -520,7 +518,7 @@ class DockerSandbox:
 
         try:
             return await asyncio.wait_for(wait_task, timeout=self._REMOVAL_GRACE_SECONDS)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             logger.warning("Sandbox wait task did not finish before cleanup grace period expired")
             return fallback_exit_code
         except NotFound:
@@ -533,7 +531,7 @@ class DockerSandbox:
         """Resolve stdout and stderr from the attach task."""
         try:
             return await asyncio.wait_for(output_task, timeout=self._REMOVAL_GRACE_SECONDS)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             logger.warning("Sandbox output stream did not close before cleanup grace period expired")
             return "", ""
         except (APIError, NotFound) as exc:
