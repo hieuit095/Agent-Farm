@@ -1,160 +1,141 @@
-# 🗺️ PROJECT_MAP.md
+# Architecture Blueprint & Project Map
 
-> **Architecture Blueprint for Farm-Agent (v2.5.0)**
-> This document reflects the raw reality of the active codebase.
+This document serves as the architectural blueprint for the Farm-Agent codebase. It outlines the core components, directory structures, and execution flows.
 
 ## 1. System Overview & Tech Stack
 
-Farm-Agent is an autonomous AI agent that discovers open-source GitHub repositories, analyzes their code, generates fixes, submits pull requests, monitors feedback, and auto-responds without human intervention.
-
-| Layer | Technology | Role |
-| :--- | :--- | :--- |
-| **Language** | Python 3.11+ | Core implementation language using `async/await` for all I/O |
-| **CLI Framework** | `click` + `rich` | Rich command-line interface, logging, and tables |
-| **HTTP Client** | `httpx` (async) | Persistent `AsyncClient` for GitHub API and LLM API requests |
-| **Database** | SQLite via `aiosqlite` | Persistent memory storage with WAL mode (`memory.db`) |
-| **LLM Provider** | Minimax (ABAB models) | Primary LLM engine for analysis, generation, and issue solving |
-| **Config** | `pydantic` + `PyYAML` | Configuration management via `FarmAgentConfig` and `config.yaml` |
-| **Docker** | `docker` (Python SDK) | Polyglot sandbox environment for testing and validating patches |
-| **RAG** | `chromadb` (ephemeral) | In-memory vector database for semantic search and context retrieval |
-| **Tests & Linting** | `pytest`, `ruff` | Testing framework and code styling/linting |
+| Component | Technology | Role in System |
+|---|---|---|
+| **Core Language** | Python (3.11+) | The foundation of the agent. Used for all primary logic and orchestration. |
+| **Build System** | Hatchling | Modern Python build backend specified in `pyproject.toml`. |
+| **CLI Framework** | Click | Powers the main interface and command-line parsing. |
+| **Formatting/UI** | Rich | Provides color, styling, and structured output (panels/tables) for the terminal. |
+| **API Client** | HTTPX | Used to handle asynchronous, non-blocking requests to the GitHub API. |
+| **Memory / Storage** | SQLite (`aiosqlite`) | Provides a persistent memory layer to track analyzed repositories, API usage, and PR outcomes. Uses Write-Ahead Logging (WAL). |
+| **LLM Integrations** | Minimax / Gemini / OpenAI / Anthropic | Generates code changes, analyzes findings, and determines project context. Managed via an extensible provider interface. |
+| **Data Validation** | Pydantic | Powers the structured parsing and validation of the complex configuration files (`config.yaml`). |
+| **RAG/Vector DB** | ChromaDB | Used specifically for local, ephemeral semantic search across a repository to find relevant code chunks. |
 
 ## 2. Directory Structure
 
 ```text
 farm_agent/
-├── __init__.py                    # Version (__version__)
-├── agents/                        # Sub-agent registry wrapping core components
+├── agents/             # Optional sub-agents and registries
 │   └── registry.py
-├── analysis/                      # CodeAnalyzer and progressive skills
-│   ├── analyzer.py
+├── analysis/           # Code analysis logic
+│   ├── analyzer.py     # CodeAnalyzer core entrypoint
+│   ├── language_rules.py
 │   ├── mapper.py
-│   └── skills.py
-├── cli/                           # Click CLI and Interactive TUI
-│   ├── __init__.py
-│   ├── main.py
+│   ├── skills.py
+│   └── strategies.py
+├── cli/                # The main command-line interface
+│   ├── main.py         # The primary entrypoint: defines run, solve, etc.
 │   └── tui.py
-├── core/                          # Shared models, config, sandbox, and RAG
-│   ├── config.py
+├── core/               # Foundational classes and data models
+│   ├── config.py       # Configuration parser via Pydantic
 │   ├── daily_log.py
 │   ├── exceptions.py
 │   ├── leaderboard.py
 │   ├── logger.py
 │   ├── middleware.py
-│   ├── models.py
+│   ├── models.py       # Typed definitions (Repository, PipelineResult, etc.)
 │   ├── notifier.py
 │   ├── profiles.py
 │   ├── quotas.py
-│   ├── rag.py
+│   ├── rag.py          # Ephemeral ChromaDB integration
 │   ├── retry.py
 │   └── sandbox.py
-├── generator/                     # Contribution generation and scoring
-│   ├── engine.py
+├── generator/          # Logic for generating actual code changes
+│   ├── engine.py       # Interacts with the LLM to output file patches
+│   ├── reviewer.py
 │   └── scorer.py
-├── github/                        # GitHub API client and repo discovery
-│   ├── client.py
-│   ├── discovery.py
+├── github/             # Interaction layer with GitHub's APIs
+│   ├── client.py       # The HTTPX client implementation
+│   ├── discovery.py    # Logic to search and find new repositories
 │   └── guidelines.py
-├── issues/                        # Issue solver logic
-│   └── solver.py
-├── llm/                           # LLM provider abstractions
+├── issues/             # Issue-specific code
+│   └── solver.py       # Maps open issues to solvable tasks
+├── llm/                # Providers for language models
 │   ├── agents.py
-│   ├── models.py
-│   ├── provider.py
+│   ├── context.py
+│   ├── models.py       # Tasks and routing logic
+│   ├── provider.py     # Interface for the LLM integrations
 │   └── router.py
-├── notifications/                 # External notification integrations
+├── notifications/
 │   └── notifier.py
-├── orchestrator/                  # Main execution loops and memory layer
-│   ├── __init__.py
+├── orchestrator/       # The brains orchestrating the entire lifecycle
 │   ├── human.py
-│   ├── memory.py
-│   └── pipeline.py
-├── plugins/                       # Extensibility plugins
-├── pr/                            # Pull Request lifecycle, patrol, and janitor
-│   ├── janitor.py
-│   ├── manager.py
+│   ├── memory.py       # SQLite database logic
+│   └── pipeline.py     # ContribPipeline: connects discovery to generation to PR
+├── plugins/
+│   └── base.py
+├── pr/                 # PR management layer
+│   ├── janitor.py.DISABLED
+│   ├── manager.py      # Creates and monitors pull requests
 │   └── patrol.py
-├── scheduler/                     # Job scheduling
-├── templates/                     # Jinja2 templates for PRs and commits
+├── templates/
+│   ├── builtin/
 │   └── registry.py
-└── tools/                         # Tool protocol for LLM function calling
+└── tools/
     └── protocol.py
 ```
 
 ## 3. Core Module Dependency Graph
 
 ```mermaid
-graph TD
-    CLI[cli/main.py] --> Orchestrator[orchestrator/pipeline.py]
-    CLI --> SuperHuman[orchestrator/human.py]
-    CLI --> PRPatrol[pr/patrol.py]
-    CLI --> PRJanitor[pr/janitor.py]
+graph TD;
+    CLI[CLI (main.py)] --> Orchestrator[Orchestrator (pipeline.py)];
+    Orchestrator --> LLM[LLM Provider (minimax, etc.)];
+    Orchestrator --> GitHub[GitHub API (client.py)];
+    Orchestrator --> Memory[(SQLite DB)];
 
-    Orchestrator --> Config[core/config.py]
-    Orchestrator --> GitHub[github/client.py]
-    Orchestrator --> Memory[orchestrator/memory.py]
-    Orchestrator --> Analyzer[analysis/analyzer.py]
-    Orchestrator --> Generator[generator/engine.py]
-    Orchestrator --> PRManager[pr/manager.py]
+    Orchestrator --> Analyzer[Code Analyzer];
+    Orchestrator --> Generator[Contribution Generator];
+    Orchestrator --> PRManager[PR Manager];
 
-    Analyzer --> Skills[analysis/skills.py]
-    Analyzer --> LLM[llm/provider.py]
-
-    Generator --> Sandbox[core/sandbox.py]
-    Generator --> RAG[core/rag.py]
-    Generator --> LLM
-
-    SuperHuman --> Orchestrator
-    SuperHuman --> PRPatrol
-
-    PRPatrol --> GitHub
-    PRPatrol --> LLM
-    PRPatrol --> Memory
-
-    PRJanitor --> GitHub
-    PRJanitor --> LLM
-
-    GitHub --> Retry[core/retry.py]
+    Generator --> RAG[RAG Engine (ChromaDB)];
+    Analyzer --> GitHub;
+    Generator --> LLM;
 ```
 
 ## 4. Core Execution Loops / Entry Points
 
-### Main Pipeline (`run`, `hunt`, `target`)
-1. **Discovery:** Finds open-source repositories based on language and star configurations (`github/discovery.py`).
-2. **Analysis:** Fetches the file tree, loads progressive skills, and uses the LLM to analyze the code for issues (`analysis/analyzer.py`).
-3. **Filtering:** Applies strict Anti-Farming gates to drop trivial or low-impact findings.
-4. **Generation:** Utilizes an ephemeral ChromaDB RAG to retrieve cross-file context. The LLM generates code patches iteratively using function-calling to read actual file contents (`generator/engine.py`).
-5. **Validation:** Executes the patch in an isolated Docker container appropriate for the repository's language to ensure tests pass (`core/sandbox.py`).
-6. **Submission:** Forks the repository, creates a branch, commits the changes with DCO sign-off, and opens a Pull Request (`pr/manager.py`).
+### Single Repo Run Flow
+When executed against a specific repository via `farm_agent target <url>`:
+1. **Initialize:** Loads config, initializes the `ContribPipeline` orchestrator.
+2. **Fetch:** Pulls the file tree and metadata from the GitHub API.
+3. **Analyze:** The `CodeAnalyzer` scans the repository code, identifying potential bugs, security issues, or refactoring opportunities.
+4. **Filter:** The findings are heavily filtered via the Anti-Farming gate.
+5. **Context/RAG:** The `ContributionGenerator` uses the LLM (and ChromaDB) to pinpoint exact file modifications.
+6. **Generate PR:** The patch is generated.
+7. **Submit:** The `PRManager` submits the proposed patch to the remote GitHub repository.
 
-### Super Human Mode (`superhuman`)
-An infinite 24/7 loop (`orchestrator/human.py`) that interleaves Hunting and Patrolling.
-- Randomizes daily PR quotas (e.g., 4-10 PRs).
-- Incorporates human-like delays (circadian rhythm, typing delays, coffee breaks).
-- Shifts to Patrol-only mode once the daily PR quota is reached.
-
-### PR Patrol (`patrol`)
-Monitors open PRs for maintainer feedback (`pr/patrol.py`).
-- Fetches unread review comments and uses the LLM to classify them.
-- Auto-generates code fixes for `CODE_CHANGE` requests and pushes them.
-- Answers maintainer `QUESTION`s and addresses `STYLE_FIX`es.
-- Auto-heals CI failures by analyzing CI logs and pushing corrective commits (up to a limit).
-
-### PR Janitor (`janitor`)
-Scans all open PRs created by the bot (`pr/janitor.py`).
-- Evaluates PR titles and bodies using the Minimax LLM.
-- Identifies and automatically closes any PR deemed "GARBAGE" (e.g., exploratory, docs, formatting) while deleting its branch.
+### Issue Solver Flow
+When executed via `farm_agent solve <url>`:
+1. **Fetch Open Issues:** Connects to GitHub to fetch a list of open issues for the repository.
+2. **Filter & Classify:** Determines which issues are reasonably solvable based on complexity heuristics.
+3. **Deep Solve:** Triggers `solve_issue_deep()`. It analyzes the required code path and proposes a solution.
+4. **Generate & PR:** Converts the proposed fix into a full Pull Request designed to automatically close the target issue.
 
 ## 5. Database/State Schema
 
-State is persisted using SQLite with WAL mode (`orchestrator/memory.py`).
+The local persistent storage is managed by SQLite (via `aiosqlite`). Key schemas identified in `memory.py` include:
 
-- **`analyzed_repos`:** Tracks repositories that have been analyzed (Columns: `full_name`, `analyzed_at`, `findings`).
-- **`submitted_prs`:** Stores all submitted PRs and issue proposals (Columns: `repo`, `pr_number`, `status`, `type`, `ci_fix_attempts`, `discussion_replies`).
-- **`findings_cache`:** Caches analysis findings to avoid redundant LLM calls (Columns: `id`, `repo`, `type`, `severity`, `status`).
-- **`run_log`:** Maintains a history of pipeline runs (Columns: `started_at`, `repos_analyzed`, `prs_created`).
-- **`pr_outcomes`:** Logs PR merge/close outcomes and maintainer feedback text (Columns: `repo`, `pr_number`, `outcome`).
-- **`repo_preferences`:** Stores learned preferences for repositories (Columns: `repo`, `preferred_types`, `merge_rate`).
-- **`blacklisted_repos`:** Repositories banned from future PRs (Columns: `repo`, `reason`, `blacklisted_at`).
-- **`api_usage_log`:** Tracks LLM API call usage for sliding window quotas (Columns: `timestamp`, `provider`).
-- **`task_schedule`:** Throttles cron-like tasks (Columns: `task_key`, `next_run`).
+**Table: `analyzed_repos`**
+- `full_name`: The unique identifier (e.g., `owner/repo`).
+- `language`: The primary programming language.
+- `stars`: Repository star count at time of analysis.
+- `analyzed_at`: Timestamp.
+- `findings`: Number of identified findings.
+
+**Table: `submitted_prs`**
+- `id`: Primary incremented key.
+- `repo`: The target repository.
+- `pr_number`: The assigned number on GitHub.
+- `pr_url`: The direct link to the PR.
+- `title`: PR title.
+- `type`: Type of contribution (e.g., security_fix, refactor).
+- `status`: Current status ('open', 'merged', 'closed').
+- `branch`: The source branch.
+- `ci_fix_attempts`: Number of automated CI fixes attempted.
+- `discussion_replies`: Number of automated discussion replies.
