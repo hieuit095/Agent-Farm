@@ -4,92 +4,107 @@
 
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-3776AB?logo=python&logoColor=white)](https://python.org)
 [![Docker](https://img.shields.io/badge/docker-ready-2496ED?logo=docker&logoColor=white)](docker-compose.yml)
-[![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue)](LICENSE)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 [![Code Style: Ruff](https://img.shields.io/badge/code%20style-ruff-000000?logo=ruff)](https://github.com/astral-sh/ruff)
 [![Tests](https://img.shields.io/badge/tests-pytest-brightgreen?logo=pytest)](tests/)
 
 ## Overview
-Farm-Agent is an autonomous AI agent that discovers open-source GitHub repositories, analyzes their code for real bugs and quality issues, generates fixes, and submits pull requests. It operates under a strict anti-farming filter to block trivial changes and disguised its operational patterns behind realistic human behavioral simulation to avoid spam detection.
+
+Farm-Agent is a highly advanced, autonomous AI software engineer designed to actively discover, analyze, and contribute to open-source GitHub repositories. Rather than simply raising PRs blindly, it utilizes an "Issue-First" methodology, validates patches via isolated Docker sandboxes, and orchestrates its actions using a "Super Human" mode to mimic organic, human developer workflows and circumvent spam detection.
 
 ## Key Features
-- **Multi-strategy analysis**: Runs security, code quality, performance, and UI/UX analyzers concurrently against repository file trees.
-- **Issue-first pipeline**: Solves open GitHub issues before falling back to static analysis, prioritizing what maintainers actually want fixed.
-- **Polyglot Sandbox Validation**: Uses isolated Docker containers to validate patches for Python, Node.js, TypeScript, Rust, Go, Java, C#, Ruby, PHP, C, and C++ before any PR is created.
-- **X-Ray Vision**: Builds a local ChromaDB vector index of the repository using a word-frequency embedding model to ensure patches are contextually accurate and don't break downstream code.
-- **PR Patrol**: Monitors open PRs for maintainer comments, auto-generates code fixes, answers questions, re-signs CLAs, and addresses style feedback.
-- **Anti-Farming Filter**: Drops trivial/low-impact findings and filters out any finding where the title or description contains farming keywords.
-- **Super Human Mode**: Operates on a stochastic daily schedule with randomized wake times, typing WPM simulation, probabilistic ghosting, and circadian rhythm simulation.
-- **Familiar Grounds (Alumni Repo Prioritization)**: Scores and prioritizes repositories the user has previously contributed to, syncing merged PR history from GitHub.
+
+- **Multi-Strategy Analysis:** Employs concurrent security, code quality, UI/UX, and performance analyzers.
+- **Issue-First Pipeline:** Prefers solving open GitHub issues before falling back to static analysis to ensure contributions are valuable to maintainers.
+- **Polyglot Sandbox Validation:** Validates patches dynamically in isolated Docker containers before opening any PRs, supporting languages like Python, Node.js, TypeScript, Go, Rust, and more.
+- **Context-Aware Code Generation:** Integrates ChromaDB for Local Retrieval-Augmented Generation (RAG) to understand repository-wide code contexts using word-frequency embedding models.
+- **PR Patrol (Auto-Heal):** Continuously monitors its opened pull requests, reading maintainer feedback, fixing code formatting, answering questions, and pushing updates automatically.
+- **Super Human Mode:** Operates on a stochastic daily schedule simulating human workflows (wake times, circadian rhythm, typing speeds, stress breaks, lunch breaks).
+- **Familiar Grounds Sync:** Prioritizes and tracks repositories where the user has previously successfully merged PRs, continuously discovering VIP open-source projects.
+- **Anti-Farming Filter:** A zero-tolerance gatekeeper that drops low-impact (e.g., formatting, docs, typo) contributions to maintain high submission quality.
+- **Janitor Mode:** Sweeps through all opened PRs, using an LLM to evaluate and destroy garbage or exploratory PRs.
 
 ## System Architecture (High-Level)
-Farm-Agent features a Click-based CLI that orchestrates the entire agent pipeline. The main orchestrator (`ContribPipeline` and `SuperHumanLoop`) interacts with an agentic LLM Engine (primarily using Minimax models), a persistent SQLite Memory (with WAL mode), and the GitHub API to discover repositories, fetch code, and submit PRs. The Code Generation Engine utilizes an ephemeral RAG system (ChromaDB) to gain cross-file context and uses Docker to validate patches in a polyglot sandbox environment. An event-driven architecture routes findings through a series of middlewares (RateLimit, DCO, QualityGate) to ensure high-quality and safe contributions.
+
+Farm-Agent is built on a rich **Click** command-line interface. The core execution engine revolves around `ContribPipeline` and `SuperHumanLoop`, orchestrating multiple sub-systems:
+- **LLM Engine:** Multi-model routing (defaulting to Minimax models) handles code generation, finding evaluation, and vibe checks.
+- **SQLite Memory:** Persistent state and run logs are managed via `aiosqlite` using Write-Ahead Logging (WAL) mode for concurrency safety.
+- **Sandbox Environment:** Patches are dynamically tested within ephemeral Docker environments.
+- **GitHub Integration:** An asynchronous HTTPX client orchestrates repository discovery, issue tracking, and PR creations securely.
 
 ## Getting Started
 
 ### Prerequisites
-- Python 3.11 or higher
-- Docker 7.1 or higher (for Sandbox Validation)
-- GitHub Personal Access Token (with `repo` scope)
-- LLM API Key (Minimax API key required by default)
+
+- **Python**: `>= 3.11`
+- **Docker**: `>= 7.1` (Required for Sandbox Validation)
+- **Git**: `>= 2.0` (For patching and cloning operations)
 
 ### Installation
-1. Clone the repository:
-   ```sh
-   git clone https://github.com/hieuit095/Farm-Agent.git
-   cd Farm-Agent
-   ```
 
-2. Install the package with dev dependencies:
-   ```sh
-   make install
-   ```
+Clone the repository and build the local development environment:
+
+```sh
+git clone https://github.com/hieuit095/Farm-Agent.git
+cd Farm-Agent
+
+# Use the included Makefile to install dependencies (hatchling, pytest, ruff, etc.)
+make install
+```
 
 ### Environment Variables
-Farm-Agent uses a Pydantic-based configuration system `config.yaml` with the following key environment variables as fallbacks:
-- `GITHUB_TOKEN`: Your GitHub Personal Access Token.
-- `MINIMAX_API_KEY`: Your Minimax API Key.
+
+Configuration is handled primarily via `config.yaml`. To authenticate external services, the following environment variables are required (you can set these in your environment or via `.env` files in docker-compose):
+
+- `GITHUB_TOKEN`: Your GitHub Personal Access Token (requires `repo` scope).
+- `MINIMAX_API_KEY`: API Key for Minimax LLM (default engine).
 - `MINIMAX_GROUP_ID`: Your Minimax Group ID.
 
-Alternatively, copy `config.example.yaml` to `config.yaml` and configure your credentials.
+Alternatively, you may also define `GEMINI_API_KEY` or other provider variables as needed.
 
 ## Usage
 
-**Run a single hunt round (discover repos, analyze, create PRs):**
+Farm-Agent provides several powerful CLI commands:
+
+**1. Run a Hunt Mode Round (Discover, analyze, and generate PRs)**
 ```sh
-farm_agent hunt --rounds 1 --dry-run
+farm_agent hunt --rounds 5 --delay 30 --mode both
 ```
 
-**Target a specific repository:**
+**2. Target a Specific Repository**
 ```sh
-farm_agent target https://github.com/owner/repo --dry-run
+farm_agent target https://github.com/owner/repo
 ```
 
-**Solve open issues in a repository:**
+**3. Solve Open Issues on a Repository**
 ```sh
-farm_agent solve https://github.com/owner/repo
+farm_agent solve https://github.com/owner/repo --max-issues 3
 ```
 
-**Run 24/7 autonomous mode (Super Human):**
+**4. Start Super Human Mode (24/7 Autonomous Daemon)**
 ```sh
 farm_agent superhuman
 ```
+*Note: You can also run the 24/7 autonomous mode via Docker Compose:* `docker compose up -d superhuman`
 
-**Monitor open PRs and auto-respond to feedback (PR Patrol):**
+**5. PR Patrol (Review and react to maintainer feedback)**
 ```sh
 farm_agent patrol
 ```
 
-**Scan and auto-close garbage PRs via LLM (Janitor):**
+**6. Janitor Sweep (Evaluate and close garbage PRs)**
 ```sh
 farm_agent janitor
 ```
 
-**Show overall statistics:**
+**7. Check System Statistics & Status**
 ```sh
 farm_agent stats
+farm_agent system-status
 ```
 
 ## Contributing & License
-We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for details on our code of conduct, and the process for submitting pull requests to us.
+
+We welcome contributions! Please refer to the [CONTRIBUTING.md](CONTRIBUTING.md) for details on submitting pull requests to the project. Check out the [ARCHITECTURE_AND_WORKFLOW.md](ARCHITECTURE_AND_WORKFLOW.md) for in-depth technical details.
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
