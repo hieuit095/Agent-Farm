@@ -878,7 +878,6 @@ class CodeAnalyzer:
 
     def _filter_severity(self, findings: list[Finding]) -> list[Finding]:
         """Filter findings by minimum severity threshold."""
-        order = [Severity.LOW, Severity.MEDIUM, Severity.HIGH, Severity.CRITICAL]
         # Define a mapping from Severity enum to an integer order for comparison
         severity_order = {
             Severity.LOW.value: 0,
