@@ -37,7 +37,7 @@ class TestAsyncIOPipeline(unittest.IsolatedAsyncioTestCase):
         # Also need to mock _do_clone inside the function or just mock the whole to_thread
         # Let's simplify and just check calls to mock_to_thread
 
-        with patch("farm_agent.orchestrator.pipeline.asyncio.gather", new_callable=unittest.IsolatedAsyncioTestCase.async_mock) as mock_gather:
+        with patch("farm_agent.orchestrator.pipeline.asyncio.gather", new_callable=unittest.mock.AsyncMock) as mock_gather:
              # Reset mock to avoid noise from previous setups
              mock_to_thread.reset_mock()
 
@@ -70,5 +70,6 @@ class TestAsyncIOPipeline(unittest.IsolatedAsyncioTestCase):
 
                 # Check if makedirs and open were called
                 mock_makedirs.assert_called()
-                mock_open.assert_called_with("new.py", "w", encoding="utf-8")
-                mock_open().write.assert_called_with("print('hello')")
+                mock_open.assert_called_with("/tmp/clone/new.py", "w", encoding="utf-8")
+                # When using 'with open(...) as f:', the file object is the context manager's __enter__ return value.
+                mock_open.return_value.__enter__.return_value.write.assert_called_with("print('hello')")

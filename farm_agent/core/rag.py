@@ -12,7 +12,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
 
@@ -50,10 +50,7 @@ class CodeChunk:
 
 def _should_index_file(path: str) -> bool:
     """Return False for files that should be excluded from RAG indexing."""
-    for pattern in EXCLUDE_PATTERNS:
-        if pattern.search(path):
-            return False
-    return True
+    return all(not pattern.search(path) for pattern in EXCLUDE_PATTERNS)
 
 
 def chunk_file(content: str, file_path: str, chunk_size: int = DEFAULT_CHUNK_SIZE, overlap: int = DEFAULT_CHUNK_OVERLAP) -> list[CodeChunk]:
