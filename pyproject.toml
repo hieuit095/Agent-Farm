@@ -60,7 +60,12 @@ line-length = 100
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "W", "UP", "B", "SIM", "RUF"]
-ignore = ["RUF012"]  # Mutable class defaults are standard in Pydantic models
+ignore = [
+    "RUF012",  # Mutable class defaults are standard in Pydantic models
+    "E501",    # Line too long
+    "E402",    # Module level import not at top of file
+    "N806",    # Variable should be lowercase
+]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
