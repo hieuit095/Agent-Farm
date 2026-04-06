@@ -387,10 +387,10 @@ def superhuman(ctx, time_warp, dry_run, target_repo):
             for sig in (signal.SIGINT, signal.SIGTERM):
                 inner_loop.add_signal_handler(sig, lambda s=sig: _handle_signal(s, shutdown_hook, inner_loop))
 
-        def _handle_signal(sig, hook, l):
+        def _handle_signal(sig, hook, loop_instance):
             console.print(f"[yellow]Received {sig.name} — initiating graceful shutdown...[/yellow]")
-            l.create_task(hook())
-            l.stop()
+            loop_instance.create_task(hook())
+            loop_instance.stop()
 
         try:
             await loop.run_daily_routine(time_warp=time_warp)
@@ -860,10 +860,10 @@ def reset_db(ctx, yes):
     config = load_config(ctx.obj["config_path"])
     db_path = config.storage.db_path
 
-    console.print(f"\n[bold]Database reset[/bold]")
+    console.print("\n[bold]Database reset[/bold]")
     console.print(f"  Path: {db_path}")
-    console.print(f"  Tables to CLEAR: run_log, analyzed_repos")
-    console.print(f"  Tables to KEEP: submitted_prs, blacklisted_repos, repo_preferences")
+    console.print("  Tables to CLEAR: run_log, analyzed_repos")
+    console.print("  Tables to KEEP: submitted_prs, blacklisted_repos, repo_preferences")
 
     if not yes and not click.confirm("\nProceed with reset?"):
         console.print("[dim]Cancelled.[/dim]")
@@ -877,11 +877,10 @@ def reset_db(ctx, yes):
         cur.execute("DELETE FROM run_log")
         cur.execute("DELETE FROM analyzed_repos")
         conn.commit()
-        affected = cur.rowcount
         conn.close()
 
-        console.print(f"[green]✅ Reset complete.[/green]")
-        console.print(f"   Cleared: run_log, analyzed_repos")
+        console.print("[green]✅ Reset complete.[/green]")
+        console.print("   Cleared: run_log, analyzed_repos")
 
     except Exception as e:
         console.print(f"[red]❌ Reset failed: {e}[/red]")
@@ -969,9 +968,9 @@ def vips(ctx, no_sync):
         sys.exit(1)
 
     async def _run():
-        from farm_agent.orchestrator.pipeline import ContribPipeline
-        from farm_agent.orchestrator.memory import Memory
         from farm_agent.orchestrator.human import SuperHumanLoop
+        from farm_agent.orchestrator.memory import Memory
+        from farm_agent.orchestrator.pipeline import ContribPipeline
 
         # Build minimal pipeline + memory for the sync
         pipeline = ContribPipeline(config)
