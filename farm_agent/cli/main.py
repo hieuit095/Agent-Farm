@@ -387,10 +387,10 @@ def superhuman(ctx, time_warp, dry_run, target_repo):
             for sig in (signal.SIGINT, signal.SIGTERM):
                 inner_loop.add_signal_handler(sig, lambda s=sig: _handle_signal(s, shutdown_hook, inner_loop))
 
-        def _handle_signal(sig, hook, l):
+        def _handle_signal(sig, hook, loop_instance):
             console.print(f"[yellow]Received {sig.name} — initiating graceful shutdown...[/yellow]")
-            l.create_task(hook())
-            l.stop()
+            loop_instance.create_task(hook())
+            loop_instance.stop()
 
         try:
             await loop.run_daily_routine(time_warp=time_warp)

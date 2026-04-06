@@ -226,13 +226,12 @@ class ContributionGenerator:
                 # to confirm the file exists in the repo even if we cannot fetch it
                 map_lower = project_map.lower()
                 target_lower = finding.file_path.lower()
-                if target_lower in map_lower or any(
+                if (target_lower in map_lower or any(
                     segment in map_lower for segment in [finding.file_path]
-                ):
+                )) and github_client is not None:
                     # The file IS in the repo (confirmed by map), but we still cannot
                     # fetch it — try one more explicit fetch with a fallback path
-                    if github_client is not None:
-                        for path_variant in [
+                    for path_variant in [
                             finding.file_path,
                             finding.file_path.lstrip("/"),
                             finding.file_path.replace("//", "/"),
@@ -1141,14 +1140,14 @@ class ContributionGenerator:
                         if not matched:
                             search_lines = search.split("\n")
                             content_lines = new_content.split("\n")
-                            stripped_search_lines = [l.lstrip() for l in search_lines]
+                            stripped_search_lines = [line.lstrip() for line in search_lines]
 
                             # Slide a window of len(search_lines) over content
                             window = len(search_lines)
                             if window >= 2:  # Require at least 2 lines for safety
                                 for start_idx in range(len(content_lines) - window + 1):
                                     candidate = content_lines[start_idx : start_idx + window]
-                                    candidate_stripped = [l.lstrip() for l in candidate]
+                                    candidate_stripped = [line.lstrip() for line in candidate]
                                     if candidate_stripped == stripped_search_lines:
                                         # Match found — re-indent replacement
                                         # using the original file's leading whitespace

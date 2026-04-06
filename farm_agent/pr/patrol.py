@@ -803,7 +803,7 @@ class PRPatrol:
         except yaml.YAMLError as e:
             logger.warning("Failed to parse LLM response as YAML: %s", e)
             raise ValueError(f"LLM returned unparseable YAML: {e}") from e
-        except json.JSONDecodeError as e:
+        except ValueError as e:
             logger.warning("Failed to parse LLM response as JSON: %s", e)
             raise ValueError(f"LLM returned unparseable JSON: {e}") from e
         except Exception as e:

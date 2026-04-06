@@ -1,9 +1,9 @@
 
 import asyncio
 import os
+import sys
 import unittest
 from unittest.mock import MagicMock, patch
-import sys
 
 # Mock pydantic dependencies before importing from farm_agent
 sys.modules['pydantic'] = MagicMock()
@@ -93,11 +93,13 @@ class TestAsyncIOPipeline(unittest.IsolatedAsyncioTestCase):
         change.is_new_file = True
 
         # Mock os.path.normpath to return a predictable path
-        with patch("farm_agent.orchestrator.pipeline.os.path.normpath", side_effect=lambda x: x):
-            with patch("farm_agent.orchestrator.pipeline.os.path.dirname", return_value="/tmp/clone"):
-                self.pipeline._apply_patch_sync(clone_path, change)
+        with (
+            patch("farm_agent.orchestrator.pipeline.os.path.normpath", side_effect=lambda x: x),
+            patch("farm_agent.orchestrator.pipeline.os.path.dirname", return_value="/tmp/clone")
+        ):
+            self.pipeline._apply_patch_sync(clone_path, change)
 
-                # Check if makedirs and open were called
-                mock_makedirs.assert_called()
-                mock_open.assert_called_with("/tmp/clone/new.py", "w", encoding="utf-8")
-                mock_open().__enter__().write.assert_called_with("print('hello')")
+            # Check if makedirs and open were called
+            mock_makedirs.assert_called()
+            mock_open.assert_called_with("/tmp/clone/new.py", "w", encoding="utf-8")
+            mock_open().__enter__().write.assert_called_with("print('hello')")
