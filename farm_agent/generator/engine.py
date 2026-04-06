@@ -61,6 +61,23 @@ def escape_html_xss(text: str) -> str:
     return text
 
 
+from farm_agent.analysis.mapper import RepoMapper
+from farm_agent.core.config import ContributionConfig
+from farm_agent.core.exceptions import ContextMissingError, GenerationError
+from farm_agent.core.models import (
+    Contribution,
+    ContributionType,
+    FileChange,
+    Finding,
+    RepoContext,
+)
+from farm_agent.core.rag import RepoIndexer
+from farm_agent.generator.reviewer import ReviewerAgent
+from farm_agent.llm.context import build_generator_system_prompt
+from farm_agent.llm.provider import LLMProvider
+from farm_agent.tools.protocol import READ_FILE_TOOL_SCHEMA, GitHubTool
+
+
 def _sanitize_text(text: str, field_name: str) -> str:
     """Sanitize free-form LLM text against AI disclosures (Gag Order).
 
@@ -80,28 +97,12 @@ def _sanitize_text(text: str, field_name: str) -> str:
     if not text:
         return text
     if _GHOST_DISCLOSURE_RE.search(text):
-        logger.warning("Gag Order: AI disclosure detected in %s. Aborting.", field_name)
         raise GenerationError(
             f"LLM output in '{field_name}' contains forbidden AI disclosure: "
             f"{_GHOST_DISCLOSURE_RE.findall(text)}"
         )
     return text
 
-from farm_agent.analysis.mapper import RepoMapper
-from farm_agent.core.config import ContributionConfig
-from farm_agent.core.exceptions import ContextMissingError, GenerationError
-from farm_agent.core.models import (
-    Contribution,
-    ContributionType,
-    FileChange,
-    Finding,
-    RepoContext,
-)
-from farm_agent.llm.context import build_generator_system_prompt
-from farm_agent.llm.provider import LLMProvider
-from farm_agent.tools.protocol import READ_FILE_TOOL_SCHEMA, GitHubTool
-from farm_agent.core.rag import RepoIndexer
-from farm_agent.generator.reviewer import ReviewerAgent
 
 logger = logging.getLogger(__name__)
 
@@ -566,8 +567,8 @@ class ContributionGenerator:
                 replace = edit_block.get("replace", "") or ""
                 if search == replace:
                     raise GenerationError(
-                        f"fix_contribution_from_error: corrected patch is a no-op "
-                        f"(search == replace) — aborting."
+                        "fix_contribution_from_error: corrected patch is a no-op "
+                        "(search == replace) — aborting."
                     )
 
             fc = FileChange(
