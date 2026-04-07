@@ -48,7 +48,7 @@ PATROL_WEIGHT = 0.40
 # ── Human Developer Persona — Vietnamese Thoughts ──────────────────────────
 HUMAN_THOUGHTS = {
     "WAKE_UP": [
-        "☀️ Trời sáng rồi! Pha ly cà phê đen rồi xem hôm nay open-source có gì vui không... (Mục tiêu: {limit} PRs)",  # noqa: E501
+        "☀️ Trời sáng rồi! Pha ly cà phê đen rồi xem hôm nay open-source có gì vui không... (Mục tiêu: {limit} PRs)",
         "🌅 Hôm nay code nhẹ nhàng {limit} cái PR rồi lượn đi đọc tài liệu vậy.",
         "☕ Mở mắt, bật máy, pha cà phê... Hôm nay chỉ cần {limit} PRs là đạt chỉ tiêu!",
         "🌤️ Ngày mới bắt đầu! Kế hoạch: gửi {limit} PRs, fix bug, rồi tối đi ăn phở. Let's go!",
@@ -91,7 +91,7 @@ HUMAN_THOUGHTS = {
         "😴 Inbox trống trơn, không có gì cần patrol. Nhàn ghê!",
     ],
     "PATROL_DONE": [
-        "✅ Patrol xong! Đã check {checked} PRs, push {fixes} fix(es), trả lời {replies} comment(s).",  # noqa: E501
+        "✅ Patrol xong! Đã check {checked} PRs, push {fixes} fix(es), trả lời {replies} comment(s).",
         "🛡️ Tuần tra hoàn tất: {checked} PRs reviewed, {fixes} sửa, {replies} phản hồi. Ngon!",
     ],
     "REST_PATROL": [
@@ -100,9 +100,9 @@ HUMAN_THOUGHTS = {
         "📰 Xem xong mấy cái PR, giờ đọc HackerNews {mins} phút đã...",
     ],
     "QUOTA_MET": [
-        "🏁 Hôm nay làm đủ KPIs rồi ({today}/{limit} PRs). Giờ chỉ ngồi trực canh comment thôi, không push thêm nữa để tránh bị report spam.",  # noqa: E501
-        "✋ Đạt quota rồi ({today}/{limit} PRs). Từ giờ đến hết ngày chỉ patrol thôi — push nhiều quá maintainer ghét!",  # noqa: E501
-        "📊 {today}/{limit} PRs — mission accomplished! Giờ chuyển sang chế độ tuần tra, ngồi trả lời review cho đẹp.",  # noqa: E501
+        "🏁 Hôm nay làm đủ KPIs rồi ({today}/{limit} PRs). Giờ chỉ ngồi trực canh comment thôi, không push thêm nữa để tránh bị report spam.",
+        "✋ Đạt quota rồi ({today}/{limit} PRs). Từ giờ đến hết ngày chỉ patrol thôi — push nhiều quá maintainer ghét!",
+        "📊 {today}/{limit} PRs — mission accomplished! Giờ chuyển sang chế độ tuần tra, ngồi trả lời review cho đẹp.",
         "😎 Xong {today}/{limit} PRs hôm nay! Bây giờ chill mode — chỉ check feedback thôi.",
     ],
     "REST_PATROL_ONLY": [
@@ -128,7 +128,7 @@ HUMAN_THOUGHTS = {
         "📋 Check-in iteration {iter}: {today}/{limit} PRs. Vẫn trong quota, let's go!",
     ],
     "TIME_WARP_START": [
-        "⏩ TIME-WARP ACTIVATED! Delay = 1-3s, auto-exit sau {max_iter} iterations. Bắt đầu test nào!",  # noqa: E501
+        "⏩ TIME-WARP ACTIVATED! Delay = 1-3s, auto-exit sau {max_iter} iterations. Bắt đầu test nào!",
     ],
     "GOODBYE": [
         "🧠 Super Human Mode kết thúc. Hẹn gặp lại ngày mai, GitHub! 👋",

@@ -11,6 +11,7 @@ import logging
 import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
+import asyncio
 from typing import TYPE_CHECKING, Any
 
 from farm_agent.core.exceptions import LLMError, LLMRateLimitError
