@@ -19,8 +19,8 @@ sys.modules["chromadb"] = MagicMock()
 sys.modules["numpy"] = MagicMock()
 sys.modules["git"] = MagicMock()
 
-import pytest
 from farm_agent.orchestrator.pipeline import ContribPipeline
+
 
 def test_get_max_concurrency_minimax_capped():
     config = MagicMock()

@@ -97,11 +97,11 @@ from farm_agent.core.models import (
     Finding,
     RepoContext,
 )
+from farm_agent.core.rag import RepoIndexer
+from farm_agent.generator.reviewer import ReviewerAgent
 from farm_agent.llm.context import build_generator_system_prompt
 from farm_agent.llm.provider import LLMProvider
 from farm_agent.tools.protocol import READ_FILE_TOOL_SCHEMA, GitHubTool
-from farm_agent.core.rag import RepoIndexer
-from farm_agent.generator.reviewer import ReviewerAgent
 
 logger = logging.getLogger(__name__)
 
@@ -566,8 +566,8 @@ class ContributionGenerator:
                 replace = edit_block.get("replace", "") or ""
                 if search == replace:
                     raise GenerationError(
-                        f"fix_contribution_from_error: corrected patch is a no-op "
-                        f"(search == replace) — aborting."
+                        "fix_contribution_from_error: corrected patch is a no-op "
+                        "(search == replace) — aborting."
                     )
 
             fc = FileChange(

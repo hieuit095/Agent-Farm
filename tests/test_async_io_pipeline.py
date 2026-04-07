@@ -2,9 +2,11 @@
 import asyncio
 import os
 import unittest
-from unittest.mock import MagicMock, patch, call
-from farm_agent.orchestrator.pipeline import ContribPipeline
+from unittest.mock import MagicMock, patch
+
 from farm_agent.core.models import FileChange
+from farm_agent.orchestrator.pipeline import ContribPipeline
+
 
 class TestAsyncIOPipeline(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
@@ -37,7 +39,8 @@ class TestAsyncIOPipeline(unittest.IsolatedAsyncioTestCase):
         # Also need to mock _do_clone inside the function or just mock the whole to_thread
         # Let's simplify and just check calls to mock_to_thread
 
-        with patch("farm_agent.orchestrator.pipeline.asyncio.gather", new_callable=unittest.IsolatedAsyncioTestCase.async_mock) as mock_gather:
+        from unittest.mock import AsyncMock
+        with patch("farm_agent.orchestrator.pipeline.asyncio.gather", new_callable=AsyncMock):
              # Reset mock to avoid noise from previous setups
              mock_to_thread.reset_mock()
 
@@ -64,11 +67,11 @@ class TestAsyncIOPipeline(unittest.IsolatedAsyncioTestCase):
         change = FileChange(path="new.py", new_content="print('hello')", is_new_file=True)
 
         # Mock os.path.normpath to return a predictable path
-        with patch("farm_agent.orchestrator.pipeline.os.path.normpath", side_effect=lambda x: x):
-            with patch("farm_agent.orchestrator.pipeline.os.path.dirname", return_value="/tmp/clone"):
-                self.pipeline._apply_patch_sync(clone_path, change)
+        with patch("farm_agent.orchestrator.pipeline.os.path.normpath", side_effect=lambda x: x), \
+             patch("farm_agent.orchestrator.pipeline.os.path.dirname", return_value="/tmp/clone"):
+            self.pipeline._apply_patch_sync(clone_path, change)
 
-                # Check if makedirs and open were called
-                mock_makedirs.assert_called()
-                mock_open.assert_called_with("new.py", "w", encoding="utf-8")
-                mock_open().write.assert_called_with("print('hello')")
+            # Check if makedirs and open were called
+            mock_makedirs.assert_called()
+            mock_open.assert_called_with("/tmp/clone/new.py", "w", encoding="utf-8")
+            mock_open().__enter__().write.assert_called_with("print('hello')")
