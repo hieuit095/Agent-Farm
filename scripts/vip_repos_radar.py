@@ -13,7 +13,6 @@ import httpx
 import yaml
 from dotenv import load_dotenv
 
-
 # Configuration
 CONFIG_PATH = Path(__file__).parent.parent / "config.yaml"
 GITHUB_API_BASE = "https://api.github.com"
@@ -27,7 +26,7 @@ def load_config() -> dict:
         print(f"ERROR: config.yaml not found at {CONFIG_PATH}")
         sys.exit(1)
 
-    with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+    with open(CONFIG_PATH, encoding="utf-8") as f:
         config = yaml.safe_load(f)
 
     github_config = config.get("github", {})

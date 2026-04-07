@@ -11,6 +11,7 @@ import contextlib
 import logging
 import random
 import re
+from datetime import UTC
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any
@@ -77,14 +78,14 @@ GITHUB_REPLIES: dict[str, list[str]] = {
     ],
     # Comment after pushing a CI fix
     "CI_FIX_APPLIED": [
-        "`{check_name}` was failing — pushed a fix for `{file_path}`.",  # noqa: E501
-        "Spotted the `{check_name}` failure and patched `{file_path}`.",  # noqa: E501
-        "Fixed `{check_name}` failure in `{file_path}`.",  # noqa: E501
+        "`{check_name}` was failing — pushed a fix for `{file_path}`.",
+        "Spotted the `{check_name}` failure and patched `{file_path}`.",
+        "Fixed `{check_name}` failure in `{file_path}`.",
     ],
     # When closing PR after exhausting CI fix attempts
     "CI_LIMIT_CLOSE": [
-        "CI still failing after {attempts} attempts. Closing to avoid noise.",  # noqa: E501
-        "Couldn't get CI green after {attempts} tries. Closing.",  # noqa: E501
+        "CI still failing after {attempts} attempts. Closing to avoid noise.",
+        "Couldn't get CI green after {attempts} tries. Closing.",
     ],
     # Surrender: max discussion retries reached
     "SURRENDER": [
@@ -161,7 +162,7 @@ class PRPatrol:
         self._github = github
         self._llm = llm
         self._memory = memory
-        self._notifier = kwargs.get("notifier", None)
+        self._notifier = kwargs.get("notifier")
         self._enable_sandbox_validation = kwargs.get(
             "enable_sandbox_validation",
             isinstance(github, GitHubClient),
@@ -169,7 +170,7 @@ class PRPatrol:
         self._sandbox_factory = kwargs.get("sandbox_factory", DockerSandbox)
         self._user: dict | None = None
         # Configurable safety limits — navigate validated Pydantic config path
-        config = kwargs.get("config", None)
+        config = kwargs.get("config")
         pipeline_cfg = getattr(config, "pipeline", None) if config else None
         self.MAX_CI_RETRIES = getattr(pipeline_cfg, "max_ci_retries", 3) if pipeline_cfg else 3
         self.MAX_DISCUSSION_REPLIES = getattr(pipeline_cfg, "max_discussion_replies", 3) if pipeline_cfg else 3
@@ -195,8 +196,8 @@ class PRPatrol:
 
     def _get_contextual_greeting(self) -> str:
         """Contextual Small Talk: Day-of-the-week greetings in UTC."""
-        from datetime import datetime, timezone
-        now = datetime.now(timezone.utc)
+        from datetime import datetime
+        now = datetime.now(UTC)
         if now.hour >= 12 and now.weekday() == 4:
             return random.choice(["Happy Friday! ", "Hope you have a great weekend ahead. "])
         elif now.hour < 12 and now.weekday() == 0:
@@ -693,8 +694,8 @@ class PRPatrol:
         """Use LLM to classify each feedback item."""
         if not feedback:
             return []
-            
-        # P1-OPSEC: Hard-cap comment ingestion to prevent malicious comment flooding 
+
+        # P1-OPSEC: Hard-cap comment ingestion to prevent malicious comment flooding
         # from exhausting LLM quota in a single PR cycle.
         feedback = feedback[-15:]
 
@@ -729,7 +730,6 @@ class PRPatrol:
         )
 
         import asyncio
-        import json
 
         from farm_agent.core.exceptions import LLMRateLimitError
 
@@ -875,12 +875,12 @@ class PRPatrol:
             if self._memory:
                 scheduled = await self._memory.get_task_schedule(task_key)
                 if scheduled:
-                    from datetime import datetime, timezone as tz
+                    from datetime import datetime
                     try:
                         scheduled_dt = datetime.fromisoformat(scheduled)
                         if scheduled_dt.tzinfo is None:
-                            scheduled_dt = scheduled_dt.replace(tzinfo=tz.utc)
-                        if scheduled_dt > datetime.now(tz.utc):
+                            scheduled_dt = scheduled_dt.replace(tzinfo=UTC)
+                        if scheduled_dt > datetime.now(UTC):
                             logger.info(
                                 "Skipping code fix for task %s — scheduled for %s",
                                 task_key, scheduled,
@@ -964,8 +964,8 @@ class PRPatrol:
                 if read_delay < 300:
                     logger.info("  Mới check mail thấy có notification từ Maintainer. Bắt đầu đọc... (Simulating notification lag: %ds)", read_delay)
                 else:
-                    from datetime import datetime, timezone as tz
-                    next_run = datetime.now(tz.utc) + __import__("datetime").timedelta(seconds=read_delay)
+                    from datetime import datetime
+                    next_run = datetime.now(UTC) + __import__("datetime").timedelta(seconds=read_delay)
                     await self._memory.set_task_schedule(task_key, next_run.isoformat())
                     logger.info("  Long notification lag (%ds) scheduled for %s — skipping this cycle", read_delay, next_run.isoformat())
                     return False
@@ -1843,43 +1843,7 @@ class PRPatrol:
             return False
 
         suffix = Path(path).suffix.lower()
-        if suffix in {
-            ".png",
-            ".jpg",
-            ".jpeg",
-            ".gif",
-            ".bmp",
-            ".ico",
-            ".pdf",
-            ".zip",
-            ".gz",
-            ".tar",
-            ".tgz",
-            ".7z",
-            ".jar",
-            ".exe",
-            ".dll",
-            ".so",
-            ".dylib",
-            ".pyc",
-            ".pyo",
-            ".class",
-            ".woff",
-            ".woff2",
-            ".ttf",
-            ".eot",
-            ".mp3",
-            ".mp4",
-            ".mov",
-            ".avi",
-            ".webm",
-            ".bin",
-            ".sqlite",
-            ".db",
-        }:
-            return False
-
-        return True
+        return suffix not in {".png", ".jpg", ".jpeg", ".gif", ".bmp", ".ico", ".pdf", ".zip", ".gz", ".tar", ".tgz", ".7z", ".jar", ".exe", ".dll", ".so", ".dylib", ".pyc", ".pyo", ".class", ".woff", ".woff2", ".ttf", ".eot", ".mp3", ".mp4", ".mov", ".avi", ".webm", ".bin", ".sqlite", ".db"}
 
     async def _write_validation_file(self, workspace: Path, file_path: str, content: str) -> None:
         """Write a file into the local validation workspace."""

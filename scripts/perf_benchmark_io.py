@@ -5,6 +5,7 @@ import shutil
 import tempfile
 import time
 
+
 # Mocking the FileChange structure
 class MockFileChange:
     def __init__(self, path, new_content, original_content=None, is_new_file=False, is_deleted=False):
@@ -51,7 +52,7 @@ def apply_patch_sync(clone_path, change):
                 os.remove(file_path)
         else:
             if os.path.exists(file_path):
-                with open(file_path, "r", encoding="utf-8") as f:
+                with open(file_path, encoding="utf-8") as f:
                     content = f.read()
                 if change.original_content and change.original_content in content:
                     content = content.replace(change.original_content, change.new_content, 1)
