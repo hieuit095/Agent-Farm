@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import UTC
 from pathlib import Path
 
 import httpx
@@ -16,8 +17,8 @@ async def _persist_failed_alert(message: str, channel: str) -> None:
     """If all notification channels fail, persist alert locally."""
     try:
         with open(FAILED_ALERTS_FILE, "a", encoding="utf-8") as f:
-            from datetime import datetime, timezone
-            timestamp = datetime.now(timezone.utc).isoformat()
+            from datetime import datetime
+            timestamp = datetime.now(UTC).isoformat()
             f.write(f"[{timestamp}] [{channel}] PERSISTED ALERT: {message}\n")
     except Exception:
         pass  # last resort — don't fail on this
@@ -141,7 +142,7 @@ class TelegramNotifier:
                 delay = 5  # reset on success
                 await asyncio.sleep(1)  # normal polling interval on success
 
-            except Exception as e:
+            except Exception:
                 logger.critical("All notification channels failed — persisted to %s", FAILED_ALERTS_FILE)
                 await asyncio.sleep(delay)
                 delay = min(delay * 2, max_delay)  # double backoff, cap at 60s
@@ -150,9 +151,9 @@ class TelegramNotifier:
         """Handle incoming C2 commands from Telegram."""
         import time
         from datetime import UTC, datetime
-        
+
         command = text.strip().split()[0].lower()
-        
+
         if command in ("/start", "/help"):
             msg = (
                 "👋 <b>Welcome to Farm-Agent Command Center!</b>\n\n"
@@ -182,7 +183,7 @@ class TelegramNotifier:
                             today_urls.append(pr["pr_url"])
                     except (ValueError, TypeError):
                         pass  # skip malformed dates
-            
+
             msg = f"📊 <b>Report Today:</b>\nYou have generated {today_prs_count} PRs today."
             if today_urls:
                 msg += "\n\n" + "\n".join(today_urls)
@@ -191,7 +192,7 @@ class TelegramNotifier:
             now = time.time()
             five_hours_ago = now - 18_000.0
             seven_days_ago = now - 604_800.0
-            
+
             cursor = await memory_instance._db.execute(
                 "SELECT COUNT(1) FROM api_usage_log WHERE provider = 'minimax' AND timestamp >= ?",
                 (five_hours_ago,)
@@ -205,11 +206,10 @@ class TelegramNotifier:
             )
             row = await cursor.fetchone()
             count_7d = row[0] if row else 0
-            
+
             await self.send_message(f"📈 <b>Minimax Quota Usage:</b>\nLast 5h: {count_5h}/1000\nLast 7d: {count_7d}/10000")
 
         elif command == "/update":
-            import asyncio
             # Notify user immediately that sync has started
             await self.send_message(
                 "⏳ Sếp đợi em một chút nhé, em đang lên GitHub lật lại sổ Nam Tào "

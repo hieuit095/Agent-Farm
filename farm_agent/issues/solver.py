@@ -301,10 +301,10 @@ class IssueSolver:
 
         # Body length hints at complexity
         body_len = len(issue.body or "")
-        MAX_BODY_LEN = 50000
-        if body_len > MAX_BODY_LEN:
+        max_body_len = 50000
+        if body_len > max_body_len:
             logger.warning("Issue body extremely large (%d chars) — capping score", body_len)
-            body_len = MAX_BODY_LEN  # cap for scoring purposes only
+            body_len = max_body_len  # cap for scoring purposes only
         if body_len > 2000:
             score += 1
         if body_len > 5000:
