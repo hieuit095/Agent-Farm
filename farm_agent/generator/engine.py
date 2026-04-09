@@ -13,6 +13,28 @@ import logging
 import re
 from datetime import UTC, datetime
 
+from farm_agent.analysis.mapper import RepoMapper
+from farm_agent.core.config import ContributionConfig
+from farm_agent.core.exceptions import ContextMissingError, GenerationError
+from farm_agent.core.models import (
+    Contribution,
+    ContributionType,
+    FileChange,
+    Finding,
+    ImpactLevel,
+    RepoContext,
+    Severity,
+    Vulnerability,
+    VulnerabilityDossier,
+)
+from farm_agent.core.rag import RepoIndexer
+from farm_agent.generator.reviewer import ReviewerAgent
+from farm_agent.llm.context import build_generator_system_prompt
+from farm_agent.llm.provider import LLMProvider
+from farm_agent.tools.protocol import READ_FILE_TOOL_SCHEMA, GitHubTool
+
+logger = logging.getLogger(__name__)
+
 # ── Module-level Gag Order regex — used by both _generate and fix_contribution_from_error ──
 _GHOST_DISCLOSURE_RE = re.compile(
     r"(?i)(as an ai|ai generated|language model|openai|minimax|"
@@ -97,28 +119,6 @@ def _sanitize_text(text: str, field_name: str) -> str:
         )
     return text
 
-from farm_agent.analysis.mapper import RepoMapper
-from farm_agent.core.config import ContributionConfig
-from farm_agent.core.exceptions import ContextMissingError, GenerationError
-from farm_agent.core.models import (
-    Contribution,
-    ContributionType,
-    FileChange,
-    Finding,
-    ImpactLevel,
-    RepoContext,
-    Severity,
-    Vulnerability,
-    VulnerabilityDossier,
-)
-from farm_agent.core.rag import RepoIndexer
-from farm_agent.generator.reviewer import ReviewerAgent
-from farm_agent.llm.context import build_generator_system_prompt
-from farm_agent.llm.provider import LLMProvider
-from farm_agent.tools.protocol import READ_FILE_TOOL_SCHEMA, GitHubTool
-
-logger = logging.getLogger(__name__)
-
 # Maximum tool calls per generation session to prevent infinite loops
 MAX_TOOL_CALLS = 3
 
@@ -126,12 +126,12 @@ MAX_TOOL_CALLS = 3
 class ContributionGenerator:
     """Generate code contributions from analysis findings."""
 
-    def __init__(self, llm: LLMProvider, config: ContributionConfig, *, memory=None, pipeline_config=None):
+    def __init__(self, llm: LLMProvider, config: ContributionConfig, *, memory=None, pipeline_config=None):  # noqa: E501
         self._llm = llm
         self._config = config
         self._memory = memory  # Optional Memory for repo_preferences
         # Configurable patch retry limit (from PipelineConfig or default)
-        self._max_patch_retries = getattr(pipeline_config, "max_patch_retries", 2) if pipeline_config else 2
+        self._max_patch_retries = getattr(pipeline_config, "max_patch_retries", 2) if pipeline_config else 2  # noqa: E501
         # Adversarial Reviewer — completely independent entity with its own LLM
         self._reviewer = ReviewerAgent(llm, max_review_tokens=800)
 
@@ -239,12 +239,11 @@ class ContributionGenerator:
                 # to confirm the file exists in the repo even if we cannot fetch it
                 map_lower = project_map.lower()
                 target_lower = finding.file_path.lower()
-                if target_lower in map_lower or any(
+                if (target_lower in map_lower or any(
                     segment in map_lower for segment in [finding.file_path]
-                ):
+                )) and github_client is not None:
                     # The file IS in the repo (confirmed by map), but we still cannot
                     # fetch it — try one more explicit fetch with a fallback path
-                    if github_client is not None:
                         for path_variant in [
                             finding.file_path,
                             finding.file_path.lstrip("/"),
@@ -302,14 +301,14 @@ class ContributionGenerator:
             # Patch-Correction Retry Loop: if the patcher fails to apply
             # any edits (LLM hallucinated the SEARCH block), re-prompt the
             # LLM with the file content and ask for a corrected patch.
-            MAX_PATCH_RETRIES = self._max_patch_retries
+            max_patch_retries = self._max_patch_retries
             changes = self._parse_changes(response, context)
             patch_attempt = 0
-            while not changes and patch_attempt < MAX_PATCH_RETRIES:
+            while not changes and patch_attempt < max_patch_retries:
                 patch_attempt += 1
                 logger.warning(
                     "Patch attempt %d/%d failed for %s — re-prompting LLM",
-                    patch_attempt, MAX_PATCH_RETRIES, finding.title,
+                    patch_attempt, max_patch_retries, finding.title,
                 )
                 # Build a correction prompt with the actual file content
                 file_content = context.relevant_files.get(finding.file_path, "")
@@ -405,7 +404,7 @@ class ContributionGenerator:
                 if review_attempt >= max_review_retries:
                     # All retries exhausted — discard this finding to protect the repo
                     logger.error(
-                        "🛑 Adversarial Review Failed for '%s' — discarding finding after %d attempts. "
+                        "🛑 Adversarial Review Failed for '%s' — discarding finding after %d attempts. "  # noqa: E501
                         "The patch was not good enough to pass our security audit.",
                         finding.title,
                         max_review_retries + 1,
@@ -430,11 +429,11 @@ class ContributionGenerator:
                 )
                 latest_changes = self._parse_changes(response, context)
                 if not latest_changes:
-                    logger.warning("Rewrite attempt produced no valid changes for: %s", finding.title)
+                    logger.warning("Rewrite attempt produced no valid changes for: %s", finding.title)  # noqa: E501
                     return None
 
                 # Regenerate commit message and branch name for the rewritten patch
-                new_commit_msg = await self._generate_commit_message(finding, latest_changes, context)
+                new_commit_msg = await self._generate_commit_message(finding, latest_changes, context)  # noqa: E501
                 new_branch_name = self._generate_branch_name(finding)
 
                 latest_contribution = Contribution(
@@ -605,7 +604,7 @@ class ContributionGenerator:
             f'```json\n{{\n  "changes": [\n    {{\n      "path": "{vuln.file}",\n'
             f'      "is_new_file": false,\n      "edits": [\n        {{\n'
             f'          "search": "exact text to find in the file",\n'
-            f'          "replace": "replacement text"\n        }}\n      ]\n    }}\n  ]\n}}\n```\n\n'
+            f'          "replace": "replacement text"\n        }}\n      ]\n    }}\n  ]\n}}\n```\n\n'  # noqa: E501
             f"CRITICAL:\n"
             f"- The `search` value MUST be an EXACT, VERBATIM copy of text from the file above.\n"
             f"- NEVER use `...` or any placeholder to skip lines.\n"
@@ -613,10 +612,10 @@ class ContributionGenerator:
         )
 
         # ── 3-Cycle Anti-Template Retry Loop ──────────────────────────────
-        MAX_CYCLES = 3
+        max_cycles = 3
         retry_warning = ""
 
-        for cycle in range(MAX_CYCLES):
+        for cycle in range(max_cycles):
             current_prompt = user_prompt + retry_warning
 
             try:
@@ -632,7 +631,7 @@ class ContributionGenerator:
                     violations = _FORBIDDEN_PATTERNS.findall(response)[:5]
                     logger.warning(
                         "Lazy code detected (Cycle %d/%d). Violations: %s. Retrying...",
-                        cycle + 1, MAX_CYCLES, violations,
+                        cycle + 1, max_cycles, violations,
                     )
                     retry_warning = (
                         "\n\nSYSTEM WARNING: Your previous attempt was REJECTED because "
@@ -714,10 +713,10 @@ class ContributionGenerator:
         # ── Hard Abort ──────────────────────────────────────────────────
         logger.error(
             "Failed to generate strict code after %d attempts for %s:%d. Aborting.",
-            MAX_CYCLES, vuln.file, vuln.line,
+            max_cycles, vuln.file, vuln.line,
         )
         raise RuntimeError(
-            f"Failed to generate strict code after {MAX_CYCLES} attempts. "
+            f"Failed to generate strict code after {max_cycles} attempts. "
             f"Aborting patch generation for {vuln.file}:{vuln.line}."
         )
 
@@ -820,7 +819,7 @@ class ContributionGenerator:
                 val = item.get(field, "") or ""
                 if _GHOST_DISCLOSURE_RE.search(val):
                     raise GenerationError(
-                        f"Gag Order: corrected patch contains AI disclosure in '{field}' — aborting."
+                        f"Gag Order: corrected patch contains AI disclosure in '{field}' — aborting."  # noqa: E501
                     )
         # ─────────────────────────────────────────────────────────────────
 
@@ -1328,12 +1327,12 @@ class ContributionGenerator:
 
                 # ── Discipline Protocol: Block scratchpad/note files ────────────
                 if is_new:
-                    _SCRATCHPAD_PATTERNS = (
+                    scratchpad_patterns = (
                         "note", "explore", "exploration", "scratchpad",
                         "temp_", "tmp_", "draft", "wip_", "thought",
                     )
                     path_lower = path.lower()
-                    is_scratchpad = any(p in path_lower for p in _SCRATCHPAD_PATTERNS)
+                    is_scratchpad = any(p in path_lower for p in scratchpad_patterns)
                     # Block .md/.txt placed in src/ or source/ directories
                     is_md_in_src = (
                         path_lower.startswith(("src/", "source/", "app/", "lib/"))
@@ -1416,14 +1415,14 @@ class ContributionGenerator:
                         if not matched:
                             search_lines = search.split("\n")
                             content_lines = new_content.split("\n")
-                            stripped_search_lines = [l.lstrip() for l in search_lines]
+                            stripped_search_lines = [line.lstrip() for line in search_lines]
 
                             # Slide a window of len(search_lines) over content
                             window = len(search_lines)
                             if window >= 2:  # Require at least 2 lines for safety
                                 for start_idx in range(len(content_lines) - window + 1):
                                     candidate = content_lines[start_idx : start_idx + window]
-                                    candidate_stripped = [l.lstrip() for l in candidate]
+                                    candidate_stripped = [line.lstrip() for line in candidate]
                                     if candidate_stripped == stripped_search_lines:
                                         # Match found — re-indent replacement
                                         # using the original file's leading whitespace
@@ -1432,7 +1431,7 @@ class ContributionGenerator:
                                         for j, rline in enumerate(replace_lines):
                                             if j < len(candidate):
                                                 # Borrow indent from the corresponding original line
-                                                orig_indent = candidate[j][: len(candidate[j]) - len(candidate[j].lstrip())]
+                                                orig_indent = candidate[j][: len(candidate[j]) - len(candidate[j].lstrip())]  # noqa: E501
                                             elif candidate:
                                                 # Extra lines: use indent of the last matched line
                                                 last = candidate[-1]
@@ -1457,12 +1456,12 @@ class ContributionGenerator:
                             # of hallucinated full-function rewrites.
                             search_line_count = len(search.split("\n"))
                             replace_line_count = len(replace.split("\n"))
-                            MAX_REPLACE_TO_SEARCH_RATIO = 2
-                            if search_line_count > 0 and (replace_line_count / search_line_count) > MAX_REPLACE_TO_SEARCH_RATIO:
+                            max_replace_to_search_ratio = 2
+                            if search_line_count > 0 and (replace_line_count / search_line_count) > max_replace_to_search_ratio:  # noqa: E501
                                 logger.warning(
-                                    "Diff Minimizer blocked: replace/search ratio %.1f exceeds limit %d in %s",
+                                    "Diff Minimizer blocked: replace/search ratio %.1f exceeds limit %d in %s",  # noqa: E501
                                     replace_line_count / search_line_count,
-                                    MAX_REPLACE_TO_SEARCH_RATIO,
+                                    max_replace_to_search_ratio,
                                     path,
                                 )
                                 continue
@@ -1477,7 +1476,7 @@ class ContributionGenerator:
                             edits_applied += 1
                         else:
                             logger.warning(
-                                "Search text not found in %s (tried exact + fuzzy + indent-agnostic). "
+                                "Search text not found in %s (tried exact + fuzzy + indent-agnostic). "  # noqa: E501
                                 "Search[:%d]: %.80s...",
                                 path,
                                 len(search),

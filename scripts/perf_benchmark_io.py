@@ -8,7 +8,7 @@ import time
 
 # Mocking the FileChange structure
 class MockFileChange:
-    def __init__(self, path, new_content, original_content=None, is_new_file=False, is_deleted=False):
+    def __init__(self, path, new_content, original_content=None, is_new_file=False, is_deleted=False):  # noqa: E501
         self.path = path
         self.new_content = str(new_content)
         self.original_content = original_content

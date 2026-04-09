@@ -967,7 +967,6 @@ def reset_db(ctx, yes):
         cur.execute("DELETE FROM run_log")
         cur.execute("DELETE FROM analyzed_repos")
         conn.commit()
-        affected = cur.rowcount
         conn.close()
 
         console.print("[green]✅ Reset complete.[/green]")

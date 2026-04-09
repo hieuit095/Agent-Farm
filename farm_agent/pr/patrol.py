@@ -172,8 +172,8 @@ class PRPatrol:
         # Configurable safety limits — navigate validated Pydantic config path
         config = kwargs.get("config")
         pipeline_cfg = getattr(config, "pipeline", None) if config else None
-        self.MAX_CI_RETRIES = getattr(pipeline_cfg, "max_ci_retries", 3) if pipeline_cfg else 3
-        self.MAX_DISCUSSION_REPLIES = getattr(pipeline_cfg, "max_discussion_replies", 3) if pipeline_cfg else 3
+        self.max_ci_retries = getattr(pipeline_cfg, "max_ci_retries", 3) if pipeline_cfg else 3
+        self.max_discussion_replies = getattr(pipeline_cfg, "max_discussion_replies", 3) if pipeline_cfg else 3  # noqa: E501
 
     def _create_sandbox(self) -> DockerSandbox:
         """Create a sandbox instance for local validation."""
@@ -303,7 +303,7 @@ class PRPatrol:
                     if ci_handled:
                         if self._notifier and not dry_run:
                             await self._notifier.send_message(
-                                f"🛡️ <b>[PATROL]</b> Action Taken!\nRepo: <code>{pr['repo']}</code>\nAction: Pushed CI Fix\nURL: {pr_data.get('html_url', pr.get('pr_url', ''))}"
+                                f"🛡️ <b>[PATROL]</b> Action Taken!\nRepo: <code>{pr['repo']}</code>\nAction: Pushed CI Fix\nURL: {pr_data.get('html_url', pr.get('pr_url', ''))}"  # noqa: E501
                             )
                         continue  # skip human feedback this cycle
 
@@ -351,7 +351,7 @@ class PRPatrol:
                             )
                         if self._notifier:
                             await self._notifier.send_message(
-                                f"⛔ <b>[ALERT]</b> Hostile maintainer detected. Repo <code>{pr['repo']}</code> blacklisted."
+                                f"⛔ <b>[ALERT]</b> Hostile maintainer detected. Repo <code>{pr['repo']}</code> blacklisted."  # noqa: E501
                             )
                     result.prs_closed_hostile += 1
                     continue
@@ -414,14 +414,14 @@ class PRPatrol:
                                     owner,
                                     repo_name,
                                     pr["pr_number"],
-                                    comment="Closing this PR for now as I won't have time to address the remaining feedback. Thanks for the review!",
+                                    comment="Closing this PR for now as I won't have time to address the remaining feedback. Thanks for the review!",  # noqa: E501
                                 )
                             except GitHubAPIError as exc:
                                 logger.warning(
                                     "  ⚠️ Could not close PR #%d: %s", pr["pr_number"], exc,
                                 )
                             if self._memory:
-                                await self._memory.update_pr_status(pr["repo"], pr["pr_number"], "ghosted")
+                                await self._memory.update_pr_status(pr["repo"], pr["pr_number"], "ghosted")  # noqa: E501
                             result.prs_closed_hostile += 1
                             continue
 
@@ -470,7 +470,7 @@ class PRPatrol:
                         FeedbackAction.CODE_CHANGE,
                         FeedbackAction.STYLE_FIX,
                     ):
-                        fixed = await self._handle_code_fix(owner, repo_name, pr, pr_data, item, dry_run=dry_run)
+                        fixed = await self._handle_code_fix(owner, repo_name, pr, pr_data, item, dry_run=dry_run)  # noqa: E501
                         if fixed:
                             result.fixes_pushed += 1
                             result.replies_sent += 1
@@ -480,10 +480,10 @@ class PRPatrol:
                                 )
                             if self._notifier and not dry_run:
                                 await self._notifier.send_message(
-                                    f"🛡️ <b>[PATROL]</b> Action Taken!\nRepo: <code>{pr['repo']}</code>\nAction: Pushed Code Fix\nURL: {pr_data.get('html_url', pr.get('pr_url', ''))}"
+                                    f"🛡️ <b>[PATROL]</b> Action Taken!\nRepo: <code>{pr['repo']}</code>\nAction: Pushed Code Fix\nURL: {pr_data.get('html_url', pr.get('pr_url', ''))}"  # noqa: E501
                                 )
                     elif item.action == FeedbackAction.QUESTION:
-                        answered = await self._handle_question(owner, repo_name, pr, pr_data, item, dry_run=dry_run)
+                        answered = await self._handle_question(owner, repo_name, pr, pr_data, item, dry_run=dry_run)  # noqa: E501
                         if answered:
                             result.replies_sent += 1
                             if self._memory:
@@ -492,7 +492,7 @@ class PRPatrol:
                                 )
                             if self._notifier and not dry_run:
                                 await self._notifier.send_message(
-                                    f"🛡️ <b>[PATROL]</b> Action Taken!\nRepo: <code>{pr['repo']}</code>\nAction: Replied to comment\nURL: {pr_data.get('html_url', pr.get('pr_url', ''))}"
+                                    f"💬 <b>[REPLY SENT]</b> Repo: <code>{pr['repo']}</code>\nAction: Replied to comment\nURL: {pr_data.get('html_url', pr.get('pr_url', ''))}"  # noqa: E501
                                 )
 
                 # Re-check CLA after pushing fixes
@@ -769,7 +769,7 @@ class PRPatrol:
         # Fall back: do NOT blindly treat as CODE_CHANGE — that triggers
         # unwanted automated commits. Mark as ALREADY_HANDLED and log error.
         logger.error(
-            "  ⚠️ LLM classification failed after %d retries — marking %d feedback items as ALREADY_HANDLED",
+            "  ⚠️ LLM classification failed after %d retries — marking %d feedback items as ALREADY_HANDLED",  # noqa: E501
             max_retries,
             len(feedback),
         )
@@ -954,7 +954,7 @@ class PRPatrol:
                 # P1-OPSEC-1: Human-like continuous delay distribution
                 # Use expovariate for Poisson-process-like delays (human work patterns)
                 mean_delay = random.uniform(120, 600)  # mean of 2-10 minutes
-                read_delay = max(15, min(random.expovariate(1.0 / mean_delay), 7200))  # cap at 2 hours
+                read_delay = max(15, min(random.expovariate(1.0 / mean_delay), 7200))
                 # Add triangular jitter to further obscure pattern
                 jitter = random.triangular(0.5, 2.0, 1.0)  # 50%-200% of base, mode=100%
                 read_delay = int(read_delay * jitter)
@@ -962,12 +962,12 @@ class PRPatrol:
                 read_delay = min(read_delay, 7200)  # 2 hours absolute max
 
                 if read_delay < 300:
-                    logger.info("  Mới check mail thấy có notification từ Maintainer. Bắt đầu đọc... (Simulating notification lag: %ds)", read_delay)
+                    logger.info("  Mới check mail thấy có notification từ Maintainer. Bắt đầu đọc... (Simulating notification lag: %ds)", read_delay)  # noqa: E501
                 else:
                     from datetime import datetime
-                    next_run = datetime.now(UTC) + __import__("datetime").timedelta(seconds=read_delay)
+                    next_run = datetime.now(UTC) + __import__("datetime").timedelta(seconds=read_delay)  # noqa: E501
                     await self._memory.set_task_schedule(task_key, next_run.isoformat())
-                    logger.info("  Long notification lag (%ds) scheduled for %s — skipping this cycle", read_delay, next_run.isoformat())
+                    logger.info("  Long notification lag (%ds) scheduled for %s — skipping this cycle", read_delay, next_run.isoformat())  # noqa: E501
                     return False
 
                 await asyncio.sleep(read_delay)
@@ -1104,7 +1104,7 @@ class PRPatrol:
                 f"PR title: {pr_title}\n"
                 f"PR description:\n{pr_body[:2000]}\n\n"
                 f"Question from @{feedback.author}:\n> {feedback.body}\n\n"
-                f"Write a concise reply (1-3 sentences). Be direct. No apologies, no excessive politeness."
+                f"Write a concise reply (1-3 sentences). Be direct. No apologies, no excessive politeness."  # noqa: E501
             )
 
             response = await self._llm.complete(
@@ -1135,7 +1135,7 @@ class PRPatrol:
                     read_delay = random.randint(30, 300)  # Quick response (active coding)
                 else:
                     read_delay = random.randint(3600, 28800)  # Long delay (meeting/sleep)
-                logger.info("  Mới check mail thấy có notification từ Maintainer. Bắt đầu đọc... (Simulating notification lag: %ds)", read_delay)
+                logger.info("  Mới check mail thấy có notification từ Maintainer. Bắt đầu đọc... (Simulating notification lag: %ds)", read_delay)  # noqa: E501
                 await asyncio.sleep(read_delay)
 
                 delay = self._calculate_typing_delay(reply_body)
@@ -1248,17 +1248,17 @@ class PRPatrol:
         if self._memory:
             attempts = await self._memory.get_ci_fix_attempts(repo_full, pr_number)
 
-        if attempts >= self.MAX_CI_RETRIES:
+        if attempts >= self.max_ci_retries:
             logger.warning(
                 "  🚫 CI fix limit (%d) reached for PR #%d — closing PR",
-                self.MAX_CI_RETRIES, pr_number,
+                self.max_ci_retries, pr_number,
             )
             if not dry_run:
                 try:
                     await self._github.close_pull_request(
                         owner, repo, pr_number,
                         comment=random.choice(GITHUB_REPLIES["CI_LIMIT_CLOSE"]).format(
-                            attempts=self.MAX_CI_RETRIES,
+                            attempts=self.max_ci_retries,
                         ),
                     )
                 except GitHubAPIError as exc:
@@ -1266,7 +1266,7 @@ class PRPatrol:
                 if self._notifier:
                     repo_url = pr_data.get("html_url", f"https://github.com/{repo_full}")
                     await self._notifier.send_message(
-                        f"🏳️ [SURRENDER] PR closed due to max CI retries ({self.MAX_CI_RETRIES}/{self.MAX_CI_RETRIES}) hit on {repo_url}"
+                        f"🏳️ [SURRENDER] PR closed due to max CI retries ({self.max_ci_retries}/{self.max_ci_retries}) hit on {repo_url}"  # noqa: E501
                     )
             return True
 
@@ -1297,7 +1297,7 @@ class PRPatrol:
 
         logger.info(
             "  🔴 CI check '%s' failed on PR #%d (attempt %d/%d)",
-            check_name, pr_number, attempts + 1, self.MAX_CI_RETRIES,
+            check_name, pr_number, attempts + 1, self.max_ci_retries,
         )
 
 
@@ -1368,7 +1368,7 @@ class PRPatrol:
         Returns a safe, ASCII-only check name suitable for commits/PR bodies.
         """
         import re as _re
-        # Strip emojis and non-ASCII (keep alphanumeric, spaces, hyphens, underscores, dots, slashes)
+        # Strip emojis and non-ASCII (keep alphanumeric, spaces, hyphens, underscores, dots, slashes)  # noqa: E501
         sanitized = _re.sub(r'[^\x20-\x7E]', '', raw_name)
         # Strip AI identity keywords (Gag Order)
         _gag_keywords = _re.compile(
@@ -1572,7 +1572,7 @@ class PRPatrol:
                 starting_attempts=starting_attempts,
             )
             if not fixed_content:
-                if starting_attempts + validation_failures >= self.MAX_CI_RETRIES:
+                if starting_attempts + validation_failures >= self.max_ci_retries:
                     await self._close_ci_retry_limited_pr(
                         owner=owner,
                         repo=repo,
@@ -1672,7 +1672,7 @@ class PRPatrol:
             fixed_content = self._extract_fixed_content(response)
             return fixed_content or None, None, 0
 
-        remaining_attempts = max(1, self.MAX_CI_RETRIES - starting_attempts)
+        remaining_attempts = max(1, self.max_ci_retries - starting_attempts)
         validation_failures = 0
         current_prompt = prompt
         last_result: dict[str, Any] | None = None
@@ -1735,11 +1735,11 @@ class PRPatrol:
                         "  Local validation failed for `%s` (attempt %d/%d, exit=%s)",
                         file_path,
                         total_attempts,
-                        self.MAX_CI_RETRIES,
+                        self.max_ci_retries,
                         last_result.get("exit_code"),
                     )
 
-                    if total_attempts >= self.MAX_CI_RETRIES:
+                    if total_attempts >= self.max_ci_retries:
                         break
 
                     current_prompt = self._append_local_validation_failure_prompt(
@@ -1815,7 +1815,7 @@ class PRPatrol:
                 try:
                     content = await get_file_content(owner, repo, node_path, branch)
                 except Exception as e:
-                    logger.warning("Validation file fetch failed for %s: %s — cannot validate", node_path, e)
+                    logger.warning("Validation file fetch failed for %s: %s — cannot validate", node_path, e)  # noqa: E501
                     continue
             except Exception:
                 continue
@@ -1978,7 +1978,7 @@ class PRPatrol:
         """Close a PR after exhausting the CI auto-heal retry budget."""
         logger.warning(
             "  CI fix limit (%d) reached for PR #%d; closing PR",
-            self.MAX_CI_RETRIES,
+            self.max_ci_retries,
             pr_number,
         )
         try:
@@ -1987,7 +1987,7 @@ class PRPatrol:
                 repo,
                 pr_number,
                 comment=random.choice(GITHUB_REPLIES["CI_LIMIT_CLOSE"]).format(
-                    attempts=self.MAX_CI_RETRIES,
+                    attempts=self.max_ci_retries,
                 ),
             )
         except GitHubAPIError as exc:
@@ -1997,7 +1997,7 @@ class PRPatrol:
             repo_url = pr_data.get("html_url", f"https://github.com/{repo_full}")
             await self._notifier.send_message(
                 f"[SURRENDER] PR closed due to max CI retries "
-                f"({self.MAX_CI_RETRIES}/{self.MAX_CI_RETRIES}) hit on {repo_url}"
+                f"({self.max_ci_retries}/{self.max_ci_retries}) hit on {repo_url}"
             )
 
     @staticmethod

@@ -19,7 +19,7 @@ sys.modules["chromadb"] = MagicMock()
 sys.modules["numpy"] = MagicMock()
 sys.modules["git"] = MagicMock()
 
-from farm_agent.orchestrator.pipeline import ContribPipeline
+from farm_agent.orchestrator.pipeline import ContribPipeline  # noqa: E402
 
 
 def test_get_max_concurrency_minimax_capped():

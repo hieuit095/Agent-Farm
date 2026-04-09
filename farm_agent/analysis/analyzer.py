@@ -9,13 +9,12 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 import logging
 import re
 import time
 import uuid
 from fnmatch import fnmatch
-
-import json
 from pathlib import Path
 
 from farm_agent.core.config import AnalysisConfig
@@ -883,7 +882,6 @@ class CodeAnalyzer:
 
     def _filter_severity(self, findings: list[Finding]) -> list[Finding]:
         """Filter findings by minimum severity threshold."""
-        order = [Severity.LOW, Severity.MEDIUM, Severity.HIGH, Severity.CRITICAL]
         # Define a mapping from Severity enum to an integer order for comparison
         severity_order = {
             Severity.LOW.value: 0,
@@ -1130,10 +1128,8 @@ class BloodhoundAnalyzer:
 
                 file_path = obj.get("file", obj.get("path", ""))
                 if file_path:
-                    try:
+                    with contextlib.suppress(ValueError):
                         file_path = str(Path(file_path).relative_to(repo_path))
-                    except ValueError:
-                        pass
 
                 start = obj.get("range", {}).get("start", {})
                 line_num = start.get("line", obj.get("line", 0))
@@ -1150,7 +1146,7 @@ class BloodhoundAnalyzer:
                 logger.info("Rule %s: %d matches", rule_file.name, len(matches))
             return matches
 
-        except asyncio.TimeoutError:
+        except TimeoutError:
             logger.warning("sg scan timed out for rule %s", rule_file.name)
             return []
         except Exception as exc:

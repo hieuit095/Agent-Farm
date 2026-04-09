@@ -6,6 +6,7 @@ the same async interface for easy swapping.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
@@ -202,8 +203,6 @@ class LLMProvider(ABC):
 # ── Minimax ─────────────────────────────────────────────────────────────────────
 
 # Module-level semaphore shared by ALL MinimaxProvider instances so the
-import asyncio
-
 # concurrent-call cap is enforced globally, not per-instance.
 _LLM_SEMAPHORE: asyncio.Semaphore | None = None
 
@@ -404,7 +403,7 @@ class OpenRouterProvider(LLMProvider):
 
                 choices = data.get("choices", [])
                 if not choices:
-                    last_error = LLMError(f"OpenRouter returned empty choices (attempt {attempt + 1}/3)")
+                    last_error = LLMError(f"OpenRouter returned empty choices (attempt {attempt + 1}/3)")  # noqa: E501
                     if attempt < 2:
                         import asyncio as _asyncio
                         await _asyncio.sleep(5 * (attempt + 1))
