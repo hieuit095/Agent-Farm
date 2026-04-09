@@ -10,7 +10,7 @@ import logging
 import re
 from dataclasses import dataclass
 
-from farm_agent.core.models import Contribution, ContributionType
+from farm_agent.core.models import Contribution, ContributionType, QAResult, VulnerabilityDossier
 
 logger = logging.getLogger(__name__)
 
@@ -232,9 +232,9 @@ class QAHardcoreScorer:
 
     async def evaluate(
         self,
-        dossier: "VulnerabilityDossier",
-        contribution: "Contribution",
-    ) -> "QAResult":
+        dossier: VulnerabilityDossier,
+        contribution: Contribution,
+    ) -> QAResult:
         """Score a patch against its originating vulnerability dossier.
 
         Returns a QAResult with score (0.0-10.0), critiques, and approval status.

@@ -34,7 +34,7 @@ class GitHubClient:
                 "Accept": "application/vnd.github+json",
                 "X-GitHub-Api-Version": "2022-11-28",
                 # Sanitized — browser-like UA avoids GitHub abuse detection
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",  # noqa: E501
             },
             # P0-FIX: Granular timeouts prevent infinite hangs on TLS handshakes
             # and slow reads.  A flat timeout=30.0 does NOT cap the connect phase
@@ -439,7 +439,7 @@ class GitHubClient:
             if not hasattr(self, "_cached_user"):
                 self._cached_user = await self.get_authenticated_user()
 
-            author_name = self._cached_user.get("name") or self._cached_user.get("login", author_name)
+            author_name = self._cached_user.get("name") or self._cached_user.get("login", author_name)  # noqa: E501
             author_email = self._cached_user.get("email")
             if not author_email:
                 # Use the real user ID + login to match GitHub's internal privacy pattern
@@ -447,7 +447,7 @@ class GitHubClient:
                 login = self._cached_user.get('login', 'farm_agent')
                 author_email = f"{uid}+{login}@users.noreply.github.com"
 
-            author_date = (datetime.now(UTC) - timedelta(minutes=random.randint(15, 45))).strftime("%Y-%m-%dT%H:%M:%SZ")
+            author_date = (datetime.now(UTC) - timedelta(minutes=random.randint(15, 45))).strftime("%Y-%m-%dT%H:%M:%SZ")  # noqa: E501
             payload["author"] = {
                 "name": author_name,
                 "email": author_email,
@@ -603,7 +603,7 @@ class GitHubClient:
                         "fetch_user_merged_prs: GET /user returned no login, using provided '%s'",
                         username,
                     )
-        except Exception:
+        except Exception as exc:
             logger.warning(
                 "fetch_user_merged_prs: could not validate username via GET /user: %s — "
                 "using provided '%s'",
@@ -905,7 +905,7 @@ class GitHubClient:
                 check_run_id, exc.response.status_code,
             )
             return ""
-        except Exception:
+        except Exception as exc:
             logger.warning("Failed to download CI log for job %d: %s", check_run_id, exc)
             return ""
 

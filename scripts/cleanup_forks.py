@@ -142,7 +142,7 @@ def main():
         if answer == "y":
             for f in deletable:
                 fork_name = f["fork"]
-                fork_owner, fork_repo = fork_name.split("/", 1)
+                fork_owner, _fork_repo = fork_name.split("/", 1)
                 parent_owner, parent_name = f["parent"].split("/", 1)
 
                 # FINAL CHECK — re-verify immediately before delete to close the TOCTOU window.
@@ -151,7 +151,7 @@ def main():
                     active_prs = get_prs_from_fork(fork_owner, parent_owner, parent_name)
                     open_prs = [p for p in active_prs if p["state"] == "open"]
                     if open_prs:
-                        print(f"   〱 Skipping {fork_name} — {len(open_prs)} PR(s) appeared since check")
+                        print(f"   〱 Skipping {fork_name} — {len(open_prs)} PR(s) appeared since check")  # noqa: E501
                         continue
                 except Exception as e:
                     print(f"   〱 Skipping {fork_name} — final PR check failed: {e}")

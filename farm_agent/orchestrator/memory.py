@@ -654,7 +654,7 @@ class Memory:
         try:
             await self._db.execute(
                 """INSERT OR REPLACE INTO knowledge_base (repo_name, entry_type, content, created_at)
-                   VALUES (?, 'qa_lesson', ?, ?)""",
+                   VALUES (?, 'qa_lesson', ?, ?)""",  # noqa: E501
                 (repo_name, content, datetime.now(UTC).isoformat()),
             )
             await self._db.commit()
@@ -678,7 +678,7 @@ class Memory:
             deleted = cursor.rowcount
             if deleted > 0:
                 logger.info(
-                    "Garbage Collection: purged %d stale knowledge base entries (older than %d days)",
+                    "Garbage Collection: purged %d stale knowledge base entries (older than %d days)",  # noqa: E501
                     deleted,
                     days,
                 )
@@ -697,7 +697,7 @@ class Memory:
 
         try:
             cursor = await self._db.execute(
-                "SELECT COUNT(*) FROM api_usage_log WHERE provider = 'openrouter' AND date(timestamp, 'unixepoch') = date('now')",
+                "SELECT COUNT(*) FROM api_usage_log WHERE provider = 'openrouter' AND date(timestamp, 'unixepoch') = date('now')",  # noqa: E501
             )
             row = await cursor.fetchone()
             return row[0] if row else 0
