@@ -190,8 +190,11 @@ class SuperHumanLoop:
             chat_id=self._pipeline.config.notifications.telegram_chat_id,
         )
 
-    def _new_day_check(self) -> bool:
-        """Check if a new calendar day has started. Returns True if day changed."""
+    async def _new_day_check(self) -> bool:
+        """Check if a new calendar day has started. Returns True if day changed.
+
+        Also runs knowledge base garbage collection once per day.
+        """
         today = datetime.now(UTC).date()
         if self._current_day != today:
             self._current_day = today
@@ -207,6 +210,18 @@ class SuperHumanLoop:
             logger.info(_thought("WAKE_UP", limit=self._daily_pr_target))
             self._daily_log.log_new_day(self._daily_pr_target)
             self._quota_logged_today = False  # reset for new day
+
+            # ── Knowledge Base Garbage Collection ──────────────────────
+            # Purge stale QA lessons older than 90 days once per day.
+            try:
+                deleted_count = await self._memory.run_kb_garbage_collection(days=90)
+                logger.info(
+                    "🧹 Garbage Collection complete: Purged %d stale knowledge base entries.",
+                    deleted_count,
+                )
+            except Exception as exc:
+                logger.warning("KB garbage collection failed (non-fatal): %s", exc)
+
             return True
         return False
 
@@ -765,7 +780,7 @@ class SuperHumanLoop:
                 break
 
             # ── New day check & target reset ────────────────────────────
-            self._new_day_check()
+            await self._new_day_check()
 
             remaining = max(0, self._daily_pr_target - self._prs_created_today)
 

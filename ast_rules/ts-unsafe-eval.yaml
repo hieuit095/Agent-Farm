@@ -1,0 +1,28 @@
+# ts-unsafe-eval.yaml
+# Targets: eval() and exec() calls with dynamic input in TypeScript code
+# Rationale: eval/exec with user-controlled input can lead to arbitrary code execution
+# Note: TypeScript is a superset of JavaScript; these patterns also catch JS usage in .ts files
+id: ts-unsafe-eval
+language: typescript
+rule:
+  pattern: eval($ARG)
+constraints:
+  ARG:
+    not:
+      kind: string
+message: "Potentially unsafe eval() call detected in TypeScript. If $ARG contains user input, this can lead to arbitrary code execution."
+severity: error
+tags: [security, code-injection]
+
+---
+id: ts-unsafe-exec
+language: typescript
+rule:
+  pattern: exec($ARG)
+constraints:
+  ARG:
+    not:
+      kind: string
+message: "Potentially unsafe exec() call detected in TypeScript. If $ARG contains user input, this can lead to arbitrary code execution."
+severity: error
+tags: [security, code-injection]

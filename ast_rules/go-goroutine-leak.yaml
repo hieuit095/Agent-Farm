@@ -1,0 +1,51 @@
+# go-goroutine-leak.yaml
+# Targets: Unclosed channels, stuck goroutines, leaked goroutines
+# Rationale: Goroutine leaks cause memory bloat and eventual OOM crashes
+id: go-goroutine-leak-channel
+language: go
+rule:
+  pattern: $CHAN <- $VAL
+constraints:
+  CHAN:
+    kind: identifier
+  VAL:
+    kind: identifier
+message: "Channel send detected. Ensure the receiving end is always ready or the channel is properly closed to prevent goroutine leaks."
+severity: warning
+tags: [memory-leak, goroutine-leak, concurrency]
+
+---
+id: go-missing-wg-wait
+language: go
+rule:
+  pattern: |
+    go func() {
+        $BODY
+    }()
+where:
+  BODY:
+    not:
+      contains_any:
+        - kind: call_expression
+          expression:
+            has:
+              identifier: "(*sync.WaitGroup).Done"
+        - kind: call_expression
+          expression:
+            has:
+              identifier: "wg.Done"
+message: "Goroutine launched without WaitGroup tracking. This can cause the goroutine to outlive its intended lifetime."
+severity: warning
+tags: [goroutine-leak, concurrency]
+
+---
+id: go-channel-never-closed
+language: go
+rule:
+  pattern: $CHAN = make($TYPE)
+constraints:
+  CHAN:
+    kind: identifier
+message: "Channel created. Ensure it is closed when no longer needed to prevent goroutine leaks."
+severity: info
+tags: [goroutine-leak, resource-cleanup]

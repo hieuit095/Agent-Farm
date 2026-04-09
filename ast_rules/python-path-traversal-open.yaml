@@ -1,0 +1,70 @@
+# python-path-traversal-open.yaml v036
+# Targets: open() with unsanitized dynamic paths (f-strings, concatenation, variables)
+# Rationale: Path traversal via user-controlled filenames can read/write sensitive files
+# Filter: Exclude hardcoded literal paths
+id: python-path-traversal-open
+language: python
+rule:
+  pattern: open($PATH, $MODE)
+constraints:
+  PATH:
+    has:
+      any:
+        - fstring: $ANY
+        - binary: "+"
+        - call: $FUNC
+  PATH:
+    not:
+      kind: string
+where:
+  MODE:
+    not:
+      regex: "^r$"
+message: "open() called with a dynamic path constructed from variables or string operations. If $PATH contains user input, path traversal (../) attacks can read or write arbitrary files. Validate and sanitize the path using os.path.basename() or pathlib.Path().resolve()."
+severity: error
+tags: [security, path-traversal, file-access, injection]
+
+---
+id: python-path-traversal-os-path-join
+language: python
+rule:
+  pattern: os.path.join($BASE, $USERINPUT)
+constraints:
+  USERINPUT:
+    not:
+      kind: string
+message: "os.path.join() with a non-literal second argument. Ensure $USERINPUT is sanitized and cannot contain path traversal sequences (../). Use pathlib and .resolve() with strict checking."
+severity: warning
+tags: [security, path-traversal, os-path]
+
+---
+id: python-path-traversal-readfile
+language: python
+rule:
+  pattern: $FUNC($PATH)
+constraints:
+  FUNC:
+    has:
+      any:
+        - identifier: "read_file"
+        - identifier: "read_text"
+        - identifier: "open"
+  PATH:
+    has:
+      any:
+        - fstring: $ANY
+        - binary: "+"
+message: "File read operation with dynamic path. Sanitize $PATH before use to prevent path traversal attacks."
+severity: error
+tags: [security, path-traversal]
+
+---
+# sg scan validation:
+# SHOULD MATCH (vulnerable):
+#   open(f"uploads/{filename}", "r")
+#   open(user_input + ".txt", "r")
+#   os.path.join("/data/", user_filename)
+#
+# SHOULD NOT MATCH (safe):
+#   open("/etc/passwd", "r")  # hardcoded literal
+#   open("config.json", "r")  # hardcoded string

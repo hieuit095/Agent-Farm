@@ -1,0 +1,19 @@
+# python-production-assert.yaml
+# Targets: assert statements used for data validation or control flow in production
+# Rationale: In Python, assert statements are stripped with -O (optimize) flag.
+# If asserts are used for validation, disabling them can cause data corruption or
+# allow invalid states to propagate silently.
+# Filter: Exclude tests/ directories (asserts are OK in tests)
+id: python-production-assert
+language: python
+rule:
+  pattern: assert $EXPR
+constraints:
+  EXPR:
+    not:
+      inside:
+        kind: function_item
+        stopBy: end
+message: "assert statement detected in production code. When Python runs with -O flag, asserts are stripped and do not execute. Do not use assert for data validation or security checks."
+severity: warning
+tags: [data-corruption, security, optimization]

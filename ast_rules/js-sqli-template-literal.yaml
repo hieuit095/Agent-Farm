@@ -1,0 +1,53 @@
+# js-sqli-template-literal.yaml v036
+# Targets: Template literals in SQL query execution contexts (raw SQL, query methods)
+# Rationale: Template literals with interpolation into SQL can enable injection attacks
+# Precision: Exclude function arguments where inputs are validated/sanitized
+id: js-sqli-template-literal
+language: javascript
+rule:
+  pattern: $DB.query($TPL)
+constraints:
+  TPL:
+    has:
+      template_literal: $ANY
+message: "Database query using template literal with interpolation. If $ANY contains user input, SQL injection is possible. Use parameterized queries: db.query('SELECT * FROM users WHERE id = ?', [userId])."
+severity: error
+tags: [security, sqli, injection, critical]
+
+---
+id: js-sqli-raw-string-concat
+language: javascript
+rule:
+  pattern: $DB.query($Q1 + $Q2)
+constraints:
+  Q1:
+    not:
+      kind: string
+message: "SQL query built by concatenating strings before db.query(). Use parameterized queries instead."
+severity: error
+tags: [security, sqli, concatenation]
+
+---
+id: js-sql-execute-raw
+language: javascript
+rule:
+  pattern: $DB.execute($RAW_SQL)
+constraints:
+  RAW_SQL:
+    has:
+      any:
+        - template_literal: $ANY
+        - binary: "+"
+message: "Raw SQL execution with dynamic string construction. Parameterize all user-controlled values."
+severity: error
+tags: [security, sqli, raw-execution]
+
+---
+# sg scan validation:
+# SHOULD MATCH (vulnerable):
+#   db.query(`SELECT * FROM users WHERE id=${userId}`)
+#   connection.execute('SELECT * FROM items WHERE name=' + itemName)
+#
+# SHOULD NOT MATCH (safe):
+#   db.query('SELECT * FROM users WHERE id = ?', [userId])
+#   pool.query(`SELECT * FROM products WHERE category = 'electronics'`)

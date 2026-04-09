@@ -1,0 +1,52 @@
+# go-nil-pointer-interface.yaml v036
+# Targets: Interface/typed nil dereference without nil-check in function body
+# Rationale: Panic from nil interface assertion causes denial of service
+# Precision: Only flag if the interface access occurs before any nil guard
+id: go-nil-interface-assertion
+language: go
+rule:
+  pattern: $VAR.$METHOD()
+constraints:
+  VAR:
+    has:
+      any:
+        - identifier: "err"
+        - identifier: "resp"
+        - identifier: "result"
+        - identifier: "val"
+  METHOD:
+    has:
+      any:
+        - text: "Error"
+        - text: "Ok"
+        - text: "Value"
+        - text: "Get"
+where:
+  kind: call_expression
+message: "Method call on interface-typed variable without nil guard. If $VAR is nil at runtime, this panics. Add a nil check: if $VAR != nil { $VAR.$METHOD() }."
+severity: error
+tags: [security, nil-dereference, panic, DoS]
+
+---
+id: go-nil-interface-typed-return
+language: go
+rule:
+  pattern: $RESULT = $FUNC()
+constraints:
+  FUNC:
+    kind: call_expression
+where:
+  kind: function_item
+message: "Return value from function call used without nil check. Assigning a nil interface can cause panics when methods are called on it later."
+severity: warning
+tags: [security, nil-interface, assignment]
+
+---
+# sg scan validation:
+# SHOULD MATCH (vulnerable):
+#   result, _ := json.Decode(data)
+#   result.Get("key")  # no nil check on result
+#
+# SHOULD NOT MATCH (safe):
+#   if err != nil { return err }
+#   if result != nil { result.Get("key") }

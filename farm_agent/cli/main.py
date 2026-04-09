@@ -75,7 +75,7 @@ def print_banner():
  | |__| (_) | | | | |_| |  | | |_) / ___ \\ | |
   \\____\\___/|_| |_|\\__|_|  |_|_.__/_/   \\_\\___|
 
-  [dim]AI Agent for Open Source Contributions v{__version__}[/dim]
+  [dim]Senior Open Source Contributor v{__version__}[/dim]
 [/bold cyan]"""
     console.print(banner)
 
@@ -224,6 +224,59 @@ def hunt(ctx, rounds, delay, language, mode, dry_run):
 
     pipeline = ContribPipeline(config)
     result = asyncio.run(pipeline.hunt(rounds=rounds, delay_sec=delay, dry_run=dry_run, mode=mode))
+    _print_result(result, dry_run)
+
+
+@cli.command("hunt-circular")
+@click.option(
+    "--json-path",
+    default="target_repo.json",
+    help="Path to target_repo.json file",
+)
+@click.option(
+    "--mode",
+    "-m",
+    type=click.Choice(["analysis", "issues", "both"]),
+    default="both",
+    help="Hunt mode: analysis (code scan), issues (solve issues), both",
+)
+@click.option("--dry-run", is_flag=True, help="Analyze without creating PRs")
+@click.pass_context
+def hunt_circular(ctx, json_path, mode, dry_run):
+    """Circular Target Loop: process one target from target_repo.json.
+
+    Picks the target with the oldest scanned_at timestamp and processes
+    it through the full pipeline (issues + analysis). The scanned_at is
+    updated before any analysis, guaranteeing crash-safe rotation.
+
+    For continuous operation, call this command repeatedly (e.g., from
+    the SuperHumanLoop or a cron job).
+    """
+    print_banner()
+
+    config = load_config(ctx.obj["config_path"])
+
+    if not config.github.token:
+        console.print("[red]GitHub token not configured[/red]")
+        sys.exit(1)
+
+    if not config.llm.api_key and not config.llm.use_vertex:
+        console.print("[red]LLM API key not configured[/red]")
+        sys.exit(1)
+
+    mode_label = "[yellow]DRY RUN[/yellow]" if dry_run else "[red]LIVE[/red]"
+    console.print(f"\nCircular Target Loop ({mode_label})")
+    console.print(f"   Mode: {mode}")
+    console.print(f"   Targets: {json_path}")
+    console.print(f"   LLM: {config.llm.provider} ({config.llm.model})")
+    console.print()
+
+    from farm_agent.orchestrator.pipeline import ContribPipeline
+
+    pipeline = ContribPipeline(config)
+    result = asyncio.run(
+        pipeline.run_circular(json_path=json_path, dry_run=dry_run, mode=mode)
+    )
     _print_result(result, dry_run)
 
 
@@ -490,6 +543,43 @@ def janitor(ctx):
         await _run_janitor(username)
 
     asyncio.run(_main())
+
+
+@cli.command("gc")
+@click.option("--days", default=90, help="Purge entries older than N days")
+@click.pass_context
+def gc(ctx, days):
+    """Garbage Collection — purge stale knowledge base entries.
+
+    Removes knowledge_base entries (QA lessons, audit history, etc.)
+    that are older than the specified number of days.
+    Default: 90 days.
+    """
+    print_banner()
+
+    config = load_config(ctx.obj["config_path"])
+
+    from farm_agent.orchestrator.memory import Memory
+
+    async def _run_gc():
+        memory = Memory(config.storage.resolved_db_path)
+        try:
+            await memory.init()
+            deleted = await memory.run_kb_garbage_collection(days=days)
+            if deleted > 0:
+                console.print(
+                    f"[green]🧹 Garbage Collection complete:[/green] "
+                    f"Purged [bold]{deleted}[/bold] stale knowledge base entries "
+                    f"(older than {days} days)."
+                )
+            else:
+                console.print(
+                    f"[dim]🧹 No stale entries found older than {days} days.[/dim]"
+                )
+        finally:
+            await memory.close()
+
+    asyncio.run(_run_gc())
 
 
 @cli.command()

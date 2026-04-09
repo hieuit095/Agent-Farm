@@ -232,6 +232,66 @@ class DiscoveryCriteria(BaseModel):
     exclude_repos: list[str] = Field(default_factory=list)  # full_name list
 
 
+class TargetRepoEntry(BaseModel):
+    """A single target repository entry from target_repo.json."""
+
+    entry_type: str = "repo"
+    repo_url: str
+    target: str | None = None
+    language: str | None = None
+    issue_info: dict | None = None
+    rule: str | None = None
+    verification_status: str | None = None
+    status: str = "PENDING"
+    stars: int = 0
+    bounty_amount: str | None = None
+    repo_fund_status: str | None = None
+    priority_score: str | None = None
+    roi_summary: str | None = None
+    friendliness_score: int | None = None
+    ai_policy: str | None = None
+    diamond_target: bool = False
+    scanned_at: datetime | None = None
+    legitimacy_score: int | None = None
+    reasoning: str | None = None
+    knowledge_base_entries: int | None = None
+
+
+class Vulnerability(BaseModel):
+    """A single validated vulnerability found by the Bloodhound analyzer."""
+
+    file: str
+    line: int
+    snippet: str
+    poc: str
+    fix: str
+    impact: str
+
+
+class VulnerabilityDossier(BaseModel):
+    """Dossier of validated vulnerabilities for a repository.
+
+    Produced by BloodhoundAnalyzer after ast-grep pre-filter and
+    LLM White-Hat audit. If has_bugs() returns False, the repo
+    is clean and no further processing is needed.
+    """
+
+    repo_url: str
+    target_commit: str
+    vulnerabilities: list[Vulnerability] = []
+
+    def has_bugs(self) -> bool:
+        return len(self.vulnerabilities) > 0 and self.vulnerabilities[0].file != "NONE"
+
+
+class QAResult(BaseModel):
+    """Result of QA hardcore evaluation of a generated patch."""
+
+    score: float
+    critiques: list[str]
+    approved: bool
+
+
 class RepoContext(BaseModel):
     """Full context about a repository for LLM prompting."""
 

@@ -1,0 +1,60 @@
+# ts-unsafe-deserialization.yaml v036
+# Targets: Unsafe deserialization of user/network data in TypeScript
+# Rationale: Deserializing untrusted data can lead to arbitrary code execution (prototype pollution, RCE)
+# Precision: Exclude hardcoded JSON fixtures and validated sources
+id: ts-unsafe-deserialization-eval
+language: typescript
+rule:
+  pattern: eval($ARG)
+constraints:
+  ARG:
+    has:
+      any:
+        - template_literal: $ANY
+        - identifier: "$INPUT"
+  ARG:
+    not:
+      kind: string
+message: "eval() with dynamic argument detected. This is a critical code injection risk if $ARG contains user input. Remove eval() or strictly validate and sanitize the input."
+severity: error
+tags: [security, code-injection, eval, rce, critical]
+
+---
+id: ts-unsafe-json-parse
+language: typescript
+rule:
+  pattern: JSON.parse($INPUT)
+constraints:
+  INPUT:
+    has:
+      any:
+        - identifier: "$USER"
+        - identifier: "$REQ"
+        - identifier: "$BODY"
+        - identifier: "$NET"
+message: "JSON.parse() applied to a variable that may contain untrusted input. If $INPUT is from user request, network, or storage, prototype pollution or unexpected behavior is possible. Validate the parsed structure before use."
+severity: warning
+tags: [security, deserialization, prototype-pollution]
+
+---
+id: ts-unsafe-yaml-load
+language: typescript
+rule:
+  pattern: yaml.load($YAMLSTR)
+constraints:
+  YAMLSTR:
+    not:
+      kind: string
+message: "yaml.load() parses YAML into JavaScript objects. If $YAMLSTR is from an untrusted source, this can cause code execution or prototype pollution. Use yaml.load($STR, { schema: yaml.JSON_SCHEMA }) with caution or prefer JSON."
+severity: error
+tags: [security, deserialization, yaml, prototype-pollution]
+
+---
+# sg scan validation:
+# SHOULD MATCH (vulnerable):
+#   eval(`console.log("${userInput}")`)
+#   const obj = JSON.parse(userProvidedString)
+#
+# SHOULD NOT MATCH (safe):
+#   JSON.parse('{"key": "value"}')  # hardcoded literal
+#   const obj = JSON.parse(trustedApiResponse)

@@ -6,12 +6,14 @@ that are good candidates for contributions.
 
 from __future__ import annotations
 
+import json
 import logging
 import random
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 from farm_agent.core.config import DiscoveryConfig
-from farm_agent.core.models import DiscoveryCriteria, Repository
+from farm_agent.core.models import DiscoveryCriteria, Repository, TargetRepoEntry
 from farm_agent.github.client import GitHubClient
 
 logger = logging.getLogger(__name__)
@@ -213,3 +215,79 @@ class RepoDiscovery:
             return s
 
         return sorted(repos, key=score, reverse=True)
+
+
+class JsonTargetDiscovery:
+    """Deterministic circular target loop from target_repo.json.
+
+    Reads targets, sorts by scanned_at ascending (oldest first),
+    and provides atomic update of scanned_at before analysis to
+    guarantee crash-safe rotation.
+    """
+
+    EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
+
+    def __init__(self, json_path: str | Path = "target_repo.json"):
+        self._path = Path(json_path)
+
+    def get_next_target(self) -> TargetRepoEntry | None:
+        """Return the target with the oldest scanned_at.
+
+        Sorts by scanned_at ascending. Missing/null scanned_at
+        is treated as epoch (1970-01-01), guaranteeing never-scanned
+        repos are processed first.
+        """
+        entries = self._load_entries()
+        if not entries:
+            return None
+        entries.sort(key=lambda e: e.scanned_at or self.EPOCH)
+        return entries[0]
+
+    def mark_scanned(self, repo_url: str) -> None:
+        """Update scanned_at to now and atomically save.
+
+        CRITICAL: Must be called BEFORE any analysis/LLM calls
+        to guarantee crash-safe target rotation.
+        """
+        entries = self._load_entries()
+        now = datetime.now(UTC)
+        for e in entries:
+            if e.repo_url == repo_url:
+                e.scanned_at = now
+                break
+        self._save_entries(entries)
+
+    def _load_entries(self) -> list[TargetRepoEntry]:
+        """Load and validate entries from the JSON file."""
+        if not self._path.exists():
+            logger.warning("target_repo.json not found at %s", self._path)
+            return []
+        try:
+            raw = json.loads(self._path.read_text(encoding="utf-8"))
+            return [TargetRepoEntry(**entry) for entry in raw]
+        except (json.JSONDecodeError, Exception) as exc:
+            logger.error("Failed to parse target_repo.json: %s", exc)
+            return []
+
+    def _save_entries(self, entries: list[TargetRepoEntry]) -> None:
+        """Atomically save entries back to JSON using temp-file-then-rename."""
+        tmp_path = self._path.with_suffix(".tmp")
+        data = [e.model_dump(mode="json") for e in entries]
+        tmp_path.write_text(
+            json.dumps(data, indent=2, ensure_ascii=False, default=str),
+            encoding="utf-8",
+        )
+        tmp_path.replace(self._path)
+
+    def mark_status(self, repo_url: str, status: str) -> None:
+        """Update the status field for a target entry and atomically save.
+
+        Used by the circular loop to mark targets as COMPLETED_NO_VULN
+        or other terminal statuses.
+        """
+        entries = self._load_entries()
+        for e in entries:
+            if e.repo_url == repo_url:
+                e.status = status
+                break
+        self._save_entries(entries)

@@ -1,0 +1,28 @@
+# python-unsafe-eval.yaml
+# Targets: eval() and exec() calls with dynamic input in production code
+# Rationale: eval/exec with user-controlled input can lead to arbitrary code execution
+# Filter: Exclude tests/ directories
+id: python-unsafe-eval
+language: python
+rule:
+  pattern: eval($ARG)
+constraints:
+  ARG:
+    not:
+      kind: string
+message: "Potentially unsafe eval() call detected. If $ARG contains user input, this can lead to arbitrary code execution."
+severity: error
+tags: [security, code-injection]
+
+---
+id: python-unsafe-exec
+language: python
+rule:
+  pattern: exec($ARG)
+constraints:
+  ARG:
+    not:
+      kind: string
+message: "Potentially unsafe exec() call detected. If $ARG contains user input, this can lead to arbitrary code execution."
+severity: error
+tags: [security, code-injection]

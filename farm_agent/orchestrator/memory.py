@@ -106,6 +106,14 @@ CREATE TABLE IF NOT EXISTS task_schedule (
     next_run    TEXT NOT NULL,
     updated_at  TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS knowledge_base (
+    repo_name   TEXT NOT NULL,
+    entry_type  TEXT NOT NULL,
+    content     TEXT NOT NULL,
+    created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(repo_name, entry_type, content)
+);
 """
 
 
@@ -608,6 +616,76 @@ class Memory:
         )
         rows = await cursor.fetchall()
         return [{"repo": r[0], "pr_type": r[1], "feedback": r[2]} for r in rows]
+
+    async def get_qa_lessons(self, repo_url: str) -> list[str]:
+        """Retrieve QA lessons for a repository from the knowledge base.
+
+        Returns a list of lesson strings sourced from past QA critiques.
+        Used by the generator to avoid repeating past architectural mistakes.
+        """
+        if self._db is None:
+            return []
+
+        # Normalize repo_url to just the owner/name part
+        repo_name = repo_url.rstrip("/")
+        if "://" in repo_name:
+            repo_name = repo_name.split("/")[-2] + "/" + repo_name.split("/")[-1]
+        if repo_name.startswith("www."):
+            repo_name = repo_name[4:]
+
+        try:
+            cursor = await self._db.execute(
+                """SELECT content FROM knowledge_base
+                   WHERE repo_name = ? AND entry_type = 'qa_lesson'
+                   ORDER BY created_at DESC""",
+                (repo_name,),
+            )
+            rows = await cursor.fetchall()
+            return [r[0] for r in rows]
+        except Exception as exc:
+            logger.debug("Could not fetch QA lessons for %s: %s", repo_name, exc)
+            return []
+
+    async def record_qa_lesson(self, repo_name: str, content: str) -> None:
+        """Record a QA lesson in the knowledge base."""
+        if self._db is None:
+            return
+
+        try:
+            await self._db.execute(
+                """INSERT OR REPLACE INTO knowledge_base (repo_name, entry_type, content, created_at)
+                   VALUES (?, 'qa_lesson', ?, ?)""",
+                (repo_name, content, datetime.now(UTC).isoformat()),
+            )
+            await self._db.commit()
+        except Exception as exc:
+            logger.debug("Could not record QA lesson for %s: %s", repo_name, exc)
+
+    async def run_kb_garbage_collection(self, days: int = 90) -> int:
+        """Purge stale knowledge base entries older than N days.
+
+        Returns the number of deleted rows.
+        """
+        if self._db is None:
+            return 0
+
+        try:
+            cursor = await self._db.execute(
+                "DELETE FROM knowledge_base WHERE created_at < datetime('now', ?)",
+                (f"-{days} days",),
+            )
+            await self._db.commit()
+            deleted = cursor.rowcount
+            if deleted > 0:
+                logger.info(
+                    "Garbage Collection: purged %d stale knowledge base entries (older than %d days)",
+                    deleted,
+                    days,
+                )
+            return deleted
+        except Exception as exc:
+            logger.error("KB garbage collection failed: %s", exc)
+            return 0
 
     async def get_outcome_stats(self) -> dict:
         """Get outcome statistics."""

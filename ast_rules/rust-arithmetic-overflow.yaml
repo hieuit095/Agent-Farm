@@ -1,0 +1,55 @@
+# rust-arithmetic-overflow.yaml
+# Targets: Division without verified denominator, missing checked math
+# Rationale: Division by zero panics; unchecked arithmetic overflow corrupts data
+id: rust-div-without-check
+language: rust
+rule:
+  pattern: $NUM / $DENOM
+constraints:
+  DENOM:
+    not:
+      regex: "^0$"
+message: "Division operation detected. Verify the denominator cannot be zero at runtime, or use checked_div()."
+severity: warning
+tags: [crash, division-by-zero, data-corruption]
+
+---
+id: rust-div-mod-zero
+language: rust
+rule:
+  pattern: $NUM % $DENOM
+constraints:
+  DENOM:
+    not:
+      regex: "^0$"
+message: "Modulo operation detected. Verify the divisor cannot be zero at runtime, or use checked_rem()."
+severity: warning
+tags: [crash, division-by-zero]
+
+---
+id: rust-missing-checked-add
+language: rust
+rule:
+  pattern: $A + $B
+constraints:
+  A:
+    kind: identifier
+  B:
+    kind: identifier
+message: "Addition without overflow check detected. Consider using checked_add() or saturating_add() to prevent integer overflow."
+severity: warning
+tags: [data-corruption, integer-overflow]
+
+---
+id: rust-missing-checked-mul
+language: rust
+rule:
+  pattern: $A * $B
+constraints:
+  A:
+    kind: identifier
+  B:
+    kind: identifier
+message: "Multiplication without overflow check detected. Consider using checked_mul() to prevent integer overflow."
+severity: warning
+tags: [data-corruption, integer-overflow]

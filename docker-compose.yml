@@ -9,7 +9,7 @@ services:
       dockerfile: Dockerfile
     entrypoint: []
     command: ["python", "-m", "farm_agent.cli.main", "superhuman"]
-    container_name: contribai_superhuman_1
+    container_name: farm_agent_superhuman_1
     restart: unless-stopped
     user: "0:0"
     healthcheck:

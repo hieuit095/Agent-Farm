@@ -1,0 +1,53 @@
+# solidity-reentrancy.yaml v028.1
+# Targets: Re-entrancy vulnerabilities - state changes after external calls
+# IMPORTANT: ast-grep cannot do semantic data-flow analysis. Rules are STRICTLY syntactic.
+# SCOPE LIMIT: Only flag patterns within the same function block.
+# Rationale: External calls to untrusted contracts can be exploited via reentrancy attacks
+id: solidity-reentrancy-call-value
+language: solidity
+rule:
+  pattern: |
+    $TARGET.call.value($VALUE)($DATA);
+where:
+  TARGET:
+    not:
+      kind: identifier
+      regex: "^(this|super)$"
+message: "Direct .call.value() detected. This is a high-risk reentrancy vector. Use ReentrancyGuard or pull-payment pattern."
+severity: error
+tags: [security, reentrancy, critical]
+
+---
+id: solidity-reentrancy-transfer
+language: solidity
+rule:
+  pattern: |
+    $TARGET.transfer($AMOUNT);
+message: ".transfer() is deprecated (Solidity 0.4.24+). It forwards 2300 gas which may be insufficient. Use pull-payment pattern."
+severity: warning
+tags: [security, payment, deprecated]
+
+---
+id: solidity-reentrancy-send
+language: solidity
+rule:
+  pattern: |
+    $TARGET.send($AMOUNT);
+message: ".send() returns false but error is ignored. Always check return value or use ReentrancyGuard."
+severity: warning
+tags: [security, error-handling]
+
+---
+id: solidity-reentrancy-delegatecall
+language: solidity
+rule:
+  pattern: |
+    $TARGET.delegatecall($DATA);
+where:
+  TARGET:
+    not:
+      kind: identifier
+      regex: "^(this)$"
+message: "delegatecall to external contract. Ensure the called code is trusted and state is protected."
+severity: error
+tags: [security, delegatecall, critical]

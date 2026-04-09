@@ -15,6 +15,9 @@ import time
 import uuid
 from fnmatch import fnmatch
 
+import json
+from pathlib import Path
+
 from farm_agent.core.config import AnalysisConfig
 from farm_agent.core.exceptions import AnalysisError
 from farm_agent.core.models import (
@@ -26,6 +29,8 @@ from farm_agent.core.models import (
     RepoContext,
     Repository,
     Severity,
+    Vulnerability,
+    VulnerabilityDossier,
 )
 from farm_agent.github.client import GitHubClient
 from farm_agent.llm.provider import LLMProvider
@@ -952,3 +957,318 @@ class CodeAnalyzer:
                 repo_full_name, exc,
             )
             return "WELCOMING"
+
+
+# ── Bloodhound Red Team Analyzer ────────────────────────────────────────────────
+
+
+class BloodhoundAnalyzer:
+    """AST-grep pre-filter → LLM White-Hat audit pipeline.
+
+    Uses local ast-grep (sg) rules to find exact bug patterns first,
+    then sends ONLY the flagged snippets to the LLM for validation,
+    POC generation, and fix suggestion. This drastically reduces LLM
+    API costs compared to blind-reading entire codebases.
+    """
+
+    LANGUAGE_RULE_PREFIX: dict[str, str] = {
+        "Python": "python",
+        "JavaScript": "js",
+        "TypeScript": "ts",
+        "Go": "go",
+        "Rust": "rust",
+        "Solidity": "solidity",
+    }
+
+    SG_SCAN_TIMEOUT = 120
+
+    def __init__(
+        self,
+        llm: LLMProvider,
+        github: GitHubClient,
+        config: AnalysisConfig,
+    ):
+        self._llm = llm
+        self._github = github
+        self._config = config
+        self._sg_available: bool | None = None
+
+    def _check_sg_available(self) -> bool:
+        if self._sg_available is not None:
+            return self._sg_available
+
+        import shutil
+
+        if shutil.which("sg") is None:
+            logger.error(
+                "ast-grep (sg) binary not found in PATH. "
+                "Bloodhound requires sg. Aborting scan."
+            )
+            self._sg_available = False
+        else:
+            logger.info("ast-grep (sg) binary found — Bloodhound ready")
+            self._sg_available = True
+        return self._sg_available
+
+    def _resolve_rule_files(self, language: str | None) -> list[Path]:
+        rules_dir = Path("ast_rules")
+        if not rules_dir.is_dir():
+            logger.warning("ast_rules/ directory not found at %s", rules_dir.resolve())
+            return []
+
+        if not language:
+            all_rules = sorted(rules_dir.glob("*.yaml"))
+            if all_rules:
+                logger.info("No language specified — using all %d rule files", len(all_rules))
+            return all_rules
+
+        prefix = self.LANGUAGE_RULE_PREFIX.get(language)
+        if prefix is None:
+            logger.info("No ast-grep rule prefix for language '%s' — skipping bloodhound", language)
+            return []
+
+        rule_files = sorted(rules_dir.glob(f"{prefix}-*.yaml"))
+        logger.info("Language '%s' → prefix '%s' → %d rule files", language, prefix, len(rule_files))
+        return rule_files
+
+    async def _clone_repo_shallow(self, repo: Repository) -> Path | None:
+        import shutil as shutil_mod
+        import subprocess
+        import tempfile
+
+        clone_url = repo.clone_url or f"https://github.com/{repo.full_name}.git"
+        tmp_dir = tempfile.mkdtemp(prefix=f"bloodhound_{repo.full_name.replace('/', '_')}_")
+
+        try:
+            proc = subprocess.run(
+                ["git", "clone", "--depth", "1", clone_url, tmp_dir],
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+            if proc.returncode != 0:
+                logger.error("Failed to clone %s: %s", repo.full_name, proc.stderr[:500])
+                shutil_mod.rmtree(tmp_dir, ignore_errors=True)
+                return None
+
+            logger.info("Cloned %s → %s", repo.full_name, tmp_dir)
+            return Path(tmp_dir)
+        except subprocess.TimeoutExpired:
+            logger.error("Timeout cloning %s", repo.full_name)
+            shutil_mod.rmtree(tmp_dir, ignore_errors=True)
+            return None
+        except Exception as exc:
+            logger.error("Error cloning %s: %s", repo.full_name, exc)
+            shutil_mod.rmtree(tmp_dir, ignore_errors=True)
+            return None
+
+    async def _run_sg_scan(self, rule_file: Path, repo_path: Path) -> list[dict]:
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "sg", "scan", "--rule", str(rule_file), "--json=compact", str(repo_path),
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, stderr = await asyncio.wait_for(
+                proc.communicate(), timeout=self.SG_SCAN_TIMEOUT
+            )
+
+            if proc.returncode != 0:
+                stderr_text = stderr.decode("utf-8", errors="replace")[:500]
+                logger.debug("sg scan returned %d for rule %s: %s", proc.returncode, rule_file.name, stderr_text)
+                return []
+
+            matches = []
+            for line in stdout.decode("utf-8", errors="replace").splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    obj = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+
+                file_path = obj.get("file", obj.get("path", ""))
+                if file_path:
+                    try:
+                        file_path = str(Path(file_path).relative_to(repo_path))
+                    except ValueError:
+                        pass
+
+                start = obj.get("range", {}).get("start", {})
+                line_num = start.get("line", obj.get("line", 0))
+                text = obj.get("text", obj.get("match", ""))
+
+                matches.append({
+                    "file": file_path,
+                    "line": line_num,
+                    "match": text,
+                    "rule": rule_file.stem,
+                })
+
+            if matches:
+                logger.info("Rule %s: %d matches", rule_file.name, len(matches))
+            return matches
+
+        except asyncio.TimeoutError:
+            logger.warning("sg scan timed out for rule %s", rule_file.name)
+            return []
+        except Exception as exc:
+            logger.error("sg scan failed for rule %s: %s", rule_file.name, exc)
+            return []
+
+    async def _white_hat_audit(
+        self, repo_url: str, repo_name: str, matches: list[dict]
+    ) -> VulnerabilityDossier:
+        context_parts = []
+        for m in matches:
+            context_parts.append(
+                f"File: {m['file']}\nLine: {m['line']}\nRule: {m['rule']}\nSnippet:\n{m['match']}\n"
+            )
+        context_str = "\n---\n".join(context_parts)
+
+        system_prompt = (
+            "You are a WHITE-HAT SECURITY RESEARCHER. You audit code snippets "
+            "that were flagged by a static analyzer (ast-grep). Your job is to "
+            "validate whether these are TRUE positives or FALSE positives.\n\n"
+            "Return ONLY a JSON array. Each element must have these exact keys: "
+            '"file", "line", "snippet", "poc", "fix", "impact".\n\n'
+            "For TRUE positives:\n"
+            "- file: the file path\n"
+            "- line: the line number\n"
+            "- snippet: the vulnerable code fragment\n"
+            "- poc: how to trigger the vulnerability (proof of concept)\n"
+            "- fix: the suggested fix code\n"
+            "- impact: severity description\n\n"
+            "If ALL matches are false positives and NO actual vulnerabilities "
+            "exist, return exactly: "
+            '[{"file": "NONE", "line": 0, "snippet": "", "poc": "", "fix": "", "impact": ""}]'
+        )
+
+        user_prompt = (
+            f"Repository: {repo_url}\n\n"
+            f"The following code snippets were flagged by our static analyzer "
+            f"for repository {repo_name}:\n\n"
+            f"{context_str}\n\n"
+            f"Audit each snippet. Validate true positives and reject false positives. "
+            f"Return the JSON array."
+        )
+
+        try:
+            response = await self._llm.complete(user_prompt, system=system_prompt, temperature=0.1)
+            return self._parse_audit_response(response, repo_url)
+        except Exception as exc:
+            logger.error("White-Hat audit LLM call failed: %s", exc)
+            return VulnerabilityDossier(repo_url=repo_url, target_commit="unknown", vulnerabilities=[])
+
+    def _parse_audit_response(self, response: str, repo_url: str) -> VulnerabilityDossier:
+        import re as _re
+
+        text = response.strip()
+
+        fence_match = _re.search(r"```(?:json)?\s*(.*?)```", text, _re.DOTALL | _re.IGNORECASE)
+        if fence_match:
+            text = fence_match.group(1).strip()
+
+        bracket_start = text.find("[")
+        bracket_end = text.rfind("]")
+        if bracket_start != -1 and bracket_end != -1 and bracket_end > bracket_start:
+            text = text[bracket_start:bracket_end + 1]
+
+        try:
+            parsed = json.loads(text)
+        except json.JSONDecodeError:
+            logger.warning("Failed to parse LLM audit response as JSON")
+            return VulnerabilityDossier(repo_url=repo_url, target_commit="unknown", vulnerabilities=[])
+
+        if not isinstance(parsed, list):
+            logger.warning("LLM audit response is not a JSON array")
+            return VulnerabilityDossier(repo_url=repo_url, target_commit="unknown", vulnerabilities=[])
+
+        vulns = []
+        for item in parsed:
+            if not isinstance(item, dict):
+                continue
+            try:
+                vulns.append(Vulnerability(
+                    file=str(item.get("file", "")),
+                    line=int(item.get("line", 0)),
+                    snippet=str(item.get("snippet", "")),
+                    poc=str(item.get("poc", "")),
+                    fix=str(item.get("fix", "")),
+                    impact=str(item.get("impact", "")),
+                ))
+            except (ValueError, TypeError):
+                continue
+
+        return VulnerabilityDossier(repo_url=repo_url, target_commit="unknown", vulnerabilities=vulns)
+
+    async def run_bloodhound(self, repo: Repository) -> VulnerabilityDossier:
+        """Execute the full Bloodhound pipeline for a repository.
+
+        1. Check sg binary
+        2. Resolve rule files for repo language
+        3. Clone repo shallow
+        4. Run ast-grep scans concurrently
+        5. If no matches → return empty dossier (skip LLM entirely)
+        6. If matches → White-Hat LLM audit
+        7. Cleanup temp clone
+        """
+        empty_dossier = VulnerabilityDossier(
+            repo_url=repo.url, target_commit="unknown", vulnerabilities=[]
+        )
+
+        if not self._check_sg_available():
+            logger.error("sg binary not found — returning empty dossier for %s", repo.full_name)
+            return empty_dossier
+
+        rule_files = self._resolve_rule_files(repo.language)
+        if not rule_files:
+            logger.info("No ast-grep rules for language '%s' — skipping bloodhound for %s", repo.language, repo.full_name)
+            return empty_dossier
+
+        import shutil
+
+        clone_path = await self._clone_repo_shallow(repo)
+        if clone_path is None:
+            logger.error("Failed to clone %s — aborting bloodhound", repo.full_name)
+            return empty_dossier
+
+        try:
+            logger.info("Running %d ast-grep rules against %s", len(rule_files), repo.full_name)
+            scan_tasks = [self._run_sg_scan(rf, clone_path) for rf in rule_files]
+            all_results = await asyncio.gather(*scan_tasks)
+
+            all_matches = []
+            for result in all_results:
+                all_matches.extend(result)
+
+            seen: set[tuple[str, int, str]] = set()
+            unique_matches = []
+            for m in all_matches:
+                key = (m["file"], m["line"], m["rule"])
+                if key not in seen:
+                    seen.add(key)
+                    unique_matches.append(m)
+
+            logger.info("ast-grep found %d unique matches across %d rules for %s", len(unique_matches), len(rule_files), repo.full_name)
+
+            if not unique_matches:
+                logger.info("Clean sweep — no ast-grep matches for %s, skipping LLM audit", repo.full_name)
+                return empty_dossier
+
+            dossier = await self._white_hat_audit(repo_url=repo.url, repo_name=repo.full_name, matches=unique_matches)
+
+            if dossier.has_bugs():
+                logger.info("Bloodhound: %d validated vulnerabilities in %s", len(dossier.vulnerabilities), repo.full_name)
+            else:
+                logger.info("Bloodhound: all matches were false positives for %s", repo.full_name)
+
+            return dossier
+
+        finally:
+            try:
+                shutil.rmtree(str(clone_path), ignore_errors=True)
+                logger.debug("Cleaned up clone at %s", clone_path)
+            except Exception:
+                pass

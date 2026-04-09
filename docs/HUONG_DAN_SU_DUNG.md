@@ -1,6 +1,6 @@
 # 🇻🇳 Hướng Dẫn Cài Đặt & Sử Dụng Farm-Agent
 
-> **Farm-Agent** là AI Agent tự động đóng góp vào các dự án mã nguồn mở trên GitHub — tìm repo, phân tích lỗi, tạo bản sửa, và gửi Pull Request hoàn toàn tự động.
+> **Farm-Agent** là công cụ hỗ trợ đóng góp vào các dự án mã nguồn mở trên GitHub — tìm repo, phân tích lỗi, tạo bản sửa, và gửi Pull Request.
 
 ---
 

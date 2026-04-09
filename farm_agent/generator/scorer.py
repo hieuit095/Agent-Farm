@@ -214,3 +214,158 @@ class QualityScorer:
             0.4,
             f"Finding in {finding_file} but changes in {changed_files}",
         )
+
+
+class QAHardcoreScorer:
+    """Ruthless LLM-powered QA scorer for the Bounty Loop.
+
+    Evaluates a generated patch against the originating VulnerabilityDossier.
+    Only patches scoring >= 9.0 / 10.0 are approved. Failed patches generate
+    strict critiques that are recorded in the Knowledge Base for the next
+    DEV cycle.
+    """
+
+    MIN_APPROVAL_SCORE = 9.0
+
+    def __init__(self, llm):
+        self._llm = llm
+
+    async def evaluate(
+        self,
+        dossier: "VulnerabilityDossier",
+        contribution: "Contribution",
+    ) -> "QAResult":
+        """Score a patch against its originating vulnerability dossier.
+
+        Returns a QAResult with score (0.0-10.0), critiques, and approval status.
+        """
+        import json as _json
+
+        from farm_agent.core.models import QAResult
+
+        # ── Build diff string from contribution ──────────────────────────
+        diff_parts = []
+        for change in contribution.changes:
+            if change.original_content:
+                import difflib
+
+                diff = "".join(difflib.unified_diff(
+                    change.original_content.splitlines(keepends=True),
+                    change.new_content.splitlines(keepends=True),
+                    fromfile=f"a/{change.path}",
+                    tofile=f"b/{change.path}",
+                    n=3,
+                ))
+                diff_parts.append(diff[:4000])
+            else:
+                diff_parts.append(
+                    f"[NEW FILE] {change.path}\n{change.new_content[:4000]}"
+                )
+        diff_str = "\n\n".join(diff_parts) if diff_parts else "No diff available."
+
+        # ── Build vulnerability context ──────────────────────────────────
+        vuln_parts = []
+        for v in dossier.vulnerabilities:
+            vuln_parts.append(
+                f"File: {v.file}\n"
+                f"Line: {v.line}\n"
+                f"Snippet: {v.snippet}\n"
+                f"PoC: {v.poc}\n"
+                f"Fix: {v.fix}\n"
+                f"Impact: {v.impact}"
+            )
+        vuln_str = "\n---\n".join(vuln_parts)
+
+        # ── System prompt: strict JSON enforcement ──────────────────────
+        system_prompt = (
+            "You are an elite, ruthless QA Security Engineer grading a patch "
+            "against a vulnerability report. You grade strictly from 0.0 to 10.0.\n\n"
+            "Weighted grading criteria:\n"
+            "- Logic (30%): Does the fix correctly address the vulnerability?\n"
+            "- Architecture (25%): Does the fix fit the codebase architecture?\n"
+            "- Idioms (20%): Does the fix follow language/framework conventions?\n"
+            "- Security (15%): Does the fix not introduce new security issues?\n"
+            "- Scope/Tests (10%): Is the change minimal and focused?\n\n"
+            "Return ONLY a JSON object with this exact schema:\n"
+            '{"score": 8.5, "critiques": ["critique 1", "critique 2"], "approved": false}\n\n'
+            "The 'approved' boolean MUST be true ONLY if the score is >= 9.0.\n"
+            "Be ruthless. A score of 9.0+ means the patch is production-ready "
+            "with zero issues. Most patches should score 5-8.\n\n"
+            "DO NOT include any text before or after the JSON object. "
+            "DO NOT wrap it in markdown fences. "
+            "Return ONLY the raw JSON."
+        )
+
+        user_prompt = (
+            f"## Repository: {dossier.repo_url}\n\n"
+            f"## Vulnerability Report\n{vuln_str}\n\n"
+            f"## Proposed Patch (Diff)\n{diff_str}\n\n"
+            f"## Commit Message\n{contribution.commit_message}\n\n"
+            f"Grade this patch. Return ONLY the JSON object."
+        )
+
+        try:
+            response = await self._llm.complete(
+                user_prompt, system=system_prompt, temperature=0.1,
+            )
+        except Exception as exc:
+            logger.error("QA Hardcore LLM call failed: %s", exc)
+            return QAResult(
+                score=0.0,
+                critiques=[f"System Error: QA Agent LLM call failed: {exc}"],
+                approved=False,
+            )
+
+        # ── Parse JSON response ──────────────────────────────────────────
+        text = response.strip()
+
+        # Strip markdown fences if present
+        import re as _re
+        fence_match = _re.search(
+            r"```(?:json)?\s*(.*?)```", text, _re.DOTALL | _re.IGNORECASE
+        )
+        if fence_match:
+            text = fence_match.group(1).strip()
+
+        # Find JSON object boundaries
+        brace_start = text.find("{")
+        brace_end = text.rfind("}")
+        if brace_start != -1 and brace_end != -1 and brace_end > brace_start:
+            text = text[brace_start:brace_end + 1]
+
+        try:
+            parsed = _json.loads(text)
+        except _json.JSONDecodeError:
+            logger.warning("QA Hardcore: failed to parse LLM response as JSON")
+            return QAResult(
+                score=0.0,
+                critiques=["System Error: QA Agent failed to return valid JSON."],
+                approved=False,
+            )
+
+        if not isinstance(parsed, dict):
+            logger.warning("QA Hardcore: LLM response is not a JSON object")
+            return QAResult(
+                score=0.0,
+                critiques=["System Error: QA Agent failed to return valid JSON."],
+                approved=False,
+            )
+
+        score = float(parsed.get("score", 0.0))
+        critiques = parsed.get("critiques", [])
+        if not isinstance(critiques, list):
+            critiques = [str(critiques)]
+
+        # Always compute approved from score — never trust LLM's boolean
+        approved = score >= self.MIN_APPROVAL_SCORE
+
+        logger.info("QA Hardcore Score: %.1f/10.0 — Approved: %s", score, approved)
+        if not approved:
+            for c in critiques[:5]:
+                logger.info("  Critique: %s", c[:200])
+
+        return QAResult(
+            score=score,
+            critiques=[str(c) for c in critiques],
+            approved=approved,
+        )

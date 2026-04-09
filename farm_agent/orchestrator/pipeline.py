@@ -14,7 +14,7 @@ import tempfile
 from dataclasses import dataclass, field
 
 from farm_agent.agents.registry import create_default_registry
-from farm_agent.analysis.analyzer import CodeAnalyzer
+from farm_agent.analysis.analyzer import BloodhoundAnalyzer, CodeAnalyzer
 from farm_agent.core.config import FarmAgentConfig
 from farm_agent.core.middleware import build_default_chain
 from farm_agent.core.models import (
@@ -26,13 +26,16 @@ from farm_agent.core.models import (
     Finding,
     ImpactLevel,
     PRResult,
+    QAResult,
     RepoContext,
     Repository,
     Severity,
+    VulnerabilityDossier,
 )
 from farm_agent.generator.engine import ContributionGenerator
+from farm_agent.generator.scorer import QAHardcoreScorer
 from farm_agent.github.client import GitHubClient
-from farm_agent.github.discovery import RepoDiscovery
+from farm_agent.github.discovery import JsonTargetDiscovery, RepoDiscovery
 from farm_agent.github.guidelines import fetch_repo_guidelines
 from farm_agent.issues.solver import IssueSolver
 from farm_agent.llm.provider import create_llm_provider
@@ -713,6 +716,215 @@ class ContribPipeline:
         finally:
             await self._cleanup()
 
+        return result
+
+    async def run_circular(
+        self,
+        *,
+        json_path: str = "target_repo.json",
+        dry_run: bool = False,
+        mode: str = "both",
+    ) -> PipelineResult:
+        """Circular Target Loop: deterministic round-robin from target_repo.json.
+
+        Processes ONE target per invocation. The caller (e.g., SuperHumanLoop
+        or CLI) should call this repeatedly in a loop.
+
+        Crash-safe: scanned_at is updated BEFORE any analysis or LLM calls,
+        so a crash will not cause the same target to be picked again.
+        """
+        await self._init_components()
+        result = PipelineResult()
+
+        discovery = JsonTargetDiscovery(json_path=json_path)
+        target = discovery.get_next_target()
+
+        if target is None:
+            logger.warning("Circular loop: no targets in %s", json_path)
+            return result
+
+        logger.info(
+            "Circular loop: selected %s (last scanned: %s)",
+            target.repo_url,
+            target.scanned_at or "never",
+        )
+
+        # ── CRASH-SAFE MARK ─────────────────────────────────────────
+        # Update scanned_at IMMEDIATELY, before any GitHub API calls,
+        # LLM calls, or analysis. This guarantees that if the agent
+        # crashes, the next restart will pick a different target.
+        discovery.mark_scanned(target.repo_url)
+        logger.info("Crash-safe mark: scanned_at updated for %s", target.repo_url)
+
+        try:
+            # Parse owner/name from URL
+            parts = target.repo_url.rstrip("/").split("/")
+            owner, name = parts[-2], parts[-1]
+
+            # Fetch repo details from GitHub API
+            repo = await self._github.get_repo_details(owner, name)
+
+            # Check daily PR limit
+            today_prs = await self._memory.get_today_pr_count()
+            remaining = self.config.github.max_prs_per_day - today_prs
+            if remaining <= 0 and not dry_run:
+                logger.warning(
+                    "Daily PR limit reached (%d)",
+                    self.config.github.max_prs_per_day,
+                )
+                return result
+
+            # ── Bloodhound Pre-Filter ──────────────────────────────────
+            # Run ast-grep pre-scan before expensive LLM analysis.
+            # If the target is clean, mark COMPLETED_NO_VULN and skip.
+            bloodhound = BloodhoundAnalyzer(
+                llm=self._llm,
+                github=self._github,
+                config=self.config.analysis,
+            )
+            dossier = await bloodhound.run_bloodhound(repo)
+
+            if not dossier.has_bugs():
+                logger.info(
+                    "Clean sweep, no vulns for %s — marking COMPLETED_NO_VULN",
+                    target.repo_url,
+                )
+                discovery.mark_status(target.repo_url, "COMPLETED_NO_VULN")
+                return result
+
+            logger.info(
+                "Bloodhound found %d vulnerabilities for %s — proceeding to pipeline",
+                len(dossier.vulnerabilities),
+                target.repo_url,
+            )
+
+            # ── Build RepoContext with vulnerable file contents ───────────
+            file_tree = await self._github.get_file_tree(repo.owner, repo.name)
+            relevant_files: dict[str, str] = {}
+            for vuln in dossier.vulnerabilities:
+                if vuln.file and vuln.file != "NONE" and vuln.file not in relevant_files:
+                    try:
+                        content = await self._github.get_file_content(
+                            repo.owner, repo.name, vuln.file
+                        )
+                        if content:
+                            relevant_files[vuln.file] = content
+                    except Exception as exc:
+                        logger.debug("Could not fetch %s: %s", vuln.file, exc)
+
+            context = RepoContext(
+                repo=repo,
+                file_tree=file_tree,
+                relevant_files=relevant_files,
+            )
+
+            # ── 10-Cycle DEV-QA Bounty Loop ──────────────────────────────
+            MAX_DEV_QA_CYCLES = 10
+            qa_passed = False
+            winning_contribution: Contribution | None = None
+
+            scorer = QAHardcoreScorer(llm=self._llm)
+
+            for cycle in range(MAX_DEV_QA_CYCLES):
+                logger.info(
+                    "Starting DEV-QA Cycle %d/%d for %s",
+                    cycle + 1, MAX_DEV_QA_CYCLES, target.repo_url,
+                )
+
+                # 1. DEV generates patches (auto-fetches QA Lessons from KB)
+                try:
+                    contributions = await self._generator.generate_from_dossier(
+                        dossier, context, github_client=self._github,
+                    )
+                except RuntimeError as e:
+                    logger.error("Generation failed: %s", e)
+                    break
+                except Exception as e:
+                    logger.error("Generation failed: %s", e)
+                    break
+
+                if not contributions:
+                    logger.warning("No contributions generated in cycle %d", cycle + 1)
+                    break
+
+                # 2. QA evaluates the first (best) contribution
+                qa_result: QAResult = await scorer.evaluate(
+                    dossier, contributions[0],
+                )
+                logger.info(
+                    "QA Score: %.1f/10.0 — Approved: %s",
+                    qa_result.score, qa_result.approved,
+                )
+
+                if qa_result.approved:
+                    # Success — exit the loop and proceed to PR submission
+                    qa_passed = True
+                    winning_contribution = contributions[0]
+                    logger.info(
+                        "QA PASSED on cycle %d with score %.1f",
+                        cycle + 1, qa_result.score,
+                    )
+                    break
+                else:
+                    # 3. QA rejected — record critiques as lessons for next cycle
+                    for critique in qa_result.critiques:
+                        await self._memory.record_qa_lesson(
+                            repo.full_name, critique
+                        )
+                    logger.warning(
+                        "QA Rejected (score %.1f). %d critiques recorded. Retrying...",
+                        qa_result.score,
+                        len(qa_result.critiques),
+                    )
+
+            if qa_passed and winning_contribution is not None:
+                # ── Proceed to PR submission ─────────────────────────────
+                result.repos_analyzed += 1
+                result.findings_total += len(dossier.vulnerabilities)
+                result.contributions_generated += 1
+
+                if not dry_run:
+                    try:
+                        pr_result = await self._pr_manager.submit_pr(
+                            repo=repo,
+                            contribution=winning_contribution,
+                        )
+                        if pr_result:
+                            result.prs_created += 1
+                            result.prs.append(pr_result)
+                            discovery.mark_status(target.repo_url, "PR_SUBMITTED")
+                            logger.info("PR submitted: %s", pr_result.pr_url)
+                    except Exception as e:
+                        logger.error("PR submission failed: %s", e)
+                        result.errors.append(f"PR submission failed: {e}")
+                else:
+                    logger.info(
+                        "Dry run — would submit PR for %s",
+                        winning_contribution.title,
+                    )
+                    discovery.mark_status(target.repo_url, "PR_SUBMITTED")
+            else:
+                logger.error(
+                    "Failed to pass QA after %d cycles for %s. Aborting target.",
+                    MAX_DEV_QA_CYCLES, target.repo_url,
+                )
+                discovery.mark_status(target.repo_url, "COMPLETED_QA_REJECTED")
+
+        except Exception as e:
+            msg = f"Circular loop error for {target.repo_url}: {e}"
+            logger.error(msg)
+            result.errors.append(msg)
+
+        finally:
+            await self._cleanup()
+
+        logger.info(
+            "Circular loop done for %s — repos=%d, findings=%d, PRs=%d",
+            target.repo_url,
+            result.repos_analyzed,
+            result.findings_total,
+            result.prs_created,
+        )
         return result
 
     async def analyze_only(self, repo_url: str) -> AnalysisResult | None:

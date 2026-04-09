@@ -1,0 +1,37 @@
+# js-unhandled-promise.yaml
+# Targets: Promise chains missing .catch() on async operations
+# Rationale: Unhandled Promise Rejections crash Node.js processes in modern versions.
+# The process will emit 'unhandledRejection' and may terminate.
+# Filter: Exclude tests/ directories and .catch() already defined
+id: js-unhandled-promise
+language: javascript
+rule:
+  pattern: await $PROMISE
+constraints:
+  PROMISE:
+    not:
+      kind: call_expression
+      has:
+        field_name: "catch"
+inside:
+  kind: async_function
+  stopBy: end
+message: "await on Promise without .catch() handler detected. Unhandled rejections can crash Node.js processes. Add .catch() or use try/catch."
+severity: error
+tags: [crash, promise-rejection, nodejs]
+
+---
+id: js-promise-no-catch
+language: javascript
+rule:
+  pattern: $PROMISE.then($CB)
+constraints:
+  PROMISE:
+    not:
+      has:
+        kind: call_expression
+        stopBy: end
+        field_name: "catch"
+message: "Promise .then() without .catch() detected. Unhandled rejections can crash Node.js. Add .catch() to handle errors."
+severity: error
+tags: [crash, promise-rejection, nodejs]

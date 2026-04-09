@@ -1,0 +1,57 @@
+# python-deserialization-pickle.yaml v036
+# Targets: pickle.loads() / pickle.load() with non-trusted, non-literal input
+# Rationale: Deserializing untrusted data with pickle can lead to arbitrary code execution
+# Filter: Exclude hardcoded bytes literals and test fixtures
+id: python-deserialization-pickle-loads
+language: python
+rule:
+  pattern: pickle.loads($DATA)
+constraints:
+  DATA:
+    not:
+      kind: bytes
+    not:
+      inside:
+        kind: function_item
+        stopBy: end
+message: "pickle.loads() called with non-literal data. If $DATA originates from user input, network, or files, an attacker can craft a malicious pickle payload to execute arbitrary code. Use JSON, protobuf, or signed/validated pickle only."
+severity: error
+tags: [security, deserialization, rce, critical]
+
+---
+id: python-pickle-load
+language: python
+rule:
+  pattern: pickle.load($FILE)
+constraints:
+  FILE:
+    not:
+      inside:
+        kind: function_item
+        stopBy: end
+message: "pickle.load() reads from a file/stream. Ensure the source is trusted and the data is integrity-checked before deserialization."
+severity: error
+tags: [security, deserialization, file-handling]
+
+---
+id: python-js-yaml-load
+language: python
+rule:
+  pattern: yaml.load($YAMLSTR)
+constraints:
+  YAMLSTR:
+    not:
+      kind: string
+message: "yaml.load() with Loader=yaml.FullLoader is unsafe with untrusted input (allows arbitrary Python object construction). Use yaml.safe_load() instead."
+severity: error
+tags: [security, deserialization, yaml, rce]
+
+---
+# sg scan validation:
+# SHOULD MATCH (vulnerable):
+#   pickle.loads(user_data)
+#   pickle.loads(request.read())
+#
+# SHOULD NOT MATCH (safe):
+#   pickle.loads(b'\x80\x04\x95...')  # hardcoded bytes literal
+#   obj = pickle.loads(get_fixture_data())  # inside test function

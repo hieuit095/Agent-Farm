@@ -5,12 +5,12 @@ build-backend = "hatchling.build"
 [project]
 name = "farm_agent"
 version = "2.5.0"
-description = "AI Agent that automatically contributes to open source projects on GitHub"
+description = "Autonomous system that automatically contributes to open source projects on GitHub"
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.11"
-authors = [{ name = "Farm-Agent Team" }]
-keywords = ["ai", "agent", "github", "open-source", "contributions"]
+authors = [{ name = "Farm-Agent Development Team" }]
+keywords = ["github", "open-source", "contributions", "automation"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",

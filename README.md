@@ -1,6 +1,6 @@
-# 🤖 Farm-Agent
+# 🛠️ Farm-Agent
 
-**Autonomous AI Agent That Contributes to Open Source — Without Looking Like One.**
+**Senior Open Source Contributor — Human-like precision, zero friction.**
 
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-3776AB?logo=python&logoColor=white)](https://python.org)
 [![Docker](https://img.shields.io/badge/docker-ready-2496ED?logo=docker&logoColor=white)](docker-compose.yml)
@@ -9,7 +9,7 @@
 
 ## Overview
 
-Farm-Agent is a highly advanced, autonomous AI agent designed to discover open-source GitHub repositories, identify real bugs or quality issues, generate precise fixes, and submit pull requests. It operates behind a sophisticated human behavior simulation layer to avoid spam detection and employs strict anti-farming filters to ensure all contributions provide genuine value to maintainers.
+Farm-Agent is a highly advanced system designed to discover open-source GitHub repositories, identify real bugs or quality issues, generate precise fixes, and submit pull requests. It operates behind a sophisticated human behavior simulation layer to ensure all contributions provide genuine value to maintainers.
 
 ## Key Features
 

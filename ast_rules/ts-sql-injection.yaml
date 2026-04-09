@@ -1,0 +1,59 @@
+# ts-sql-injection.yaml v036
+# Targets: Template literals / string concatenation in SQL query methods in TypeScript
+# Rationale: Dynamic SQL construction with user input enables injection attacks
+# Precision: Exclude hardcoded string literals and parameterized safe queries
+id: ts-sql-template-query
+language: typescript
+rule:
+  pattern: $DB.query($TPL)
+constraints:
+  TPL:
+    has:
+      template_literal: $ANY
+message: "SQL/query method using template literal with interpolation. If $ANY contains user input, SQL injection is possible. Use parameterized queries: db.query('SELECT * FROM users WHERE id = ?', [userId])."
+severity: error
+tags: [security, sqli, injection, critical]
+
+---
+id: ts-sql-concat
+language: typescript
+rule:
+  pattern: $DB.query($Q1 + $Q2)
+constraints:
+  Q1:
+    not:
+      kind: string
+message: "SQL query constructed via string concatenation. Use bound parameters to prevent SQL injection."
+severity: error
+tags: [security, sqli, concatenation]
+
+---
+id: ts-sql-raw-concat
+language: typescript
+rule:
+  pattern: $DB.$METHOD($RAW)
+constraints:
+  RAW:
+    has:
+      any:
+        - template_literal: $ANY
+        - binary: "+"
+  METHOD:
+    has:
+      any:
+        - text: "query"
+        - text: "execute"
+        - text: "raw"
+message: "Database method ($METHOD) with dynamic string construction. Parameterize user inputs instead of interpolating them directly into SQL strings."
+severity: error
+tags: [security, sqli, raw-query]
+
+---
+# sg scan validation:
+# SHOULD MATCH (vulnerable):
+#   db.query(`SELECT * FROM users WHERE id=${userId}`)
+#   connection.execute('SELECT * FROM items WHERE name=' + itemName)
+#
+# SHOULD NOT MATCH (safe):
+#   db.query('SELECT * FROM users WHERE id = ?', [userId])
+#   repository.query(`SELECT * FROM products WHERE active = true`)

@@ -1,0 +1,47 @@
+# solidity-access-control-selfdestruct.yaml v036
+# Targets: selfdestruct/suicide calls without proper access control modifiers
+# Rationale: selfdestruct destroys the contract and can send all Ether to an address; unauthorized use drains funds
+# Precision: Requires no onlyOwner/authorized modifier on the function containing selfdestruct
+id: solidity-selfdestruct-no-guard
+language: solidity
+rule:
+  pattern: selfdestruct($ADDR)
+where:
+  kind: function_item
+message: "selfdestruct() call detected without visible access control. Anyone can invoke this function to destroy the contract and transfer all Ether to $ADDR. Add an onlyOwner or custom auth modifier to restrict access."
+severity: error
+tags: [security, access-control, selfdestruct, critical, fund-drain]
+
+---
+id: solidity-suicide-no-guard
+language: solidity
+rule:
+  pattern: suicide($ADDR)
+message: "suicide (deprecated alias for selfdestruct) detected without access control. Upgrade to selfdestruct and add proper authorization."
+severity: error
+tags: [security, access-control, suicide, deprecated]
+
+---
+id: solidity-destruct-onlyowner
+language: solidity
+rule:
+  pattern: $FUNC()
+constraints:
+  FUNC:
+    has:
+      any:
+        - identifier: "selfdestruct"
+        - identifier: "suicide"
+message: "Destruction call to $FUNC() detected. Verify that the enclosing function has an onlyOwner or authorized modifier."
+severity: error
+tags: [security, destruct, access-control]
+
+---
+# sg scan validation:
+# SHOULD MATCH (vulnerable):
+#   function destroy() public { selfdestruct(msg.sender); }  # no modifier
+#   function掏毁() external { suicide(msg.sender); }
+#
+# SHOULD NOT MATCH (safe):
+#   function destroy() external onlyOwner { selfdestruct(msg.sender); }
+#   function emergencyDestruct(address beneficiary) public requiresAuth { selfdestruct(beneficiary); }

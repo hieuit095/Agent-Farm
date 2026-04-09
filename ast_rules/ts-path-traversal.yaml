@@ -1,0 +1,85 @@
+# ts-path-traversal.yaml v036
+# Targets: Dynamic/unsanitized paths in TypeScript file I/O operations
+# Rationale: Path traversal via user-controlled filenames can read/write sensitive files
+# Precision: Exclude hardcoded literal paths and validated/whitelisted path sources
+id: ts-path-traversal-readfile
+language: typescript
+rule:
+  pattern: $FS.readFile($PATH, $CB)
+constraints:
+  PATH:
+    has:
+      any:
+        - template_literal: $ANY
+        - binary: "+"
+  PATH:
+    not:
+      kind: string
+message: "fs.readFile() with dynamic path. If $PATH contains user input (e.g., from req.params, req.query), path traversal attacks (../) can read arbitrary files. Use path.resolve() and validate against a whitelist of allowed directories."
+severity: error
+tags: [security, path-traversal, file-access, injection]
+
+---
+id: ts-path-traversal-readFileSync
+language: typescript
+rule:
+  pattern: $FS.readFileSync($PATH)
+constraints:
+  PATH:
+    has:
+      any:
+        - template_literal: $ANY
+        - binary: "+"
+  PATH:
+    not:
+      kind: string
+message: "fs.readFileSync() with dynamic path. Validate and sanitize $PATH to prevent path traversal attacks."
+severity: error
+tags: [security, path-traversal, sync-io]
+
+---
+id: ts-path-traversal-createstream
+language: typescript
+rule:
+  pattern: $FS.createReadStream($PATH)
+constraints:
+  PATH:
+    has:
+      any:
+        - template_literal: $ANY
+        - binary: "+"
+  PATH:
+    not:
+      kind: string
+message: "fs.createReadStream() with unsanitized dynamic path. Use path.resolve() and restrict the stream to a known-safe directory."
+severity: error
+tags: [security, path-traversal, stream]
+
+---
+id: ts-path-traversal-write
+language: typescript
+rule:
+  pattern: $FS.writeFile($PATH, $DATA)
+constraints:
+  PATH:
+    has:
+      any:
+        - template_literal: $ANY
+        - binary: "+"
+  PATH:
+    not:
+      kind: string
+message: "fs.writeFile() with a dynamic path. User-controlled paths can enable path traversal attacks, allowing overwrite of sensitive system files."
+severity: error
+tags: [security, path-traversal, file-write]
+
+---
+# sg scan validation:
+# SHOULD MATCH (vulnerable):
+#   fs.readFile(`uploads/${filename}`)
+#   fs.readFile(req.query.path + '.txt')
+#   fs.createReadStream(userInput)
+#
+# SHOULD NOT MATCH (safe):
+#   fs.readFile(path.join(__dirname, 'data.json'))
+#   fs.readFile('/etc/passwd')  # hardcoded literal (still dangerous but intentional)
