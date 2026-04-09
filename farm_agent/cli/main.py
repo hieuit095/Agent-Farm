@@ -860,10 +860,10 @@ def reset_db(ctx, yes):
     config = load_config(ctx.obj["config_path"])
     db_path = config.storage.db_path
 
-    console.print(f"\n[bold]Database reset[/bold]")
+    console.print("\n[bold]Database reset[/bold]")
     console.print(f"  Path: {db_path}")
-    console.print(f"  Tables to CLEAR: run_log, analyzed_repos")
-    console.print(f"  Tables to KEEP: submitted_prs, blacklisted_repos, repo_preferences")
+    console.print("  Tables to CLEAR: run_log, analyzed_repos")
+    console.print("  Tables to KEEP: submitted_prs, blacklisted_repos, repo_preferences")
 
     if not yes and not click.confirm("\nProceed with reset?"):
         console.print("[dim]Cancelled.[/dim]")
@@ -880,8 +880,8 @@ def reset_db(ctx, yes):
         affected = cur.rowcount
         conn.close()
 
-        console.print(f"[green]✅ Reset complete.[/green]")
-        console.print(f"   Cleared: run_log, analyzed_repos")
+        console.print("[green]✅ Reset complete.[/green]")
+        console.print("   Cleared: run_log, analyzed_repos")
 
     except Exception as e:
         console.print(f"[red]❌ Reset failed: {e}[/red]")
@@ -969,9 +969,9 @@ def vips(ctx, no_sync):
         sys.exit(1)
 
     async def _run():
-        from farm_agent.orchestrator.pipeline import ContribPipeline
-        from farm_agent.orchestrator.memory import Memory
         from farm_agent.orchestrator.human import SuperHumanLoop
+        from farm_agent.orchestrator.memory import Memory
+        from farm_agent.orchestrator.pipeline import ContribPipeline
 
         # Build minimal pipeline + memory for the sync
         pipeline = ContribPipeline(config)

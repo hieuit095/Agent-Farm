@@ -7,9 +7,8 @@ Generates detailed PR descriptions with context and testing info.
 from __future__ import annotations
 
 import logging
-import re
 
-from farm_agent.core.exceptions import GenerationError, PRCreationError
+from farm_agent.core.exceptions import PRCreationError
 from farm_agent.core.models import Contribution, ContributionType, PRResult, PRStatus, Repository
 from farm_agent.generator.engine import _sanitize_text, escape_html_xss
 from farm_agent.github.client import GitHubClient
@@ -37,7 +36,7 @@ def auto_check_pr_template(body: str, contrib_type: ContributionType | None = No
         ContributionType.FEATURE_ADD: ["feature", "enhancement", "new"],
         ContributionType.REFACTOR: ["refactor", "cleanup", "chore"],
     }
-    
+
     allowed_terms = type_matches.get(contrib_type, [])
     if not allowed_terms:
         return body
@@ -223,7 +222,6 @@ class PRManager:
     @staticmethod
     def _human_branch_name(contribution: Contribution) -> str:
         """Generate a natural-looking branch name (no tool branding)."""
-        import re
 
         type_prefix = {
             ContributionType.SECURITY_FIX: "fix/security",

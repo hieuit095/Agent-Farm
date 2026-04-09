@@ -202,6 +202,8 @@ class LLMProvider(ABC):
 # ── Minimax ─────────────────────────────────────────────────────────────────────
 
 # Module-level semaphore shared by ALL MinimaxProvider instances so the
+import asyncio
+
 # concurrent-call cap is enforced globally, not per-instance.
 _LLM_SEMAPHORE: asyncio.Semaphore | None = None
 
@@ -218,6 +220,7 @@ class MinimaxProvider(LLMProvider):
     def __init__(self, config: LLMConfig):
         super().__init__(config)
         import asyncio
+
         import httpx
 
         headers = {
