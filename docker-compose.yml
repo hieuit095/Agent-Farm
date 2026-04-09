@@ -1,43 +1,39 @@
+# ╔══════════════════════════════════════════════════════════════════════╗
+# ║  Farm-Agent v3.0.0 — Docker Compose (DooD Architecture)            ║
+# ║                                                                    ║
+# ║  DooD = Docker-outside-of-Docker. The container mounts the host's  ║
+# ║  Docker socket so the Sandbox Guillotine can spawn sibling          ║
+# ║  containers for code validation.                                   ║
+# ║                                                                    ║
+# ║  Usage:                                                             ║
+# ║    docker compose up -d          # Start 24/7 superhuman daemon     ║
+# ║    docker compose logs -f        # Follow logs                      ║
+# ║    docker compose down           # Stop                            ║
+# ╚══════════════════════════════════════════════════════════════════════╝
+
 services:
-  # ── Super Human Mode — default background daemon ─────────────────────────
-  # Runs farm_agent superhuman as the 24/7 autonomous engine.
-  # Start: docker compose up -d
-  superhuman:
-    image: worker-daemon:latest
+  farm_agent:
     build:
       context: .
       dockerfile: Dockerfile
-    entrypoint: []
-    command: ["python", "-m", "farm_agent.cli.main", "superhuman"]
-    container_name: farm_agent_superhuman_1
+    image: farm-agent:3.0.0
+    container_name: farm_agent
     restart: unless-stopped
     user: "0:0"
-    healthcheck:
-      disable: true
     environment:
       - TZ=Asia/Ho_Chi_Minh
-    env_file: .env
+    env_file:
+      - .env
     volumes:
-      - farm_agent_db:/home/farm_agent/.farm_agent
-      - ./data:/home/farm_agent/data:rw
-      - ./config.yaml:/home/farm_agent/config.yaml:ro
-      - ./logs:/home/farm_agent/logs:rw
+      # ── DooD: mount host Docker socket for Sandbox Guillotine ──────────
       - /var/run/docker.sock:/var/run/docker.sock:rw
-
-  # ── One-shot run ─────────────────────────────────────────────────────────
-  # Usage: docker compose run --rm runner run --dry-run
-  runner:
-    image: worker-daemon:latest
-    build: .
-    container_name: system_runner_1
-    volumes:
-      - farm_agent_db:/home/farm_agent/.farm_agent
-      - ./config.yaml:/home/farm_agent/config.yaml:ro
-    environment:
-      - GITHUB_TOKEN=${GITHUB_TOKEN}
-      - GEMINI_API_KEY=${GEMINI_API_KEY}
-    profiles:
-      - cli
-
-volumes:
-  farm_agent_db:
+      # ── Data persistence (SQLite memory.db + ChromaDB) ──────────────────
+      - ./data:/app/data:rw
+      # ── Circular target loop queue ──────────────────────────────────────
+      - ./target_repo.json:/app/target_repo.json:rw
+      # ── Configuration (read-only) ───────────────────────────────────────
+      - ./config.yaml:/app/config.yaml:ro
+      # ── Environment variables (API keys, read-only) ────────────────────
+      - ./.env:/app/.env:ro
+      # ── Log persistence ─────────────────────────────────────────────────
+      - ./logs:/app/logs:rw

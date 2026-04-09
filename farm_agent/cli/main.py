@@ -118,7 +118,7 @@ def run(ctx, language, stars, max_prs, dry_run):
         console.print("Set it in config.yaml or run: farm_agent config set github.token <token>")
         sys.exit(1)
 
-    if not config.llm.api_key and not config.llm.use_vertex:
+    if not config.llm.api_key:
         console.print("[red]❌ LLM API key not configured![/red]")
         sys.exit(1)
 
@@ -156,7 +156,7 @@ def target(ctx, url, types, dry_run):
         console.print("[red]❌ GitHub token not configured![/red]")
         sys.exit(1)
 
-    if not config.llm.api_key and not config.llm.use_vertex:
+    if not config.llm.api_key:
         console.print("[red]❌ LLM API key not configured![/red]")
         sys.exit(1)
 
@@ -207,7 +207,7 @@ def hunt(ctx, rounds, delay, language, mode, dry_run):
         console.print("[red]❌ GitHub token not configured![/red]")
         sys.exit(1)
 
-    if not config.llm.api_key and not config.llm.use_vertex:
+    if not config.llm.api_key:
         console.print("[red]❌ LLM API key not configured![/red]")
         sys.exit(1)
 
@@ -260,7 +260,7 @@ def hunt_circular(ctx, json_path, mode, dry_run):
         console.print("[red]GitHub token not configured[/red]")
         sys.exit(1)
 
-    if not config.llm.api_key and not config.llm.use_vertex:
+    if not config.llm.api_key:
         console.print("[red]LLM API key not configured[/red]")
         sys.exit(1)
 
@@ -304,7 +304,7 @@ def patrol(ctx, dry_run, pr_number):
         console.print("[red]❌ GitHub token not configured![/red]")
         sys.exit(1)
 
-    if not config.llm.api_key and not config.llm.use_vertex:
+    if not config.llm.api_key:
         console.print("[red]❌ LLM API key not configured![/red]")
         sys.exit(1)
 
@@ -398,7 +398,7 @@ def superhuman(ctx, time_warp, dry_run, target_repo):
         console.print("[red]❌ GitHub token not configured![/red]")
         sys.exit(1)
 
-    if not config.llm.api_key and not config.llm.use_vertex:
+    if not config.llm.api_key:
         console.print("[red]❌ LLM API key not configured![/red]")
         sys.exit(1)
 
@@ -595,7 +595,7 @@ def analyze(ctx, url):
         console.print("[red]❌ GitHub token not configured![/red]")
         sys.exit(1)
 
-    if not config.llm.api_key and not config.llm.use_vertex:
+    if not config.llm.api_key:
         console.print("[red]❌ LLM API key not configured![/red]")
         sys.exit(1)
 
@@ -663,7 +663,7 @@ def solve(ctx, url, max_issues, dry_run):
         console.print("[red]❌ GitHub token not configured![/red]")
         sys.exit(1)
 
-    if not config.llm.api_key and not config.llm.use_vertex:
+    if not config.llm.api_key:
         console.print("[red]❌ LLM API key not configured![/red]")
         sys.exit(1)
 
@@ -999,38 +999,15 @@ def show_config(ctx):
             f"[bold]Analysis[/bold]\n"
             f"  Analyzers: {', '.join(config.analysis.enabled_analyzers)}\n"
             f"  Threshold: {config.analysis.severity_threshold}\n\n"
-            f"[bold]Pipeline[/bold]\n"
-            f"  Max concurrent: {config.pipeline.max_concurrent_repos}\n"
-            f"  Timeout/repo: {config.pipeline.timeout_per_repo_sec}s\n\n"
-            f"[bold]Web Dashboard[/bold]\n"
-            f"  Host: {config.web.host}:{config.web.port}\n\n"
-            f"[bold]Super Human Mode[/bold]\n"
+f"[bold]Pipeline[/bold]\n"
+             f"  Max concurrent: {config.pipeline.max_concurrent_repos}\n"
+             f"  Timeout/repo: {config.pipeline.timeout_per_repo_sec}s\n\n"
+             f"[bold]Super Human Mode[/bold]\n"
             f"  KPI Target: {config.github.min_daily_prs}-{config.github.max_daily_prs} PRs/day\n"
             f"  Max PRs/day (hard cap): {config.github.max_prs_per_day}",
             title="Farm-Agent Configuration",
         )
     )
-
-
-@cli.command("serve")
-@click.option("--host", default=None, help="Host to bind to")
-@click.option("--port", default=None, type=int, help="Port")
-@click.pass_context
-def serve(ctx, host, port):
-    """Start the web dashboard server."""
-    config = load_config(ctx.obj["config_path"])
-    if host:
-        config.web.host = host
-    if port:
-        config.web.port = port
-
-    console.print(
-        f"[bold]Starting Farm-Agent Dashboard[/bold] at http://{config.web.host}:{config.web.port}"
-    )
-
-    from farm_agent.web.server import run_server
-
-    run_server(config)
 
 
 @cli.command("vips")

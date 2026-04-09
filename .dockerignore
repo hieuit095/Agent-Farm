@@ -1,17 +1,45 @@
-# Node Dependencies
+# ── Python ────────────────────────────────────────────
+venv/
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+*.egg
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+coverage.xml
+
+# ── Git ───────────────────────────────────────────────
+.git/
+.gitignore
+
+# ── Node ──────────────────────────────────────────────
 node_modules/
 npm-debug.log
 yarn-error.log
 
-# Git History
-.git/
-.gitignore
-
-# Build outputs
+# ── Build outputs ─────────────────────────────────────
 dist/
 build/
 .next/
 
-# Environment Variables & OPSEC
+# ── Environment & secrets (mounted read-only at runtime)
 .env
 .env.*
+
+# ── Data persistence (mounted as volumes at runtime) ──
+data/
+logs/
+
+# ── Tests (not needed in production image) ─────────────
+tests/
+
+# ── IDE / editor junk ─────────────────────────────────
+.idea/
+.vscode/
+*.swp
+*.swo

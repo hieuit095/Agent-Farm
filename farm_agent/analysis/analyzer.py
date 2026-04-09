@@ -987,11 +987,14 @@ class BloodhoundAnalyzer:
         llm: LLMProvider,
         github: GitHubClient,
         config: AnalysisConfig,
+        memory=None,
     ):
         self._llm = llm
         self._github = github
         self._config = config
+        self._memory = memory
         self._sg_available: bool | None = None
+        self._red_team_client: LLMProvider | None = None
 
     def _check_sg_available(self) -> bool:
         if self._sg_available is not None:
@@ -1009,6 +1012,43 @@ class BloodhoundAnalyzer:
             logger.info("ast-grep (sg) binary found — Bloodhound ready")
             self._sg_available = True
         return self._sg_available
+
+    def _get_red_team_provider(self) -> LLMProvider | None:
+        """Lazily create an OpenRouter LLM provider for Red Team audits.
+
+        Returns None if the OpenRouter API key is not configured.
+        """
+        if self._red_team_client is not None:
+            return self._red_team_client
+
+        from farm_agent.core.config import LLMConfig
+        from farm_agent.llm.provider import OpenRouterProvider
+
+        api_key = ""
+        if hasattr(self._config, "openrouter_api_key"):
+            api_key = self._config.openrouter_api_key
+        if not api_key and hasattr(self, "_llm") and hasattr(self._llm, "config"):
+            api_key = getattr(self._llm.config, "openrouter_api_key", "")
+
+        if not api_key:
+            logger.debug("No OpenRouter API key configured — will use default LLM for Red Team audit")
+            return None
+
+        red_team_model = getattr(self._config, "red_team_model", "cognitivecomputations/dolphin-mistral-24b-venice-edition:free")
+        rt_config = LLMConfig(
+            provider="openrouter",
+            model=red_team_model,
+            api_key="",
+            openrouter_api_key=api_key,
+            temperature=0.1,
+            max_tokens=4096,
+        )
+        self._red_team_client = OpenRouterProvider(rt_config)
+        logger.info(
+            "Red Team provider initialized: OpenRouter (%s)",
+            red_team_model,
+        )
+        return self._red_team_client
 
     def _resolve_rule_files(self, language: str | None) -> list[Path]:
         rules_dir = Path("ast_rules")
@@ -1155,7 +1195,28 @@ class BloodhoundAnalyzer:
         )
 
         try:
-            response = await self._llm.complete(user_prompt, system=system_prompt, temperature=0.1)
+            client = self._get_red_team_provider()
+            if client is not None:
+                daily_limit = getattr(self._config, "red_team_daily_limit", 1000)
+                if self._memory is not None:
+                    usage = await self._memory.get_openrouter_usage_today()
+                    if usage >= daily_limit:
+                        logger.warning(
+                            "OpenRouter daily limit reached (%d/%d) — falling back to default LLM",
+                            usage, daily_limit,
+                        )
+                        client = None
+                    else:
+                        logger.info("OpenRouter Red Team audit (%d/%d today)", usage + 1, daily_limit)
+
+            if client is not None:
+                response = await client.complete(user_prompt, system=system_prompt, temperature=0.1)
+                if self._memory is not None:
+                    await self._memory.record_openrouter_usage()
+            else:
+                logger.info("No OpenRouter provider — using default LLM for White-Hat audit")
+                response = await self._llm.complete(user_prompt, system=system_prompt, temperature=0.1)
+
             return self._parse_audit_response(response, repo_url)
         except Exception as exc:
             logger.error("White-Hat audit LLM call failed: %s", exc)

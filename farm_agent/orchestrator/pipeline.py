@@ -781,6 +781,7 @@ class ContribPipeline:
                 llm=self._llm,
                 github=self._github,
                 config=self.config.analysis,
+                memory=self._memory,
             )
             dossier = await bloodhound.run_bloodhound(repo)
 

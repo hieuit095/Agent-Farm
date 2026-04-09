@@ -331,11 +331,120 @@ class MinimaxProvider(LLMProvider):
         await self._client.aclose()
 
 
+# ── OpenRouter ──────────────────────────────────────────────────────────────────
+
+
+class OpenRouterProvider(LLMProvider):
+    """OpenRouter provider for Red Team (Bloodhound) audits.
+
+    Uses the OpenRouter API (https://openrouter.ai/api/v1) which provides
+    access to multiple models including free ones. Used exclusively for
+    vulnerability validation to conserve Minimax quota.
+    """
+
+    API_URL = "https://openrouter.ai/api/v1/chat/completions"
+
+    def __init__(self, config: LLMConfig):
+        super().__init__(config)
+
+        import httpx
+
+        headers = {
+            "Authorization": f"Bearer {config.openrouter_api_key}",
+            "Content-Type": "application/json",
+            "HTTP-Referer": "https://github.com/farm-agent",
+            "X-Title": "Farm-Agent Bloodhound",
+        }
+
+        self._model = config.model
+        self._client = httpx.AsyncClient(
+            headers=headers,
+            timeout=300.0,
+            follow_redirects=True,
+        )
+
+    async def complete(self, prompt: str, *, system: str | None = None, **kwargs) -> str:
+        messages = []
+        if system:
+            messages.append({"role": "system", "content": system})
+        messages.append({"role": "user", "content": prompt})
+        return await self.chat(messages, **kwargs)
+
+    async def chat(
+        self,
+        messages: list[dict[str, str]],
+        *,
+        system: str | None = None,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+        **kwargs,
+    ) -> str:
+        import httpx
+
+        temp = temperature if temperature is not None else self.temperature
+        max_tok = max_tokens if max_tokens is not None else self.max_tokens
+
+        all_messages = list(messages)
+        if system and not any(m["role"] == "system" for m in all_messages):
+            all_messages.insert(0, {"role": "system", "content": system})
+
+        payload = {
+            "model": self._model,
+            "messages": all_messages,
+            "temperature": temp,
+            "max_tokens": max_tok,
+        }
+
+        last_error: Exception | None = None
+        for attempt in range(3):
+            try:
+                response = await self._client.post(self.API_URL, json=payload)
+                response.raise_for_status()
+                data = response.json()
+
+                choices = data.get("choices", [])
+                if not choices:
+                    last_error = LLMError(f"OpenRouter returned empty choices (attempt {attempt + 1}/3)")
+                    if attempt < 2:
+                        import asyncio as _asyncio
+                        await _asyncio.sleep(5 * (attempt + 1))
+                        continue
+                    raise last_error
+
+                content = choices[0].get("message", {}).get("content", "")
+                return _strip_reasoning_artifacts(content)
+
+            except httpx.TimeoutException as e:
+                last_error = LLMError(f"OpenRouter timeout (attempt {attempt + 1}/3): {e}")
+                if attempt < 2:
+                    import asyncio as _asyncio
+                    await _asyncio.sleep(5 * (attempt + 1))
+                    continue
+                raise last_error from e
+            except httpx.HTTPStatusError as e:
+                status = e.response.status_code
+                if status == 429:
+                    raise LLMRateLimitError(f"OpenRouter rate limit (429): {e}") from e
+                if status == 401:
+                    raise LLMError("OpenRouter auth failed (401): check openrouter_api_key") from e
+                raise LLMError(f"OpenRouter HTTP {status}: {e}") from e
+            except (LLMError, LLMRateLimitError):
+                raise
+            except Exception as e:
+                raise LLMError(f"OpenRouter error: {e}") from e
+
+        raise last_error or LLMError("OpenRouter: all retries exhausted")
+
+    async def close(self):
+        await self._client.aclose()
+
+
 # ── Factory ────────────────────────────────────────────────────────────────────
 
 
 _PROVIDERS: dict[str, type[LLMProvider]] = {
     "minimax": MinimaxProvider,
+    "openrouter": OpenRouterProvider,
 }
 
 

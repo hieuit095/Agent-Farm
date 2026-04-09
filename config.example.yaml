@@ -1,4 +1,4 @@
-# Farm-Agent Configuration
+# Farm-Agent Configuration v3.0
 # Copy this file to config.yaml and fill in your values
 
 github:
@@ -10,11 +10,12 @@ github:
   rate_limit_buffer: 100
 
 llm:
-  provider: "minimax"  # gemini | openai | anthropic | ollama | minimax
+  provider: "minimax"  # minimax | gemini | openai | anthropic | ollama
   model: "MiniMax-M2.7"
-  api_key: "YOUR_API_KEY_HERE"
+  api_key: "YOUR_API_KEY_HERE"  # Or set MINIMAX_API_KEY in .env
   temperature: 0.2
   max_tokens: 8192
+  minimax_group_id: ""  # Or set MINIMAX_GROUP_ID in .env
   # For ollama (local models):
   # provider: "ollama"
   # model: "codellama:13b"
@@ -34,6 +35,9 @@ analysis:
     - "vendor/*"
     - "node_modules/*"
     - "*.lock"
+  # Red Team engine — Bloodhound White-Hat audits via OpenRouter
+  red_team_model: "cognitivecomputations/dolphin-mistral-24b-venice-edition:free"
+  red_team_daily_limit: 1000
 
 contribution:
   enabled_types:
@@ -65,40 +69,17 @@ storage:
   db_path: "data/memory.db"
   cache_ttl_hours: 24
 
-# ── Phase 4+ Configuration ──────────────────────────
-
 pipeline:
-  max_concurrent_repos: 3         # parallel repo processing
+  max_concurrent_repos: 3
   timeout_per_repo_sec: 300
-
-scheduler:
-  enabled: false
-  cron: "0 */6 * * *"             # every 6 hours
-  timezone: "UTC"
-  max_concurrent: 3
-
-web:
-  host: "127.0.0.1"
-  port: 8787
-  enabled: true
-  api_keys: []                     # ["cai_xxx"] for auth, empty = no auth
-  webhook_secret: ""               # GitHub webhook secret for HMAC
-
-quota:
-  github_daily_limit: 5000
-  llm_daily_limit: 1000
-  llm_daily_tokens: 1000000
 
 notifications:
   slack_webhook: ""
   discord_webhook: ""
   telegram_token: "YOUR_TELEGRAM_TOKEN_HERE"
   telegram_chat_id: "YOUR_TELEGRAM_CHAT_ID_HERE"
-  on_merge: true
-  on_close: true
-  on_run_complete: true
 
-# Multi-model routing - auto-selects best model per task
+# Multi-model routing — auto-selects best model per task type
 multi_model:
-  enabled: false                     # true to enable smart model routing
-  strategy: "balanced"               # performance | balanced | economy
+  enabled: false
+  strategy: "balanced"  # performance | balanced | economy

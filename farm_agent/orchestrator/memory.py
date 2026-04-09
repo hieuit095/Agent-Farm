@@ -687,6 +687,40 @@ class Memory:
             logger.error("KB garbage collection failed: %s", exc)
             return 0
 
+    async def get_openrouter_usage_today(self) -> int:
+        """Count OpenRouter API calls made today (UTC).
+
+        Used by BloodhoundAnalyzer to enforce the red_team_daily_limit.
+        """
+        if self._db is None:
+            return 0
+
+        try:
+            cursor = await self._db.execute(
+                "SELECT COUNT(*) FROM api_usage_log WHERE provider = 'openrouter' AND date(timestamp, 'unixepoch') = date('now')",
+            )
+            row = await cursor.fetchone()
+            return row[0] if row else 0
+        except Exception as exc:
+            logger.debug("Could not query OpenRouter usage: %s", exc)
+            return 0
+
+    async def record_openrouter_usage(self) -> None:
+        """Record an OpenRouter API call in the usage log."""
+        if self._db is None:
+            return
+
+        import time as _time
+
+        try:
+            await self._db.execute(
+                "INSERT INTO api_usage_log (timestamp, provider) VALUES (?, 'openrouter')",
+                (_time.time(),),
+            )
+            await self._db.commit()
+        except Exception as exc:
+            logger.debug("Could not record OpenRouter usage: %s", exc)
+
     async def get_outcome_stats(self) -> dict:
         """Get outcome statistics."""
         stats = {}

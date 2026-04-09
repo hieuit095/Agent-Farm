@@ -57,6 +57,9 @@ class LLMConfig(BaseModel):
     # Minimax
     minimax_group_id: str = ""
 
+    # OpenRouter (Red Team engine for Bloodhound audits)
+    openrouter_api_key: str = ""
+
     @model_validator(mode="after")
     def resolve_api_key_and_defaults(self):
         """Fallback: env vars for API keys."""
@@ -64,6 +67,8 @@ class LLMConfig(BaseModel):
             self.api_key = os.environ.get("MINIMAX_API_KEY", "")
         if not self.minimax_group_id:
             self.minimax_group_id = os.environ.get("MINIMAX_GROUP_ID", "")
+        if not self.openrouter_api_key:
+            self.openrouter_api_key = os.environ.get("OPENROUTER_API_KEY", "")
 
         if self.model == "gemini-2.5-flash":
              self.model = "MiniMax-M2.7"
@@ -81,6 +86,10 @@ class AnalysisConfig(BaseModel):
     skip_patterns: list[str] = Field(
         default_factory=lambda: ["*.min.js", "*.min.css", "vendor/*", "node_modules/*", "*.lock"]
     )
+
+    # Red Team engine (Bloodhound White-Hat audits via OpenRouter)
+    red_team_model: str = "cognitivecomputations/dolphin-mistral-24b-venice-edition:free"
+    red_team_daily_limit: int = 1000
 
 
 class ContributionConfig(BaseModel):
@@ -125,18 +134,6 @@ class StorageConfig(BaseModel):
         return Path(self.db_path).expanduser()
 
 
-
-
-class WebConfig(BaseModel):
-    """Web dashboard configuration."""
-
-    host: str = "127.0.0.1"
-    port: int = 8787
-    enabled: bool = True
-    api_keys: list[str] = Field(default_factory=list)
-    webhook_secret: str = ""
-
-
 class PipelineConfig(BaseModel):
     """Pipeline execution configuration."""
 
@@ -151,14 +148,6 @@ class PipelineConfig(BaseModel):
     sandbox_validation_enabled: bool = True
 
 
-class QuotaConfig(BaseModel):
-    """API usage quota configuration."""
-
-    github_daily_limit: int = 5000
-    llm_daily_limit: int = 1000
-    llm_daily_tokens: int = 1_000_000
-
-
 class NotificationConfig(BaseModel):
     """Notification channel configuration."""
 
@@ -166,9 +155,6 @@ class NotificationConfig(BaseModel):
     discord_webhook: str = ""
     telegram_token: str = ""
     telegram_chat_id: str = ""
-    on_merge: bool = True
-    on_close: bool = True
-    on_run_complete: bool = True
 
 
 class LogConfig(BaseModel):
@@ -197,10 +183,7 @@ class FarmAgentConfig(BaseModel):
     contribution: ContributionConfig = Field(default_factory=ContributionConfig)
     discovery: DiscoveryConfig = Field(default_factory=DiscoveryConfig)
     storage: StorageConfig = Field(default_factory=StorageConfig)
-
-    web: WebConfig = Field(default_factory=WebConfig)
     pipeline: PipelineConfig = Field(default_factory=PipelineConfig)
-    quota: QuotaConfig = Field(default_factory=QuotaConfig)
     notifications: NotificationConfig = Field(default_factory=NotificationConfig)
     logging: LogConfig = Field(default_factory=LogConfig)
     multi_model: MultiModelConfig = Field(default_factory=MultiModelConfig)

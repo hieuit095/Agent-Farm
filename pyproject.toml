@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "farm_agent"
-version = "2.5.0"
+version = "3.0.0"
 description = "Autonomous system that automatically contributes to open source projects on GitHub"
 readme = "README.md"
 license = { text = "MIT" }
