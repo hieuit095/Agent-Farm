@@ -19,7 +19,7 @@ Farm-Agent is a highly advanced system designed to discover open-source GitHub r
 - **X-Ray Context Vision:** Builds a local ChromaDB Retrieval-Augmented Generation (RAG) index to ensure code patches are contextually accurate across multiple files.
 - **PR Patrol & Janitor:** Autonomously monitors open PRs for maintainer feedback to push auto-fixes, answer questions, and sign CLAs. The "Janitor" sweeps and deletes any PRs classified as low-quality or garbage.
 - **Anti-Farming Filter:** A zero-tolerance gatekeeper that drops trivial findings (e.g., typos, formatting) and blocks documentation-only PRs to prevent spamming maintainers.
-- **Super Human Mode:** A 24/7 autonomous daemon that operates on a stochastic daily schedule, complete with simulated coding delays, lunch breaks, and randomized PR quotas to mimic a real developer's circadian rhythm.
+- **Super Human Mode:** A 24/7 autonomous daemon that employs a relentless execution loop with strict safety sleep delays and daily API quotas, interleaving repository hunting, issue resolution, and PR patrols.
 - **Familiar Grounds:** Learns from past merged PRs to prioritize repositories where the agent is already a trusted contributor.
 
 ## System Architecture (High-Level)
@@ -52,13 +52,22 @@ When analyzing code or solving issues, the Code Generation Engine uses an epheme
 
 ### Environment Variables
 
-Configure the agent using `config.yaml` or set the following key environment variables:
+Farm-Agent requires certain API keys and configurations, defined in `.env`. Copy the provided example to get started:
 
-- `GITHUB_TOKEN`: Your GitHub Personal Access Token.
+```bash
+cp .env.example .env
+```
+
+**Required `.env` Variables:**
+- `GITHUB_TOKEN`: Your GitHub Personal Access Token (requires `repo`, `read:org`, and `workflow` scopes).
 - `MINIMAX_API_KEY`: Your Minimax API Key for LLM access.
-- `MINIMAX_GROUP_ID`: Your Minimax Group ID.
 
-Alternatively, copy `config.example.yaml` to `config.yaml` and fill in your details.
+**Optional `.env` Variables:**
+- `EXCLUDED_LANGUAGES`: Filter out verbose/costly languages (comma-separated, e.g. javascript,typescript).
+- `MINIMAX_GROUP_ID`: Your Minimax Group ID.
+- `OPENROUTER_API_KEY`: API key for OpenRouter, used by the Bloodhound Red Team pipeline.
+- `GITHUB_SECONDARY_TOKENS`: Additional tokens for GET request rotation (comma-separated).
+- `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `SLACK_WEBHOOK_URL`, `DISCORD_WEBHOOK_URL`: Config for notifications.
 
 ## Usage
 
