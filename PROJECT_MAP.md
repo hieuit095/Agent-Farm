@@ -27,70 +27,52 @@ Farm-Agent is a highly autonomous, multi-layered AI system capable of full-lifec
 ## 2. Directory Structure
 
 ```text
-farm_agent/
-├── cli/                 # Command-Line Interface entry points
-│   ├── main.py          # Primary Click CLI (`hunt`, `hunt-circular`, `superhuman`, `gc`, etc.)
-│   └── tui.py           # Text User Interface module
-├── core/                # Core domain models, configuration, and infrastructure
-│   ├── config.py        # Pydantic config (LLMConfig, AnalysisConfig with red_team_*/semgrep_*, GitHubConfig with secondary_tokens, FarmAgentConfig)
-│   ├── middleware.py    # Pipeline execution middlewares (Rate limits, DCO, Quality Gates)
-│   ├── models.py        # Shared data structures (Contribution, Repository, Finding, Vulnerability, VulnerabilityDossier, QAResult, TargetRepoEntry)
-│   ├── rag.py           # ChromaDB integration for contextual code search
-│   └── sandbox.py       # Docker-based Polyglot Sandbox for testing patches (DooD)
-├── github/              # Interfacing with the GitHub REST API
-│   ├── client.py        # Multi-token async HTTPX client with pool rotation (GET=pool, POST/PATCH=primary) + GraphQL
-│   ├── discovery.py     # RepoDiscovery (API search) + JsonTargetDiscovery (circular loop)
-│   └── guidelines.py    # Parsers for CONTRIBUTING.md and PR templates
-├── orchestrator/        # The brains of the operation connecting subsystems
-│   ├── human.py         # TerminatorLoop: relentless continuous execution + KB GC
-│   ├── memory.py        # SQLite persistence layer (aiosqlite) + knowledge_base + OpenRouter tracking
-│   └── pipeline.py      # ContribPipeline: discovery → bloodhound → DEV-QA loop → PR
-├── analysis/            # Code scanning and issue identification
-│   ├── analyzer.py      # CodeAnalyzer (legacy) + BloodhoundAnalyzer (ast-grep + Semgrep dual radar → OpenRouter/LLM)
-│   ├── mapper.py        # Repository structural mapper
-│   └── skills.py        # Progressive analysis skill definitions
-├── generator/           # Patch generation and validation
-│   ├── engine.py        # ContributionGenerator + TemplateViolationError + anti-template retry + CoT planning
-│   ├── scorer.py        # QualityScorer (heuristic) + QAHardcoreScorer (LLM-adversarial)
-│   └── reviewer.py      # Adversarial ReviewerAgent for self-review
-├── issues/              # Issue-driven contribution logic
-│   └── solver.py        # Analyzes and solves open GitHub issues
-├── pr/                  # Pull Request lifecycle management
-│   ├── manager.py       # Forks, branches, commits, and creates PRs
-│   ├── patrol.py        # Monitors open PRs for feedback and auto-pushes fixes
-│   └── janitor.py       # Sweeps and destroys garbage/low-quality PRs
-├── llm/                 # Abstractions for Language Models
-│   ├── provider.py      # Factory and interface for LLM clients (MinimaxProvider, OpenRouterProvider, _PROVIDERS registry)
-│   ├── context.py       # System prompt construction and style guide injection
-│   └── router.py        # Task-based routing to different LLM models
-├── notifications/       # Alerting system
-│   └── notifier.py      # Telegram/Slack/Discord webhook integrations
-├── agents/              # Sub-agents for specialized tasks
-│   └── registry.py      # Agent registry
-└── tools/               # LLM Function Calling Tools
-    └── protocol.py      # Tool registry for the LLM to interact with the environment
-
-ast_rules/               # AST-grep rule files (YAML) for Bloodhound pre-filtering
-├── python-*.yaml        # Python vulnerability rules (sqli, deserialization, etc.)
-├── js-*.yaml            # JavaScript vulnerability rules
-├── ts-*.yaml            # TypeScript vulnerability rules
-├── go-*.yaml            # Go vulnerability rules
-├── rust-*.yaml           # Rust vulnerability rules
-└── solidity-*.yaml      # Solidity vulnerability rules
-
-target_repo.json         # Circular Target Loop data: list of target repos with scan timestamps
+Farm-Agent/
+├── farm_agent/                     # Core application package
+│   ├── cli/                        # Command-line interfaces
+│   │   ├── main.py                 # Primary entrypoint
+│   │   └── tui.py                  # Interactive text-based UI
+│   ├── core/                       # Shared infrastructure
+│   │   ├── config.py               # Pydantic settings loading
+│   │   ├── exceptions.py           # Custom exception hierarchy
+│   │   ├── logger.py               # Application logging
+│   │   ├── sandbox.py              # Docker-based Polyglot execution sandbox
+│   │   ├── models.py               # Shared Pydantic data models
+│   │   └── leaderboard.py          # Tracks PR outcomes and merge rates
+│   ├── generator/                  # Code modification and evaluation
+│   │   ├── engine.py               # LLM prompt construction & generation
+│   │   ├── reviewer.py             # LLM code review pipeline
+│   │   └── scorer.py               # Code quality assessment
+│   ├── github/                     # GitHub API interactions
+│   │   ├── client.py               # Async REST and GraphQL API wrapper
+│   │   ├── discovery.py            # Repository search and filtering
+│   │   └── guidelines.py           # Extracts contributing guidelines
+│   ├── issues/                     # Issue resolution logic
+│   │   └── solver.py               # Issue classification and processing
+│   ├── llm/                        # Language model providers
+│   │   ├── provider.py             # Minimax, OpenAI, Anthropic, OpenRouter
+│   │   ├── router.py               # Dynamic model task allocation
+│   │   ├── models.py               # LLM configurations
+│   │   ├── agents.py               # specialized LLM prompts/roles
+│   │   └── context.py              # Context builders for LLM
+│   ├── orchestrator/               # Core execution loops
+│   │   ├── memory.py               # SQLite persistent state management
+│   │   ├── pipeline.py             # ContribPipeline (Single run)
+│   │   └── human.py                # SuperHumanLoop (Terminator loop)
+│   ├── pr/                         # Pull Request lifecycle management
+│   │   ├── manager.py              # Fork, branch, commit, push, PR creation
+│   │   ├── patrol.py               # Monitors PRs for feedback
+│   │   └── janitor.py              # Sweeps and deletes garbage PRs
+│   ├── tools/                      # Extensible functionality plugins
+│   │   └── ast_grep.py             # AST-based code search wrapper
+│   ├── templates/                  # Contribution definitions
+│   └── plugins/                    # Additional plugins
+├── tests/                          # Pytest suite
+├── pyproject.toml                  # Project metadata and Hatchling config
+├── Makefile                        # Development tasks
+├── docker-compose.yml              # DooD daemon configuration
+└── .env.example                    # Environment variable template
 ```
-
-### Docker Deployment Files
-
-```text
-Dockerfile               # Multi-stage build (python:3.11-slim), ast-grep binary, semgrep pip, wheel install
-docker-compose.yml        # DooD architecture; single `farm_agent` service with Docker socket mount
-.dockerignore             # Excludes venv/, tests/, .git/, .env, data/, logs/ from build context
-entrypoint.sh             # Minimal `exec "$@"` — no DB seeding (v3.0 Memory.init() handles schema)
-```
-
----
 
 ## 3. Core Module Dependency Graph
 
