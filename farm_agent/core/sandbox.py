@@ -196,23 +196,79 @@ def get_environment_for_language(language: str) -> dict[str, str]:
 
 
 class DockerSandbox:
-    """Run commands inside ephemeral Docker containers."""
+    """Run commands inside ephemeral Docker containers with strict isolation.
+
+    Security hardening:
+    - network_mode="none": Sever all internet access (prevents payload downloads,
+      data exfiltration, and C2 callbacks).
+    - mem_limit="512m": Prevent OOM attacks and memory exhaustion.
+    - nano_cpus=500_000_000: Cap at 0.5 CPU to prevent fork bombs and CPU pegging.
+    - cap_drop=["ALL"]: Drop ALL Linux capabilities (no net_admin, no sys_admin, etc.).
+    - security_opt=["no-new-privileges"]: Prevent privilege escalation via setuid binaries.
+    - pids_limit=128: Prevent fork bombs at the process level.
+    - Hard 60-second asyncio.wait_for timeout on container execution, enforced in
+      addition to the OS-level `timeout --signal=KILL` wrapper inside the container.
+    """
 
     _WORKSPACE_PATH = "/workspace"
     _POLL_INTERVAL_SECONDS = 0.2
     _REMOVAL_GRACE_SECONDS = 10.0
     _TIMEOUT_EXIT_CODE = 137
+    _EXECUTION_TIMEOUT_SECONDS = 60
 
     def __init__(self):
         """Initialize the Docker client from the local environment."""
         self.client = docker.from_env()
+
+    def _determine_test_command(self, repo_path: Path, fallback_cmd: str = "") -> str:
+        """Heuristically determine the native test command for the repository."""
+        if (repo_path / "foundry.toml").exists():
+            return "forge test"
+
+        if (repo_path / "hardhat.config.js").exists() or (repo_path / "hardhat.config.ts").exists():
+            return "npx hardhat test"
+
+        if (repo_path / "Cargo.toml").exists():
+            return "cargo test"
+
+        if (repo_path / "tox.ini").exists():
+            return "tox"
+        
+        makefile = repo_path / "Makefile"
+        if makefile.exists():
+            try:
+                if "test:" in makefile.read_text(errors="ignore"):
+                    return "make test"
+            except Exception:
+                pass
+                
+        package_json = repo_path / "package.json"
+        if package_json.exists():
+            try:
+                import json
+                data = json.loads(package_json.read_text(errors="ignore"))
+                if "test" in data.get("scripts", {}):
+                    return "npm test"
+            except Exception:
+                pass
+                
+        if (repo_path / "pytest.ini").exists() or (repo_path / "tests").is_dir():
+            return "pytest"
+            
+        if (repo_path / "Cargo.toml").exists():
+            return "cargo test"
+            
+        if (repo_path / "go.mod").exists():
+            return "go test ./..."
+            
+        return fallback_cmd
 
     async def run_in_sandbox(
         self,
         repo_path: str,
         command: str | None = None,
         image: str | None = None,
-        timeout: int = 300,
+        timeout: int = 60,
         language: str | None = None,
         repo_info: dict | None = None,
     ) -> dict[str, Any]:
@@ -222,11 +278,24 @@ class DockerSandbox:
         Docker image and test command for that language. Falls back to python
         if no language is detected.
 
+        The container is strictly sandboxed:
+        - No network access (network_mode="none")
+        - 512MB memory cap (mem_limit="512m")
+        - 0.5 CPU cap (nano_cpus=500_000_000)
+        - All Linux capabilities dropped (cap_drop=["ALL"])
+        - No new privileges (security_opt=["no-new-privileges"])
+        - 128 process limit (pids_limit=128)
+        - Hard 60-second execution timeout enforced at THREE levels:
+          1. OS-level: `timeout --signal=KILL` inside the container
+          2. asyncio-level: `asyncio.wait_for` with EXECUTION_TIMEOUT_SECONDS
+          3. Poll-level: deadline-based kill loop with container.kill()
+
         Args:
             repo_path: Host path to the repository that will be mounted at `/workspace`.
             command: Shell command to execute. Auto-selected from language if not given.
             image: Docker image. Auto-selected from language if not given.
             timeout: Maximum execution time in seconds before the container is killed.
+                     Defaults to 60 seconds.
             language: Language hint (e.g. 'python', 'rust', 'go'). Auto-detected
                       from repo_info or file extensions if not provided.
             repo_info: Optional GitHub repo metadata dict for language detection.
@@ -250,7 +319,15 @@ class DockerSandbox:
 
         env = get_environment_for_language(detected_lang)
         resolved_image = image or env["image"]
-        resolved_command = command or env["test_cmd"]
+        base_command = command or env["test_cmd"]
+
+        repo_dir = Path(repo_path).expanduser().resolve()
+        if not repo_dir.exists():
+            raise FileNotFoundError(f"Sandbox repository path does not exist: {repo_dir}")
+        if not repo_dir.is_dir():
+            raise NotADirectoryError(f"Sandbox repository path is not a directory: {repo_dir}")
+            
+        resolved_command = self._determine_test_command(repo_dir, fallback_cmd=base_command)
 
         logger.info(
             "Polyglot Guillotine: language=%s, image=%s, cmd=%s",
@@ -258,11 +335,6 @@ class DockerSandbox:
             resolved_image,
             resolved_command[:60],
         )
-        repo_dir = Path(repo_path).expanduser().resolve()
-        if not repo_dir.exists():
-            raise FileNotFoundError(f"Sandbox repository path does not exist: {repo_dir}")
-        if not repo_dir.is_dir():
-            raise NotADirectoryError(f"Sandbox repository path is not a directory: {repo_dir}")
         if not resolved_command.strip():
             raise ValueError("Sandbox command must not be empty.")
         if timeout <= 0:
@@ -282,6 +354,9 @@ class DockerSandbox:
         timed_out = False
         exit_code: int | None = None
 
+        import shutil
+        import tempfile
+        
         logger.info("Starting sandbox container %s for %s", container_name, repo_dir)
 
         try:
@@ -294,47 +369,72 @@ class DockerSandbox:
                 timeout=timeout,
             )
 
-            output_task = asyncio.create_task(
-                asyncio.to_thread(self._capture_output, container.id)
-            )
-            wait_task = asyncio.create_task(
-                asyncio.to_thread(self._wait_for_exit_code, container.id)
-            )
-
-            loop = asyncio.get_running_loop()
-            deadline = loop.time() + timeout
-
-            while True:
-                if wait_task.done():
-                    break
-
-                if loop.time() >= deadline:
-                    timed_out = True
-                    logger.warning(
-                        "Sandbox container %s exceeded timeout after %s seconds; killing it",
-                        container_name,
-                        timeout,
+            # ── Hard execution timeout enforced at asyncio level ──────────
+            # In addition to the OS-level `timeout --signal=KILL` wrapper
+            # inside the container, we enforce a hard cap here. If the
+            # container execution + output capture exceeds
+            # _EXECUTION_TIMEOUT_SECONDS, we kill the container and return
+            # a timeout result.
+            try:
+                async def _execute_and_collect() -> dict[str, Any]:
+                    output_task = asyncio.create_task(
+                        asyncio.to_thread(self._capture_output, container.id)
                     )
-                    await self._kill_container(container)
-                    break
+                    wait_task = asyncio.create_task(
+                        asyncio.to_thread(self._wait_for_exit_code, container.id, timeout=timeout)
+                    )
 
-                try:
-                    await asyncio.to_thread(container.reload)
-                    if container.status in {"exited", "dead"}:
-                        break
-                except NotFound:
-                    if wait_task.done():
-                        break
+                    loop = asyncio.get_running_loop()
+                    deadline = loop.time() + timeout
 
-                await asyncio.sleep(self._POLL_INTERVAL_SECONDS)
+                    while True:
+                        if wait_task.done():
+                            break
 
-            if wait_task is not None:
-                exit_code = await self._resolve_exit_code(wait_task, timed_out=timed_out)
+                        if loop.time() >= deadline:
+                            raise asyncio.TimeoutError()
 
-            stdout = ""
-            stderr = ""
-            if output_task is not None:
-                stdout, stderr = await self._resolve_output(output_task)
+                        try:
+                            await asyncio.to_thread(container.reload)
+                            if container.status in {"exited", "dead"}:
+                                break
+                        except NotFound:
+                            if wait_task.done():
+                                break
+
+                        await asyncio.sleep(self._POLL_INTERVAL_SECONDS)
+
+                    exit_code = await self._resolve_exit_code(wait_task, timed_out=False)
+                    stdout, stderr = await self._resolve_output(output_task)
+                    return {
+                        "exit_code": exit_code,
+                        "stdout": stdout,
+                        "stderr": stderr,
+                        "timed_out": False,
+                    }
+
+                result = await asyncio.wait_for(
+                    _execute_and_collect(),
+                    timeout=self._EXECUTION_TIMEOUT_SECONDS,
+                )
+
+                exit_code = result["exit_code"]
+                stdout = result["stdout"]
+                stderr = result["stderr"]
+                timed_out = False
+
+            except asyncio.TimeoutError:
+                timed_out = True
+                logger.warning(
+                    "Sandbox container %s exceeded hard execution timeout (%ds); "
+                    "forcefully killing and removing",
+                    container_name,
+                    self._EXECUTION_TIMEOUT_SECONDS,
+                )
+                await self._kill_container(container)
+                exit_code = self._TIMEOUT_EXIT_CODE
+                stdout = ""
+                stderr = f"Sandbox execution timed out after {self._EXECUTION_TIMEOUT_SECONDS}s"
 
             await self._wait_for_container_removal(run_id)
 
@@ -352,6 +452,14 @@ class DockerSandbox:
             if container is not None:
                 await self._force_remove_container(container)
                 await self._wait_for_container_removal(run_id)
+            if 'temp_dir_obj' in locals():
+                # tempfile cleanup can sometimes raise if files are in use, but usually safe.
+                # However, tempfile.TemporaryDirectory's cleanup may fail on Windows if files are read-only.
+                # We'll just call it and ignore exceptions or let it throw.
+                try:
+                    temp_dir_obj.cleanup()
+                except Exception as cleanup_exc:
+                    logger.debug("Failed to clean up temp dir %s: %s", temp_dir_obj.name, cleanup_exc)
 
     async def _start_container(
         self,
@@ -378,30 +486,34 @@ class DockerSandbox:
         guarded_command = f"timeout --signal=KILL {timeout}s {command}"
 
         def _run_container() -> Container:
-            return self.client.containers.run(
+            container = self.client.containers.create(
                 image,
                 ["/bin/sh", "-lc", guarded_command],
-                detach=True,
-                # DEBT-05: Removed auto_remove=True — rely on explicit finally cleanup
-                # block for deterministic container removal and to avoid 409 Conflict
-                # warnings when the daemon races with container exit.
                 working_dir=self._WORKSPACE_PATH,
-                volumes={
-                    str(repo_dir): {
-                        "bind": self._WORKSPACE_PATH,
-                        "mode": "rw",
-                    }
-                },
+                tmpfs={self._WORKSPACE_PATH: "size=500m,mode=1777"},
+                # ── Security hardening: strict isolation ──────────────────────
+                network_mode="none",
                 mem_limit="512m",
-                network_disabled=True,
+                nano_cpus=500_000_000,
                 cap_drop=["ALL"],
+                security_opt=["no-new-privileges"],
                 pids_limit=128,
-                init=False,  # P0-FIX: init=False lets `timeout --signal=KILL` kill PID 1 directly.
-                # With init=True (tini), SIGKILL goes to tini which may not forward
-                # to child processes, causing sandbox containers to outlive their timeout.
+                init=False,
                 labels=labels,
                 name=container_name,
             )
+
+            import io
+            import tarfile
+
+            tar_stream = io.BytesIO()
+            with tarfile.open(fileobj=tar_stream, mode='w') as tar:
+                tar.add(str(repo_dir), arcname='.')
+            tar_stream.seek(0)
+
+            self.client.api.put_archive(container.id, self._WORKSPACE_PATH, tar_stream)
+            container.start()
+            return container
 
         try:
             return await asyncio.to_thread(_run_container)

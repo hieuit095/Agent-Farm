@@ -98,6 +98,12 @@ class Issue(BaseModel):
     html_url: str = ""
 
 
+TOKEN_BLACKLIST = {
+    "node_modules", "vendor", "dist", "build", "target", ".git", 
+    "package-lock.json", "yarn.lock", "pnpm-lock.yaml", "Cargo.lock", 
+    "go.sum", "poetry.lock"
+}
+
 class FileNode(BaseModel):
     """A file or directory in the repo tree."""
 

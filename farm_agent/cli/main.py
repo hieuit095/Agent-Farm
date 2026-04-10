@@ -982,10 +982,11 @@ def reset_db(ctx, yes):
 def show_config(ctx):
     """Show current configuration."""
     config = load_config(ctx.obj["config_path"])
-    console.print(
+console.print(
         Panel(
             f"[bold]GitHub[/bold]\n"
             f"  Token: {'****' + config.github.token[-4:] if config.github.token else 'NOT SET'}\n"
+            f"  Secondary tokens: {len(config.github.secondary_tokens)} configured\n"
             f"  Max repos/run: {config.github.max_repos_per_run}\n"
             f"  Max PRs/day: {config.github.max_prs_per_day}\n\n"
             f"[bold]LLM[/bold]\n"
@@ -999,11 +1000,10 @@ def show_config(ctx):
             f"[bold]Analysis[/bold]\n"
             f"  Analyzers: {', '.join(config.analysis.enabled_analyzers)}\n"
             f"  Threshold: {config.analysis.severity_threshold}\n\n"
-f"[bold]Pipeline[/bold]\n"
-             f"  Max concurrent: {config.pipeline.max_concurrent_repos}\n"
-             f"  Timeout/repo: {config.pipeline.timeout_per_repo_sec}s\n\n"
-             f"[bold]Super Human Mode[/bold]\n"
-            f"  KPI Target: {config.github.min_daily_prs}-{config.github.max_daily_prs} PRs/day\n"
+            f"[bold]Pipeline[/bold]\n"
+            f"  Max concurrent: {config.pipeline.max_concurrent_repos}\n"
+            f"  Timeout/repo: {config.pipeline.timeout_per_repo_sec}s\n\n"
+            f"[bold]Terminator Mode[/bold]\n"
             f"  Max PRs/day (hard cap): {config.github.max_prs_per_day}",
             title="Farm-Agent Configuration",
         )

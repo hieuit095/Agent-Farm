@@ -114,6 +114,15 @@ CREATE TABLE IF NOT EXISTS knowledge_base (
     created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(repo_name, entry_type, content)
 );
+
+CREATE TABLE IF NOT EXISTS target_repos (
+    repo_url        TEXT PRIMARY KEY,
+    status          TEXT DEFAULT 'PENDING',
+    scanned_at      REAL,
+    language        TEXT,
+    bounty_amount   INTEGER,
+    diamond_target  INTEGER DEFAULT 0
+);
 """
 
 
@@ -720,6 +729,150 @@ class Memory:
             await self._db.commit()
         except Exception as exc:
             logger.debug("Could not record OpenRouter usage: %s", exc)
+
+    # ── Target Repo Management (Circular Target Loop) ────────────────────────
+
+    async def seed_targets_from_json(self, json_path: Path) -> int:
+        """Seed the target_repos table from a target_repo.json file.
+
+        Uses INSERT OR IGNORE so existing rows (with progress) are never
+        overwritten. This allows seamless upgrades from the JSON-based system.
+
+        Returns the number of new rows inserted.
+        """
+        import json as _json
+
+        if self._db is None:
+            return 0
+
+        json_path = Path(json_path)
+        if not json_path.exists():
+            logger.info("No target_repo.json found at %s — skipping seed", json_path)
+            return 0
+
+        try:
+            raw = json_path.read_text(encoding="utf-8")
+            entries = _json.loads(raw)
+        except (json.JSONDecodeError, OSError) as exc:
+            logger.error("Failed to read target_repo.json for seeding: %s", exc)
+            return 0
+
+        inserted = 0
+        for entry_data in entries:
+            repo_url = entry_data.get("repo_url", "")
+            if not repo_url:
+                continue
+
+            language = entry_data.get("language") or None
+            status = entry_data.get("status", "PENDING")
+            bounty = entry_data.get("bounty_amount")
+            bounty_int = int(bounty) if bounty is not None else None
+            diamond = 1 if entry_data.get("diamond_target") else 0
+
+            scanned_at = None
+            sa = entry_data.get("scanned_at")
+            if sa is not None:
+                try:
+                    if isinstance(sa, str):
+                        dt = datetime.fromisoformat(sa.replace("Z", "+00:00"))
+                        scanned_at = dt.timestamp()
+                    elif isinstance(sa, (int, float)):
+                        scanned_at = float(sa)
+                except (ValueError, TypeError):
+                    scanned_at = None
+
+            try:
+                cursor = await self._db.execute(
+                    """INSERT OR IGNORE INTO target_repos
+                       (repo_url, status, scanned_at, language, bounty_amount, diamond_target)
+                       VALUES (?, ?, ?, ?, ?, ?)""",
+                    (repo_url, status, scanned_at, language, bounty_int, diamond),
+                )
+                if cursor.rowcount == 1:
+                    inserted += 1
+            except Exception as exc:
+                logger.debug("Seed skip for %s: %s", repo_url, exc)
+
+        await self._db.commit()
+        if inserted > 0:
+            logger.info("Seeded %d target repos from %s", inserted, json_path)
+        return inserted
+
+    async def get_next_target(self, excluded_languages: list[str] | None = None) -> dict | None:
+        """Return the target repo with the oldest scanned_at (or NULL scanned_at first).
+
+        Equivalent to the old JsonTargetDiscovery.get_next_target() but backed
+        by SQLite for atomic reads and writes.
+
+        Returns a dict with keys: repo_url, status, scanned_at, language,
+        bounty_amount, diamond_target — or None if the table is empty.
+        """
+        if self._db is None:
+            return None
+
+        import time
+        now_ts = time.time()
+
+        if excluded_languages:
+            placeholders = ",".join(["?"] * len(excluded_languages))
+            query = f"""UPDATE target_repos 
+               SET scanned_at = ? 
+               WHERE repo_url = (SELECT repo_url FROM target_repos WHERE LOWER(language) NOT IN ({placeholders}) ORDER BY COALESCE(scanned_at, 0) ASC, rowid ASC LIMIT 1) 
+               RETURNING *"""
+            params = (now_ts, *[lang.lower() for lang in excluded_languages])
+        else:
+            query = """UPDATE target_repos 
+               SET scanned_at = ? 
+               WHERE repo_url = (SELECT repo_url FROM target_repos ORDER BY COALESCE(scanned_at, 0) ASC, rowid ASC LIMIT 1) 
+               RETURNING *"""
+            params = (now_ts,)
+
+        cursor = await self._db.execute(query, params)
+        row = await cursor.fetchone()
+        await self._db.commit()
+        
+        if row is None:
+            return None
+
+        cols = [d[0] for d in cursor.description]
+        return dict(zip(cols, row, strict=False))
+
+    async def mark_target_status(
+        self,
+        repo_url: str,
+        new_status: str,
+        update_timestamp: bool = True,
+    ) -> None:
+        """Update the status of a target repo in the database.
+
+        If update_timestamp is True, also updates scanned_at to the current
+        Unix timestamp (for crash-safe rotation: call with update_timestamp=True
+        BEFORE making any API or LLM calls).
+
+        Args:
+            repo_url: The repository URL to update.
+            new_status: New status string (e.g. 'SCANNED', 'COMPLETED_NO_VULN',
+                        'PR_SUBMITTED', 'COMPLETED_TOO_COMPLEX').
+            update_timestamp: If True, also set scanned_at = current time.
+        """
+        if self._db is None:
+            return
+
+        import time as _time
+
+        if update_timestamp:
+            now_ts = _time.time()
+            await self._db.execute(
+                "UPDATE target_repos SET status = ?, scanned_at = ? WHERE repo_url = ?",
+                (new_status, now_ts, repo_url),
+            )
+        else:
+            await self._db.execute(
+                "UPDATE target_repos SET status = ? WHERE repo_url = ?",
+                (new_status, repo_url),
+            )
+        await self._db.commit()
+        logger.debug("Target %s → status=%s (timestamp=%s)", repo_url, new_status, update_timestamp)
 
     async def get_outcome_stats(self) -> dict:
         """Get outcome statistics."""

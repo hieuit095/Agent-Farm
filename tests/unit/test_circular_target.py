@@ -1,4 +1,4 @@
-"""Tests for JsonTargetDiscovery and crash-safe circular target rotation."""
+"""Tests for JsonTargetDiscovery, DatabaseTargetDiscovery, and crash-safe circular target rotation."""
 
 import json
 from datetime import UTC, datetime
@@ -6,7 +6,8 @@ from datetime import UTC, datetime
 import pytest
 
 from farm_agent.core.models import TargetRepoEntry
-from farm_agent.github.discovery import JsonTargetDiscovery
+from farm_agent.github.discovery import JsonTargetDiscovery, DatabaseTargetDiscovery
+from farm_agent.orchestrator.memory import Memory
 
 
 @pytest.fixture
@@ -146,3 +147,97 @@ class TestJsonTargetDiscovery:
         assert entry.stars == 0
         assert entry.diamond_target is False
         assert entry.language is None
+
+
+class TestDatabaseTargetDiscovery:
+    """Tests for the SQLite-backed DatabaseTargetDiscovery."""
+
+    @pytest.fixture
+    async def memory_db(self, tmp_path):
+        db_path = str(tmp_path / "test_memory.db")
+        mem = Memory(db_path)
+        await mem.init()
+        yield mem
+        await mem.close()
+
+    @pytest.mark.asyncio
+    async def test_seed_from_json(self, json_file, memory_db):
+        disc = DatabaseTargetDiscovery(memory=memory_db)
+        inserted = await disc.initialize(json_path=json_file)
+        assert inserted == 3
+
+    @pytest.mark.asyncio
+    async def test_get_next_target_nulls_first(self, json_file, memory_db):
+        disc = DatabaseTargetDiscovery(memory=memory_db)
+        await disc.initialize(json_path=json_file)
+        target = await disc.get_next_target()
+        assert target is not None
+        assert target.repo_url == "https://github.com/owner/repo3"
+
+    @pytest.mark.asyncio
+    async def test_mark_scanned_updates_timestamp(self, json_file, memory_db):
+        disc = DatabaseTargetDiscovery(memory=memory_db)
+        await disc.initialize(json_path=json_file)
+
+        target = await disc.get_next_target()
+        assert target.repo_url == "https://github.com/owner/repo3"
+
+        await disc.mark_scanned(target.repo_url)
+
+        next_target = await disc.get_next_target()
+        assert next_target is not None
+        assert next_target.repo_url == "https://github.com/owner/repo1"
+
+    @pytest.mark.asyncio
+    async def test_mark_status_no_timestamp(self, json_file, memory_db):
+        disc = DatabaseTargetDiscovery(memory=memory_db)
+        await disc.initialize(json_path=json_file)
+
+        target = await disc.get_next_target()
+        assert target.repo_url == "https://github.com/owner/repo3"
+
+        await disc.mark_status(target.repo_url, "COMPLETED_NO_VULN")
+
+        row = await memory_db._db.execute(
+            "SELECT status FROM target_repos WHERE repo_url = ?",
+            (target.repo_url,),
+        )
+        result = await row.fetchone()
+        assert result[0] == "COMPLETED_NO_VULN"
+
+    @pytest.mark.asyncio
+    async def test_crash_safe_rotation(self, json_file, memory_db):
+        disc = DatabaseTargetDiscovery(memory=memory_db)
+        await disc.initialize(json_path=json_file)
+
+        target = await disc.get_next_target()
+        assert target.repo_url == "https://github.com/owner/repo3"
+
+        await disc.mark_scanned(target.repo_url)
+
+        disc2 = DatabaseTargetDiscovery(memory=memory_db)
+        next_target = await disc2.get_next_target()
+        assert next_target.repo_url == "https://github.com/owner/repo1"
+
+    @pytest.mark.asyncio
+    async def test_seed_idempotent(self, json_file, memory_db):
+        disc = DatabaseTargetDiscovery(memory=memory_db)
+        inserted1 = await disc.initialize(json_path=json_file)
+        assert inserted1 == 3
+
+        inserted2 = await disc.initialize(json_path=json_file)
+        assert inserted2 == 0
+
+    @pytest.mark.asyncio
+    async def test_empty_db_returns_none(self, memory_db):
+        disc = DatabaseTargetDiscovery(memory=memory_db)
+        target = await disc.get_next_target()
+        assert target is None
+
+    @pytest.mark.asyncio
+    async def test_missing_json_file_seed(self, tmp_path, memory_db):
+        disc = DatabaseTargetDiscovery(memory=memory_db)
+        inserted = await disc.initialize(json_path=str(tmp_path / "nonexistent.json"))
+        assert inserted == 0
+        target = await disc.get_next_target()
+        assert target is None

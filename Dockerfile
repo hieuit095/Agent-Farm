@@ -38,7 +38,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     curl \
     ca-certificates \
+    nodejs \
+    npm \
     && rm -rf /var/lib/apt/lists/*
+
+# Install Rust
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+ENV PATH="/root/.cargo/bin:${PATH}"
+
+# Install Foundry
+RUN curl -L https://foundry.paradigm.xyz | bash && \
+    /root/.foundry/bin/foundryup
+ENV PATH="/root/.foundry/bin:${PATH}"
 
 # ── Install ast-grep (sg) binary ───────────────────────────────────────────
 # Direct binary download — avoids pulling Node.js (~200MB savings).
@@ -57,6 +68,11 @@ RUN ARCH=$(uname -m) && \
     chmod +x /usr/local/bin/sg && \
     rm -rf /tmp/sg.zip /tmp/sg-extract && \
     sg --version
+
+# ── Install Semgrep (parallel radar for Bloodhound) ────────────────────────
+# Heavy dep (~200MB) but provides access to community security rulesets.
+# Gracefully skipped at runtime if binary missing (use_semgrep=False in config).
+RUN pip install --no-cache-dir semgrep
 
 # ── Install Python wheel from builder ──────────────────────────────────────
 COPY --from=builder /build/dist/*.whl /tmp/

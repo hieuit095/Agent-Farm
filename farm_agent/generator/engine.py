@@ -468,6 +468,7 @@ class ContributionGenerator:
         *,
         guidelines=None,
         github_client=None,
+        failure_context: str = "",
     ) -> list[Contribution]:
         """Generate patches for vulnerabilities found by the Bloodhound analyzer.
 
@@ -476,12 +477,16 @@ class ContributionGenerator:
         automatic retries with escalating warnings.
 
         Injects QA lessons from memory to avoid repeating past mistakes.
+        Injects failure_context from previous DEV-QA cycles so the LLM
+        can read raw compilation/test errors and QA critiques.
 
         Args:
             dossier: VulnerabilityDossier from BloodhoundAnalyzer.
             context: RepoContext with file contents for the target repo.
             guidelines: Optional repo guidelines.
             github_client: Optional GitHub client for file reads.
+            failure_context: Accumulated failure traces from previous DEV-QA
+                cycles (QA critiques, sandbox stderr, generation errors).
 
         Returns:
             List of Contribution objects (one per valid vulnerability fix).
@@ -499,6 +504,7 @@ class ContributionGenerator:
                 context=context,
                 guidelines=guidelines,
                 github_client=github_client,
+                failure_context=failure_context,
             )
             if contribution is not None:
                 contributions.append(contribution)
@@ -519,10 +525,13 @@ class ContributionGenerator:
         *,
         guidelines=None,
         github_client=None,
+        failure_context: str = "",
     ) -> Contribution | None:
         """Generate a single Contribution for one Vulnerability entry.
 
         Implements the 3-cycle anti-template retry loop with QA lesson injection.
+        Injects failure_context from previous DEV-QA cycles so the LLM can read
+        raw compilation/test errors and QA critiques.
         """
         # ── Inject QA Lessons from knowledge base ────────────────────────
         qa_lessons_section = ""
@@ -541,21 +550,17 @@ class ContributionGenerator:
         # ── Build hardened system prompt ─────────────────────────────────
         system = (
             "You are an elite, silent software engineer. "
-            "You output ONLY valid Markdown code blocks. "
-            "YOU ARE FORBIDDEN from using placeholders like `...`, `TODO`, "
-            "`[Insert Code]`, or `<variable>`. "
-            "YOU MUST write the exact, complete, and functional code. "
-            "DO NOT output conversational text, explanations, or apologies.\n\n"
+            "You MUST think deeply before writing any code.\n\n"
             "ABSOLUTE RULES:\n"
-            "1. Every code block must be COMPLETE and FUNCTIONAL.\n"
-            "2. NO ellipsis (`...`) to skip code sections.\n"
-            "3. NO `TODO` comments instead of implementation.\n"
-            "4. NO `[Insert X here]` or `<placeholder>` markers.\n"
-            "5. NO `TBD` or similar shorthand.\n"
-            "6. Return ONLY the requested machine-readable payload. "
-            "No prose, no markdown commentary, no \u0422\u0435\u0442\u0430\u0434\u0435 tags.\n"
-            "7. SURGICAL PRECISION: Make the SMALLEST change that fixes the issue.\n"
-            "8. Match existing code style EXACTLY (indentation, naming, patterns).\n"
+            "1. Before writing any code, you MUST formulate a strict, step-by-step "
+            "architectural plan.\n"
+            "2. Think about: root cause analysis, data flow, potential regressions, "
+            "and how to neutralize the vulnerability without breaking the system.\n"
+            "3. Every code block must be COMPLETE and FUNCTIONAL.\n"
+            "4. NO placeholders like `...`, `TODO`, `[Insert Code]`, `<variable>`, or `TBD`.\n"
+            "5. SURGICAL PRECISION: make the SMALLEST change that fixes the issue.\n"
+            "6. Match existing code style EXACTLY (indentation, naming, patterns).\n"
+            "7. Return ONLY the JSON object below. No prose, no markdown commentary, no \u0422\u0435\u0442\u0430\u0434\u0435 tags.\n"
         )
 
         # ── Build user prompt from vulnerability ─────────────────────────
@@ -597,16 +602,28 @@ class ContributionGenerator:
         if qa_lessons_section:
             user_prompt += qa_lessons_section
 
+        if failure_context:
+            user_prompt += (
+                "\n\n## Previous Failure Trace (MUST address these errors)\n"
+                "Your previous attempt(s) failed. Here are the EXACT errors and critiques:\n"
+                f"```\n{failure_context}\n```\n\n"
+                "You MUST analyze these failures and produce a DIFFERENT approach. "
+                "Do NOT repeat the same mistakes.\n"
+            )
+
         user_prompt += (
             f"\n## Current File Content ({vuln.file})\n"
             f"```\n{target_file_content[:8000]}\n```\n\n"
             f"## Output Format\n"
-            f"Return ONLY a JSON object with search/replace edits:\n"
-            f'```json\n{{\n  "changes": [\n    {{\n      "path": "{vuln.file}",\n'
+            f"You MUST respond strictly in the following JSON format. "
+            f"The `coding_plan` MUST appear first.\n"
+            f'```json\n{{\n  "coding_plan": "1. Root cause analysis\\n2. Step-by-step fix strategy\\n3. Edge cases to handle",\n'
+            f'  "changes": [\n    {{\n      "path": "{vuln.file}",\n'
             f'      "is_new_file": false,\n      "edits": [\n        {{\n'
             f'          "search": "exact text to find in the file",\n'
             f'          "replace": "replacement text"\n        }}\n      ]\n    }}\n  ]\n}}\n```\n\n'
             f"CRITICAL:\n"
+            f"- The `coding_plan` field is MANDATORY. Think before you code.\n"
             f"- The `search` value MUST be an EXACT, VERBATIM copy of text from the file above.\n"
             f"- NEVER use `...` or any placeholder to skip lines.\n"
             f"- Include enough context (3-5 lines) so the search block is unique.\n"
@@ -1313,6 +1330,9 @@ class ContributionGenerator:
                 data = yaml.safe_load(payload_text)
 
             if isinstance(data, dict):
+                coding_plan = data.get("coding_plan")
+                if coding_plan:
+                    logger.info("[CoT] DEV Agent Plan: %s", coding_plan)
                 raw_changes = data.get("changes", [])
             elif isinstance(data, list):
                 raw_changes = data

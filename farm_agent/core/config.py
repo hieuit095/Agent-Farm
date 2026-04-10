@@ -23,6 +23,7 @@ class GitHubConfig(BaseModel):
     max_daily_prs: int = 10
     rate_limit_buffer: int = 3  # Stop API calls when remaining < 3 to prevent secondary rate limits
     dco_signoff: bool = True  # Auto-append Signed-off-by to commit messages
+    secondary_tokens: list[str] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def resolve_token(self):
@@ -41,6 +42,10 @@ class GitHubConfig(BaseModel):
                     self.token = result.stdout.strip()
             except (FileNotFoundError, subprocess.TimeoutExpired):
                 pass
+        if not self.secondary_tokens:
+            env_tokens = os.environ.get("GITHUB_SECONDARY_TOKENS", "")
+            if env_tokens:
+                self.secondary_tokens = [t.strip() for t in env_tokens.split(",") if t.strip()]
         return self
 
 
@@ -91,6 +96,12 @@ class AnalysisConfig(BaseModel):
     red_team_model: str = "cognitivecomputations/dolphin-mistral-24b-venice-edition:free"
     red_team_daily_limit: int = 1000
 
+    # Semgrep radar (runs concurrently with ast-grep in Bloodhound pipeline)
+    use_semgrep: bool = True
+    semgrep_rulesets: list[str] = Field(
+        default_factory=lambda: ["p/security-audit", "p/cwe-top-25", "p/default"]
+    )
+
 
 class ContributionConfig(BaseModel):
     """Contribution generation configuration."""
@@ -117,10 +128,23 @@ class DiscoveryConfig(BaseModel):
     """Repository discovery configuration."""
 
     languages: list[str] = Field(default_factory=lambda: ["python"])
+    excluded_languages: list[str] = Field(default_factory=list)
     stars_range: list[int] = Field(default_factory=lambda: [50, 10000])
     min_last_activity_days: int = 30
     require_contributing_guide: bool = False
     topics: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def resolve_excluded_languages(self):
+        """Parse excluded_languages from env var."""
+        env_val = os.environ.get("EXCLUDED_LANGUAGES", "")
+        if env_val:
+            self.excluded_languages = [
+                lang.strip().lower() for lang in env_val.split(",") if lang.strip()
+            ]
+        else:
+            self.excluded_languages = [lang.lower() for lang in self.excluded_languages]
+        return self
 
 
 class StorageConfig(BaseModel):

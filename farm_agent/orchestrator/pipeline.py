@@ -35,7 +35,7 @@ from farm_agent.core.models import (
 from farm_agent.generator.engine import ContributionGenerator
 from farm_agent.generator.scorer import QAHardcoreScorer
 from farm_agent.github.client import GitHubClient
-from farm_agent.github.discovery import JsonTargetDiscovery, RepoDiscovery
+from farm_agent.github.discovery import DatabaseTargetDiscovery, RepoDiscovery
 from farm_agent.github.guidelines import fetch_repo_guidelines
 from farm_agent.issues.solver import IssueSolver
 from farm_agent.llm.provider import create_llm_provider
@@ -246,6 +246,7 @@ class ContribPipeline:
         self._github = GitHubClient(
             token=self.config.github.token,
             rate_limit_buffer=self.config.github.rate_limit_buffer,
+            secondary_tokens=self.config.github.secondary_tokens,
         )
 
         # Memory
@@ -736,11 +737,14 @@ class ContribPipeline:
         await self._init_components()
         result = PipelineResult()
 
-        discovery = JsonTargetDiscovery(json_path=json_path)
-        target = discovery.get_next_target()
+        discovery = DatabaseTargetDiscovery(memory=self._memory)
+        await discovery.initialize(json_path=json_path)
+        target = await discovery.get_next_target(
+            excluded_languages=self.config.discovery.excluded_languages
+        )
 
         if target is None:
-            logger.warning("Circular loop: no targets in %s", json_path)
+            logger.warning("Circular loop: no targets in target_repos table")
             return result
 
         logger.info(
@@ -753,7 +757,7 @@ class ContribPipeline:
         # Update scanned_at IMMEDIATELY, before any GitHub API calls,
         # LLM calls, or analysis. This guarantees that if the agent
         # crashes, the next restart will pick a different target.
-        discovery.mark_scanned(target.repo_url)
+        await discovery.mark_scanned(target.repo_url)
         logger.info("Crash-safe mark: scanned_at updated for %s", target.repo_url)
 
         try:
@@ -790,7 +794,7 @@ class ContribPipeline:
                     "Clean sweep, no vulns for %s — marking COMPLETED_NO_VULN",
                     target.repo_url,
                 )
-                discovery.mark_status(target.repo_url, "COMPLETED_NO_VULN")
+                await discovery.mark_status(target.repo_url, "COMPLETED_NO_VULN")
                 return result
 
             logger.info(
@@ -819,10 +823,11 @@ class ContribPipeline:
                 relevant_files=relevant_files,
             )
 
-            # ── 10-Cycle DEV-QA Bounty Loop ──────────────────────────────
-            MAX_DEV_QA_CYCLES = 10
+            # ── 3-Cycle DEV-QA Bounty Loop (FinOps Circuit Breaker) ────────────
+            MAX_DEV_QA_CYCLES = 3
             qa_passed = False
             winning_contribution: Contribution | None = None
+            failure_context = ""  # Accumulates sandbox/QA failure traces across cycles
 
             scorer = QAHardcoreScorer(llm=self._llm)
 
@@ -832,21 +837,25 @@ class ContribPipeline:
                     cycle + 1, MAX_DEV_QA_CYCLES, target.repo_url,
                 )
 
-                # 1. DEV generates patches (auto-fetches QA Lessons from KB)
+                # 1. DEV generates patches (auto-injects QA Lessons + failure context)
                 try:
                     contributions = await self._generator.generate_from_dossier(
                         dossier, context, github_client=self._github,
+                        failure_context=failure_context,
                     )
                 except RuntimeError as e:
                     logger.error("Generation failed: %s", e)
-                    break
+                    failure_context += f"\n[CYCLE {cycle + 1} GENERATION FAILURE] {e}"
+                    continue
                 except Exception as e:
                     logger.error("Generation failed: %s", e)
-                    break
+                    failure_context += f"\n[CYCLE {cycle + 1} GENERATION FAILURE] {e}"
+                    continue
 
                 if not contributions:
                     logger.warning("No contributions generated in cycle %d", cycle + 1)
-                    break
+                    failure_context += f"\n[CYCLE {cycle + 1} No valid code generated — anti-template interceptor may have triggered.]"
+                    continue
 
                 # 2. QA evaluates the first (best) contribution
                 qa_result: QAResult = await scorer.evaluate(
@@ -867,11 +876,16 @@ class ContribPipeline:
                     )
                     break
                 else:
-                    # 3. QA rejected — record critiques as lessons for next cycle
+                    # 3. QA rejected — record critiques as lessons and inject into failure context
+                    critique_text = "; ".join(qa_result.critiques)
                     for critique in qa_result.critiques:
                         await self._memory.record_qa_lesson(
                             repo.full_name, critique
                         )
+                    failure_context += (
+                        f"\n[CYCLE {cycle + 1} QA REJECTED — Score: {qa_result.score:.1f}/10.0]"
+                        f"\nQA Critiques: {critique_text}"
+                    )
                     logger.warning(
                         "QA Rejected (score %.1f). %d critiques recorded. Retrying...",
                         qa_result.score,
@@ -893,7 +907,7 @@ class ContribPipeline:
                         if pr_result:
                             result.prs_created += 1
                             result.prs.append(pr_result)
-                            discovery.mark_status(target.repo_url, "PR_SUBMITTED")
+                            await discovery.mark_status(target.repo_url, "PR_SUBMITTED")
                             logger.info("PR submitted: %s", pr_result.pr_url)
                     except Exception as e:
                         logger.error("PR submission failed: %s", e)
@@ -903,13 +917,14 @@ class ContribPipeline:
                         "Dry run — would submit PR for %s",
                         winning_contribution.title,
                     )
-                    discovery.mark_status(target.repo_url, "PR_SUBMITTED")
+                    await discovery.mark_status(target.repo_url, "PR_SUBMITTED")
             else:
-                logger.error(
-                    "Failed to pass QA after %d cycles for %s. Aborting target.",
+                logger.warning(
+                    "Bailout: Complexity exceeded after %d DEV-QA cycles for %s. "
+                    "Cutting losses to save tokens.",
                     MAX_DEV_QA_CYCLES, target.repo_url,
                 )
-                discovery.mark_status(target.repo_url, "COMPLETED_QA_REJECTED")
+                await discovery.mark_status(target.repo_url, "COMPLETED_TOO_COMPLEX")
 
         except Exception as e:
             msg = f"Circular loop error for {target.repo_url}: {e}"
@@ -1505,11 +1520,17 @@ class ContribPipeline:
 
                     # Determine success
                     if isinstance(sandbox_result, dict):
-                        is_success = sandbox_result.get("is_success", False)
-                        error_log = sandbox_result.get("logs", "Validation failed")
+                        is_success = sandbox_result.get("exit_code") == 0
+                        raw_stdout = sandbox_result.get("stdout", "")
+                        raw_stderr = sandbox_result.get("stderr", "")
                     else:
-                        is_success = getattr(sandbox_result, "is_success", False)
-                        error_log = getattr(sandbox_result, "logs", "Validation failed")
+                        is_success = getattr(sandbox_result, "exit_code", -1) == 0
+                        raw_stdout = getattr(sandbox_result, "stdout", "")
+                        raw_stderr = getattr(sandbox_result, "stderr", "")
+
+                    out_trunc = raw_stdout[:500] if raw_stdout else ""
+                    err_trunc = raw_stderr[-2000:] if raw_stderr else ""
+                    error_log = f"STDOUT:\n{out_trunc}\n\nSTDERR:\n{err_trunc}"
 
                     if is_success:
                         logger.info("✅ Sandbox validated — patch passes CI/tests.")
@@ -1938,11 +1959,17 @@ class ContribPipeline:
                         command=None,  # Auto-select via Polyglot Guillotine
                     )
                     if isinstance(sandbox_result, dict):
-                        is_success = sandbox_result.get("is_success", False)
-                        error_log = sandbox_result.get("logs", "Validation failed")
+                        is_success = sandbox_result.get("exit_code") == 0
+                        raw_stdout = sandbox_result.get("stdout", "")
+                        raw_stderr = sandbox_result.get("stderr", "")
                     else:
-                        is_success = getattr(sandbox_result, "is_success", False)
-                        error_log = getattr(sandbox_result, "logs", "Validation failed")
+                        is_success = getattr(sandbox_result, "exit_code", -1) == 0
+                        raw_stdout = getattr(sandbox_result, "stdout", "")
+                        raw_stderr = getattr(sandbox_result, "stderr", "")
+
+                    out_trunc = raw_stdout[:500] if raw_stdout else ""
+                    err_trunc = raw_stderr[-2000:] if raw_stderr else ""
+                    error_log = f"STDOUT:\n{out_trunc}\n\nSTDERR:\n{err_trunc}"
 
                     if is_success:
                         logger.info(

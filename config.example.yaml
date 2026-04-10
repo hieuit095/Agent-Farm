@@ -5,9 +5,14 @@ github:
   token: ""  # Leave empty — use GITHUB_TOKEN env var (from .env file)
   max_repos_per_run: 5
   max_prs_per_day: 10
-  min_daily_prs: 3
+  min_daily_prs: 4
   max_daily_prs: 10
   rate_limit_buffer: 100
+  dco_signoff: true
+  # Additional GitHub tokens for GET request rotation (comma-separated in env var).
+  # All mutation requests (PR/issue creation) always use the primary token.
+  # Or set GITHUB_SECONDARY_TOKENS in .env (comma-separated).
+  secondary_tokens: []
 
 llm:
   provider: "minimax"  # minimax | gemini | openai | anthropic | ollama
@@ -38,6 +43,12 @@ analysis:
   # Red Team engine — Bloodhound White-Hat audits via OpenRouter
   red_team_model: "cognitivecomputations/dolphin-mistral-24b-venice-edition:free"
   red_team_daily_limit: 1000
+  # Semgrep radar — runs concurrently with ast-grep in Bloodhound pipeline
+  use_semgrep: true
+  semgrep_rulesets:
+    - "p/security-audit"
+    - "p/cwe-top-25"
+    - "p/default"
 
 contribution:
   enabled_types:

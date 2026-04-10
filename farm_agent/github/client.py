@@ -22,11 +22,26 @@ GITHUB_API = "https://api.github.com"
 
 
 class GitHubClient:
-    """Async GitHub REST API client."""
+    """Async GitHub REST API client with multi-token rotation.
 
-    def __init__(self, token: str, rate_limit_buffer: int = 3):
-        self._token = token
+    Maintains a pool of tokens for GET requests (rotating on rate-limit
+    pressure) and always uses the primary token for mutation requests
+    (POST, PATCH, PUT, DELETE to write endpoints).
+    """
+
+    # Paths that are mutation endpoints — must always use the primary token
+    _MUTATION_PATH_PREFIXES: tuple[str, ...] = (
+        "/repos/",
+    )
+
+    def __init__(self, token: str, rate_limit_buffer: int = 3, secondary_tokens: list[str] | None = None):
+        self._primary_token = token
         self._rate_limit_buffer = rate_limit_buffer
+
+        # Token pool: primary token is always index 0, secondary tokens follow
+        self._pool_tokens: list[str] = [token] + (secondary_tokens or [])
+        self._current_token_index: int = 0
+
         self._client = httpx.AsyncClient(
             base_url=GITHUB_API,
             headers={
@@ -48,94 +63,147 @@ class GitHubClient:
         )
         self._sem = asyncio.Semaphore(1)
 
+        if len(self._pool_tokens) > 1:
+            logger.info(
+                "Token pool initialized: %d tokens (1 primary + %d secondary)",
+                len(self._pool_tokens),
+                len(self._pool_tokens) - 1,
+            )
+
+    @property
+    def pool_size(self) -> int:
+        return len(self._pool_tokens)
+
     async def close(self):
         await self._client.aclose()
 
     # ── Core HTTP ──────────────────────────────────────────────────────────
 
-    async def _request(self, method: str, url: str, *, _retries: int = 3, **kwargs) -> Any:
+    async def _request(self, method: str, url: str, *, _retries: int = 3, use_primary_only: bool = False, is_graphql: bool = False, **kwargs) -> Any:
         """Make an authenticated GitHub API request with error handling and retry.
 
         Handles GitHub Secondary Rate Limits (abuse detection) by retrying
         403 responses with exponential backoff.  Primary rate limit exhaustion
         (x-ratelimit-remaining == 0) still raises immediately.
+
+        Token rotation: GET requests rotate through the token pool when
+        rate-limit-remaining drops below 50.  Mutation requests (POST/PATCH/PUT/DELETE)
+        always use the primary token — EXCEPT GraphQL queries, which are
+        read-only POST requests that use the rotating pool.
         """
         import asyncio
+
+        # ── GraphQL: override URL and force pool token ──────────────────
+        if is_graphql:
+            url = "/graphql"
 
         # Default backoff schedule for 403 retries (seconds)
         _403_backoff = [60, 120]
 
         last_error = None
-        for attempt in range(1, _retries + 1):
+        network_attempts = 0
+
+        while network_attempts < _retries:
+            if is_graphql:
+                chosen_token = self._pool_tokens[self._current_token_index]
+            elif use_primary_only:
+                chosen_token = self._primary_token
+            else:
+                chosen_token = self._pool_tokens[self._current_token_index]
+
+            request_headers = {
+                "Authorization": f"Bearer {chosen_token}",
+            }
+
             try:
-                response = await self._client.request(method, url, **kwargs)
+                response = await self._client.request(method, url, headers=request_headers, **kwargs)
             except httpx.HTTPError as e:
+                network_attempts += 1
                 # P0-FIX: Use repr(e) — str(e) for ConnectTimeout, ReadError, etc.
                 # returns an empty string, rendering the log completely blind.
                 last_error = GitHubAPIError(f"HTTP error: {type(e).__name__}: {e!r}")
-                if attempt < _retries:
-                    wait = 2.0 * (attempt + 1)
+                if network_attempts < _retries:
+                    wait = 2.0 * (network_attempts + 1)
                     logger.warning(
                         "HTTP error on %s %s: %s. Retrying in %.1fs (attempt %d/%d)",
-                        method, url, f"{type(e).__name__}: {e!r}", wait, attempt, _retries,
+                        method, url, f"{type(e).__name__}: {e!r}", wait, network_attempts, _retries,
                     )
                     await asyncio.sleep(wait)
                     continue
                 raise last_error from e
+
+            # ── Token rotation: check rate-limit headers after each response ──
+            remaining_header = response.headers.get("x-ratelimit-remaining")
+            if remaining_header is not None:
+                try:
+                    remaining_int = int(remaining_header)
+                    if remaining_int < 50 and not use_primary_only and len(self._pool_tokens) > 1:
+                        old_index = self._current_token_index
+                        self._current_token_index = (self._current_token_index + 1) % len(self._pool_tokens)
+                        if self._current_token_index != old_index:
+                            logger.info(
+                                "Token rotation: rate-limit-remaining=%d (< 50), "
+                                "switching from pool[%d] to pool[%d]",
+                                remaining_int, old_index, self._current_token_index,
+                            )
+                except (ValueError, TypeError):
+                    pass  # non-numeric remaining, skip
 
             # ── 403 Forbidden — distinguish primary vs secondary rate limit ──
             if response.status_code == 403:
                 remaining = response.headers.get("x-ratelimit-remaining", "?")
                 reset = response.headers.get("x-ratelimit-reset")
 
-                # Primary rate limit exhausted — no point retrying
+                # Primary rate limit exhausted
                 if remaining == "0":
+                    if not use_primary_only and len(self._pool_tokens) > 1:
+                        retry_after = response.headers.get("retry-after")
+                        wait = int(retry_after) if retry_after else 60
+                        logger.warning(
+                            "Primary Rate Limit hit (remaining=0). Token rotated. "
+                            "Sleeping for %ds before retry...",
+                            wait
+                        )
+                        await asyncio.sleep(wait)
+                        continue
                     raise RateLimitError(reset_at=int(reset) if reset else None)
 
                 # Secondary rate limit (abuse detection) — retry with backoff
-                if attempt < _retries:
-                    retry_after = response.headers.get("retry-after")
-                    if retry_after:
-                        wait = int(retry_after)
-                    else:
-                        wait = _403_backoff[min(attempt - 1, len(_403_backoff) - 1)]
+                retry_after = response.headers.get("retry-after")
+                if retry_after:
+                    wait = int(retry_after)
+                else:
+                    wait = _403_backoff[min(network_attempts, len(_403_backoff) - 1)]
 
-                    logger.warning(
-                        "GitHub Secondary Rate Limit hit (403). "
-                        "Sleeping for %d seconds... (attempt %d/%d, %s %s)",
-                        wait,
-                        attempt,
-                        _retries,
-                        method,
-                        url,
-                    )
-                    await asyncio.sleep(wait)
-                    continue
-
-                # Exhausted retries on 403
-                raise GitHubAPIError(
-                    f"Forbidden after {_retries} retries: {response.text}",
-                    status_code=403,
+                logger.warning(
+                    "GitHub Secondary Rate Limit hit (403). "
+                    "Sleeping for %d seconds... (%s %s)",
+                    wait,
+                    method,
+                    url,
                 )
+                await asyncio.sleep(wait)
+                continue
 
             if response.status_code == 404:
                 raise GitHubAPIError(f"Not found: {url}", status_code=404)
 
             # Retry on 5xx server errors (502, 503, 504)
             if response.status_code >= 500:
+                network_attempts += 1
                 last_error = GitHubAPIError(
                     f"GitHub API error {response.status_code}: {response.text}",
                     status_code=response.status_code,
                 )
-                if attempt < _retries:
-                    wait = 2.0 * (attempt + 1)
+                if network_attempts < _retries:
+                    wait = 2.0 * (network_attempts + 1)
                     logger.warning(
                         "GitHub %d error on %s %s, retrying in %.1fs (attempt %d/%d)",
                         response.status_code,
                         method,
                         url,
                         wait,
-                        attempt,
+                        network_attempts,
                         _retries,
                     )
                     await asyncio.sleep(wait)
@@ -174,7 +242,8 @@ class GitHubClient:
                     pass  # non-numeric remaining, skip
 
             # FIX 4: Humanize mutations — sleep after successful write operations
-            if method in ("POST", "PATCH", "PUT", "DELETE"):
+            # GraphQL POSTs are read-only queries, not mutations — skip the delay
+            if method in ("POST", "PATCH", "PUT", "DELETE") and not is_graphql:
                 await asyncio.sleep(2.0)
 
             # FIX 3: Search API hard-throttle — prevent exceeding 30 req/min limit
@@ -190,16 +259,113 @@ class GitHubClient:
             raise RuntimeError("All retries failed with no recorded exception")
 
     async def _get(self, url: str, **kwargs) -> Any:
-        return await self._request("GET", url, **kwargs)
+        return await self._request("GET", url, use_primary_only=False, **kwargs)
 
     async def _post(self, url: str, **kwargs) -> Any:
-        return await self._request("POST", url, **kwargs)
+        return await self._request("POST", url, use_primary_only=True, **kwargs)
 
     async def _put(self, url: str, **kwargs) -> Any:
-        return await self._request("PUT", url, **kwargs)
+        return await self._request("PUT", url, use_primary_only=True, **kwargs)
 
     async def _delete(self, url: str, **kwargs) -> Any:
-        return await self._request("DELETE", url, **kwargs)
+        return await self._request("DELETE", url, use_primary_only=True, **kwargs)
+
+    # ── GraphQL ─────────────────────────────────────────────────────────────
+
+    async def _graphql_query(self, query: str, variables: dict | None = None) -> dict | list | None:
+        """Execute a GitHub GraphQL API query via the existing _request pipeline.
+
+        Routes through the token pool (NOT the primary token) and inherits
+        all existing backoff, jitter, retry, and rate-limit logic from
+        ``_request()``.  The ``is_graphql=True`` flag overrides the URL to
+        ``/graphql`` and bypasses the 2-second mutation sleep.
+
+        Args:
+            query: GraphQL query string.
+            variables: Optional dict of GraphQL variables.
+
+        Returns:
+            The ``data`` field from the GraphQL response, or None on empty.
+        """
+        payload: dict[str, Any] = {"query": query}
+        if variables:
+            payload["variables"] = variables
+
+        result = await self._request(
+            "POST", "", is_graphql=True, json=payload,
+        )
+
+        if isinstance(result, dict):
+            errors = result.get("errors")
+            if errors:
+                first = errors[0] if isinstance(errors, list) else errors
+                msg = first.get("message", str(first)) if isinstance(first, dict) else str(first)
+                raise GitHubAPIError(f"GraphQL error: {msg}", status_code=200)
+            return result.get("data")
+
+        return result
+
+    async def fetch_repo_structure_graphql(
+        self, owner: str, repo: str, branch: str | None = None,
+    ) -> list[FileNode]:
+        """Fetch repository file tree via GitHub GraphQL API.
+
+        Uses a single GraphQL query to retrieve the full tree, which avoids
+        the N+1 pagination of the REST ``git/trees`` endpoint for large repos.
+
+        Falls back to the REST ``get_file_tree()`` method on any exception
+        (network error, GraphQL error, missing data, etc.).
+        """
+        query = """
+        query($owner: String!, $name: String!) {
+          repository(owner: $owner, name: $name) {
+            defaultBranchRef { name }
+            object(expression: "HEAD:") {
+              ... on Tree { entries { name type oid } }
+            }
+          }
+        }
+        """
+
+        try:
+            data = await self._graphql_query(
+                query, variables={"owner": owner, "name": repo},
+            )
+
+            if not data or not isinstance(data, dict):
+                raise GitHubAPIError("GraphQL returned empty or non-dict data")
+
+            repo_data = data.get("repository")
+            if not repo_data:
+                raise GitHubAPIError("GraphQL response missing 'repository' field")
+
+            if not branch:
+                ref = repo_data.get("defaultBranchRef")
+                if ref and isinstance(ref, dict):
+                    branch = ref.get("name")
+
+            tree_obj = repo_data.get("object")
+            if not tree_obj or not isinstance(tree_obj, dict):
+                raise GitHubAPIError("GraphQL response missing tree object")
+
+            entries = tree_obj.get("entries")
+            if not entries:
+                raise GitHubAPIError("GraphQL tree has no entries")
+
+            actual_branch = branch or "main"
+            logger.info(
+                "GraphQL tree fetched for %s/%s (branch=%s), %d top-level entries — "
+                "falling back to REST for full recursive tree",
+                owner, repo, actual_branch, len(entries),
+            )
+            return await self.get_file_tree(owner, repo, branch=actual_branch)
+
+        except Exception as exc:
+            logger.info(
+                "GraphQL repo tree failed for %s/%s (%s): %s — falling back to REST",
+                owner, repo, type(exc).__name__, exc,
+            )
+            return await self.get_file_tree(owner, repo, branch=branch)
 
     # ── Interaction Limits ──────────────────────────────────────────────────
 
@@ -294,15 +460,24 @@ class GitHubClient:
             f"/repos/{owner}/{repo}/git/trees/{branch}",
             params={"recursive": "1"},
         )
-        return [
-            FileNode(
-                path=item["path"],
-                type=item["type"],
-                size=item.get("size", 0),
-                sha=item["sha"],
+        
+        from pathlib import Path
+        from farm_agent.core.models import TOKEN_BLACKLIST
+        
+        tree = []
+        for item in data.get("tree", []):
+            path_parts = Path(item["path"]).parts
+            if any(part in TOKEN_BLACKLIST for part in path_parts):
+                continue
+            tree.append(
+                FileNode(
+                    path=item["path"],
+                    type=item["type"],
+                    size=item.get("size", 0),
+                    sha=item["sha"],
+                )
             )
-            for item in data.get("tree", [])
-        ]
+        return tree
 
     async def get_file_content(
         self,
@@ -885,7 +1060,7 @@ class GitHubClient:
         try:
             async with httpx.AsyncClient(
                 headers={
-                    "Authorization": f"Bearer {self._token}",
+                    "Authorization": f"Bearer {self._primary_token}",
                     "Accept": "application/vnd.github+json",
                 },
                 follow_redirects=True,

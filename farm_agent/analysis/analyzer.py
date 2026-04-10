@@ -981,6 +981,7 @@ class BloodhoundAnalyzer:
     }
 
     SG_SCAN_TIMEOUT = 120
+    SEMGREP_TIMEOUT = 180
 
     def __init__(
         self,
@@ -1157,6 +1158,116 @@ class BloodhoundAnalyzer:
             logger.error("sg scan failed for rule %s: %s", rule_file.name, exc)
             return []
 
+    def _check_semgrep_available(self) -> bool:
+        if hasattr(self, "_semgrep_available") and self._semgrep_available is not None:
+            return self._semgrep_available
+
+        import shutil
+
+        if shutil.which("semgrep") is None:
+            logger.info("semgrep binary not found — Bloodhound Semgrep radar disabled")
+            self._semgrep_available = False
+        else:
+            logger.info("semgrep binary found — Bloodhound Semgrep radar ready")
+            self._semgrep_available = True
+        return self._semgrep_available
+
+    async def _run_semgrep(self, repo_path: Path) -> list[dict]:
+        if not self._check_semgrep_available():
+            return []
+
+        rulesets = getattr(self._config, "semgrep_rulesets", [])
+        if not rulesets:
+            logger.info("No Semgrep rulesets configured — skipping Semgrep radar")
+            return []
+
+        cmd = ["semgrep", "scan", "--json", "--quiet"]
+        for ruleset in rulesets:
+            cmd.extend(["--config", ruleset])
+        cmd.append(str(repo_path))
+
+        logger.info(
+            "Running Semgrep with %d rulesets against %s",
+            len(rulesets),
+            repo_path.name,
+        )
+
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, stderr = await asyncio.wait_for(
+                proc.communicate(), timeout=self.SEMGREP_TIMEOUT
+            )
+
+            if proc.returncode not in (0, 1):
+                stderr_text = stderr.decode("utf-8", errors="replace")[:500]
+                logger.warning(
+                    "Semgrep returned exit code %d: %s",
+                    proc.returncode,
+                    stderr_text,
+                )
+
+            data = json.loads(stdout.decode("utf-8", errors="replace"))
+            results = data.get("results", [])
+
+            matches = []
+            for result in results:
+                file_path = result.get("path", "")
+                if file_path:
+                    try:
+                        file_path = str(Path(file_path).relative_to(repo_path))
+                    except ValueError:
+                        pass
+
+                line_num = result.get("start", {}).get("line", 0)
+                lines_text = result.get("extra", {}).get("lines", "")
+                check_id = result.get("check_id", "semgrep-unknown")
+
+                rule_name = f"semgrep:{check_id}"
+
+                matches.append({
+                    "file": file_path,
+                    "line": line_num,
+                    "match": lines_text,
+                    "rule": rule_name,
+                })
+
+            logger.info("Semgrep found %d matches for %s", len(matches), repo_path.name)
+            return matches
+
+        except asyncio.TimeoutError:
+            logger.warning("Semgrep scan timed out (%ds) for %s", self.SEMGREP_TIMEOUT, repo_path.name)
+            return []
+        except json.JSONDecodeError:
+            logger.warning("Semgrep returned invalid JSON for %s", repo_path.name)
+            return []
+        except Exception as exc:
+            logger.error("Semgrep scan failed for %s: %s", repo_path.name, exc)
+            return []
+
+    async def _run_ast_grep(self, rule_files: list[Path], repo_path: Path) -> list[dict]:
+        logger.info("Running %d ast-grep rules against %s", len(rule_files), repo_path.name)
+        scan_tasks = [self._run_sg_scan(rf, repo_path) for rf in rule_files]
+        all_results = await asyncio.gather(*scan_tasks)
+
+        all_matches = []
+        for result in all_results:
+            all_matches.extend(result)
+
+        seen: set[tuple[str, int, str]] = set()
+        unique = []
+        for m in all_matches:
+            key = (m["file"], m["line"], m["rule"])
+            if key not in seen:
+                seen.add(key)
+                unique.append(m)
+
+        logger.info("ast-grep found %d unique matches across %d rules", len(unique), len(rule_files))
+        return unique
+
     async def _white_hat_audit(
         self, repo_url: str, repo_name: str, matches: list[dict]
     ) -> VulnerabilityDossier:
@@ -1167,23 +1278,30 @@ class BloodhoundAnalyzer:
             )
         context_str = "\n---\n".join(context_parts)
 
-        system_prompt = (
-            "You are a WHITE-HAT SECURITY RESEARCHER. You audit code snippets "
-            "that were flagged by a static analyzer (ast-grep). Your job is to "
-            "validate whether these are TRUE positives or FALSE positives.\n\n"
-            "Return ONLY a JSON array. Each element must have these exact keys: "
-            '"file", "line", "snippet", "poc", "fix", "impact".\n\n'
-            "For TRUE positives:\n"
-            "- file: the file path\n"
-            "- line: the line number\n"
-            "- snippet: the vulnerable code fragment\n"
-            "- poc: how to trigger the vulnerability (proof of concept)\n"
-            "- fix: the suggested fix code\n"
-            "- impact: severity description\n\n"
-            "If ALL matches are false positives and NO actual vulnerabilities "
-            "exist, return exactly: "
-            '[{"file": "NONE", "line": 0, "snippet": "", "poc": "", "fix": "", "impact": ""}]'
-        )
+        system_prompt = """You are an elite, ruthless Red Team exploit developer and vulnerability researcher. 
+Your singular goal is to discover and weaponize ZERO-DAY vulnerabilities in the provided code snippets. 
+DO NOT act as a polite auditor. Think strictly like an attacker.
+
+Your core directives:
+1. THE ATTACK VECTOR: Look for deeply hidden flaws—Race Conditions, Deserialization triggers, Memory Corruptions (Use-After-Free), Prototype Pollution, Logic Bypasses, and Blind SQLi.
+2. CHAINING: Do not just look at the single line; deduce how this snippet connects to user input or global state to form an exploit chain.
+3. RUTHLESSNESS: If the code relies on "security by obscurity" or weak default configurations, tear it apart.
+
+You will receive an ast-grep match report. 
+- If the code is genuinely secure and cannot be exploited in any scenario, you MUST return [{"file": "NONE"}].
+- If it is exploitable, you must provide the exact attack path.
+
+You MUST respond strictly in the following JSON array format. No markdown, no conversational text.
+[
+    {
+        "file": "path/to/file",
+        "line": 123,
+        "snippet": "the vulnerable code",
+        "poc": "Step-by-step ATTACK PAYLOAD to exploit this flaw (be technical and precise).",
+        "fix": "The architectural patch to kill this attack vector.",
+        "impact": "CRITICAL: Remote Code Execution via..."
+    }
+]"""
 
         user_prompt = (
             f"Repository: {repo_url}\n\n"
@@ -1267,26 +1385,12 @@ class BloodhoundAnalyzer:
     async def run_bloodhound(self, repo: Repository) -> VulnerabilityDossier:
         """Execute the full Bloodhound pipeline for a repository.
 
-        1. Check sg binary
-        2. Resolve rule files for repo language
-        3. Clone repo shallow
-        4. Run ast-grep scans concurrently
-        5. If no matches → return empty dossier (skip LLM entirely)
-        6. If matches → White-Hat LLM audit
-        7. Cleanup temp clone
+        Runs ast-grep and optionally Semgrep concurrently, merges
+        findings, then sends to the Red Team LLM for validation.
         """
         empty_dossier = VulnerabilityDossier(
             repo_url=repo.url, target_commit="unknown", vulnerabilities=[]
         )
-
-        if not self._check_sg_available():
-            logger.error("sg binary not found — returning empty dossier for %s", repo.full_name)
-            return empty_dossier
-
-        rule_files = self._resolve_rule_files(repo.language)
-        if not rule_files:
-            logger.info("No ast-grep rules for language '%s' — skipping bloodhound for %s", repo.language, repo.full_name)
-            return empty_dossier
 
         import shutil
 
@@ -1296,32 +1400,70 @@ class BloodhoundAnalyzer:
             return empty_dossier
 
         try:
-            logger.info("Running %d ast-grep rules against %s", len(rule_files), repo.full_name)
-            scan_tasks = [self._run_sg_scan(rf, clone_path) for rf in rule_files]
-            all_results = await asyncio.gather(*scan_tasks)
+            # ── Concurrent Radar: ast-grep + Semgrep ──
+            tasks = []
+            task_labels = []
 
+            # ast-grep radar
+            sg_available = self._check_sg_available()
+            if sg_available:
+                rule_files = self._resolve_rule_files(repo.language)
+                if rule_files:
+                    tasks.append(self._run_ast_grep(rule_files, clone_path))
+                    task_labels.append(f"ast-grep({len(rule_files)} rules)")
+
+            # Semgrep radar
+            use_semgrep = getattr(self._config, "use_semgrep", False)
+            if use_semgrep:
+                tasks.append(self._run_semgrep(clone_path, language=repo.language))
+                rulesets = list(getattr(self._config, "semgrep_rulesets", []))
+                if repo.language and repo.language.lower() == "solidity":
+                    rulesets.extend(["p/solidity", "p/smart-contracts", "p/jwt"])
+                task_labels.append(f"semgrep({len(rulesets)} rulesets)")
+
+            # If neither tool is available, return empty dossier
+            if not tasks:
+                logger.warning(
+                    "No radar tools available (ast-grep=%s, semgrep=%s) for %s — skipping bloodhound",
+                    sg_available, use_semgrep, repo.full_name,
+                )
+                return empty_dossier
+
+            results = await asyncio.gather(*tasks)
+
+            # Merge and cross-tool deduplicate by (file, line)
             all_matches = []
-            for result in all_results:
+            for result in results:
                 all_matches.extend(result)
 
-            seen: set[tuple[str, int, str]] = set()
+            seen: set[tuple[str, int]] = set()
             unique_matches = []
             for m in all_matches:
-                key = (m["file"], m["line"], m["rule"])
+                key = (m["file"], m["line"])
                 if key not in seen:
                     seen.add(key)
                     unique_matches.append(m)
 
-            logger.info("ast-grep found %d unique matches across %d rules for %s", len(unique_matches), len(rule_files), repo.full_name)
+            logger.info(
+                "Radar [%s]: %d unique matches for %s",
+                " + ".join(task_labels) if task_labels else "none",
+                len(unique_matches),
+                repo.full_name,
+            )
 
             if not unique_matches:
-                logger.info("Clean sweep — no ast-grep matches for %s, skipping LLM audit", repo.full_name)
+                logger.info("Clean sweep — no matches for %s, skipping LLM audit", repo.full_name)
                 return empty_dossier
 
-            dossier = await self._white_hat_audit(repo_url=repo.url, repo_name=repo.full_name, matches=unique_matches)
+            dossier = await self._white_hat_audit(
+                repo_url=repo.url, repo_name=repo.full_name, matches=unique_matches,
+            )
 
             if dossier.has_bugs():
-                logger.info("Bloodhound: %d validated vulnerabilities in %s", len(dossier.vulnerabilities), repo.full_name)
+                logger.info(
+                    "Bloodhound: %d validated vulnerabilities in %s",
+                    len(dossier.vulnerabilities), repo.full_name,
+                )
             else:
                 logger.info("Bloodhound: all matches were false positives for %s", repo.full_name)
 

@@ -223,6 +223,10 @@ class JsonTargetDiscovery:
     Reads targets, sorts by scanned_at ascending (oldest first),
     and provides atomic update of scanned_at before analysis to
     guarantee crash-safe rotation.
+
+    NOTE: This class is preserved for backward compatibility but is
+    superseded by DatabaseTargetDiscovery which uses SQLite for
+    atomic state management.
     """
 
     EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
@@ -291,3 +295,73 @@ class JsonTargetDiscovery:
                 e.status = status
                 break
         self._save_entries(entries)
+
+
+class DatabaseTargetDiscovery:
+    """SQLite-backed circular target loop using the target_repos table.
+
+    Replaces JsonTargetDiscovery with atomic database operations,
+    eliminating file I/O race conditions and data fragmentation.
+    On first initialization, seeds the database from target_repo.json
+    using INSERT OR IGNORE (preserving any existing progress).
+    """
+
+    def __init__(self, memory):
+        """Initialize with a Memory instance for database access.
+
+        Args:
+            memory: A farm_agent.orchestrator.memory.Memory instance
+                     (must be initialized with .init() before use).
+        """
+        self._memory = memory
+
+    async def initialize(self, json_path: str | Path = "target_repo.json") -> int:
+        """Seed the target_repos table from target_repo.json if not already seeded.
+
+        Must be called once before get_next_target(). Uses INSERT OR IGNORE
+        so existing rows with progress are never overwritten.
+
+        Returns the number of new rows inserted.
+        """
+        return await self._memory.seed_targets_from_json(Path(json_path))
+
+    async def get_next_target(self, excluded_languages: list[str] | None = None) -> TargetRepoEntry | None:
+        """Return the target with the oldest scanned_at (or NULL first).
+
+        Atomically reserves the target and reads from the target_repos SQLite
+        table using RETURNING. NULL scanned_at entries (never scanned) come first.
+        """
+        row = await self._memory.get_next_target(excluded_languages=excluded_languages)
+        if row is None:
+            return None
+
+        scanned_at_value = None
+        if row.get("scanned_at") is not None:
+            try:
+                scanned_at_value = datetime.fromtimestamp(row["scanned_at"], tz=UTC)
+            except (ValueError, OSError, OverflowError):
+                scanned_at_value = None
+
+        return TargetRepoEntry(
+            repo_url=row["repo_url"],
+            status=row.get("status", "PENDING"),
+            scanned_at=scanned_at_value,
+            language=row.get("language"),
+            bounty_amount=str(row.get("bounty_amount")) if row.get("bounty_amount") is not None else None,
+            diamond_target=bool(row.get("diamond_target", 0)),
+        )
+
+    async def mark_scanned(self, repo_url: str) -> None:
+        """Update scanned_at to now for crash-safe rotation.
+
+        No-op: get_next_target() now handles atomic reservation via RETURNING.
+        """
+        pass
+
+    async def mark_status(self, repo_url: str, status: str) -> None:
+        """Update the status for a target repo without updating scanned_at.
+
+        Used for terminal statuses: COMPLETED_NO_VULN, PR_SUBMITTED,
+        COMPLETED_TOO_COMPLEX, etc.
+        """
+        await self._memory.mark_target_status(repo_url, status, update_timestamp=False)
