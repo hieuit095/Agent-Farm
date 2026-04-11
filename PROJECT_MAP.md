@@ -28,6 +28,12 @@ Farm-Agent is a highly autonomous, multi-layered AI system capable of full-lifec
 
 ```text
 farm_agent/
+├── agents/              # Sub-agents for specialized tasks
+│   └── registry.py      # Agent registry
+├── analysis/            # Code scanning and issue identification
+│   ├── analyzer.py      # CodeAnalyzer (legacy) + BloodhoundAnalyzer (ast-grep + Semgrep dual radar → OpenRouter/LLM)
+│   ├── mapper.py        # Repository structural mapper
+│   └── skills.py        # Progressive analysis skill definitions
 ├── cli/                 # Command-Line Interface entry points
 │   ├── main.py          # Primary Click CLI (`hunt`, `hunt-circular`, `superhuman`, `gc`, etc.)
 │   └── tui.py           # Text User Interface module
@@ -37,36 +43,30 @@ farm_agent/
 │   ├── models.py        # Shared data structures (Contribution, Repository, Finding, Vulnerability, VulnerabilityDossier, QAResult, TargetRepoEntry)
 │   ├── rag.py           # ChromaDB integration for contextual code search
 │   └── sandbox.py       # Docker-based Polyglot Sandbox for testing patches (DooD)
-├── github/              # Interfacing with the GitHub REST API
-│   ├── client.py        # Multi-token async HTTPX client with pool rotation (GET=pool, POST/PATCH=primary) + GraphQL
-│   ├── discovery.py     # RepoDiscovery (API search) + JsonTargetDiscovery (circular loop)
-│   └── guidelines.py    # Parsers for CONTRIBUTING.md and PR templates
-├── orchestrator/        # The brains of the operation connecting subsystems
-│   ├── human.py         # TerminatorLoop: relentless continuous execution + KB GC
-│   ├── memory.py        # SQLite persistence layer (aiosqlite) + knowledge_base + OpenRouter tracking
-│   └── pipeline.py      # ContribPipeline: discovery → bloodhound → DEV-QA loop → PR
-├── analysis/            # Code scanning and issue identification
-│   ├── analyzer.py      # CodeAnalyzer (legacy) + BloodhoundAnalyzer (ast-grep + Semgrep dual radar → OpenRouter/LLM)
-│   ├── mapper.py        # Repository structural mapper
-│   └── skills.py        # Progressive analysis skill definitions
 ├── generator/           # Patch generation and validation
 │   ├── engine.py        # ContributionGenerator + TemplateViolationError + anti-template retry + CoT planning
 │   ├── scorer.py        # QualityScorer (heuristic) + QAHardcoreScorer (LLM-adversarial)
 │   └── reviewer.py      # Adversarial ReviewerAgent for self-review
+├── github/              # Interfacing with the GitHub REST API
+│   ├── client.py        # Multi-token async HTTPX client with pool rotation (GET=pool, POST/PATCH=primary) + GraphQL
+│   ├── discovery.py     # RepoDiscovery (API search) + JsonTargetDiscovery (circular loop)
+│   └── guidelines.py    # Parsers for CONTRIBUTING.md and PR templates
 ├── issues/              # Issue-driven contribution logic
 │   └── solver.py        # Analyzes and solves open GitHub issues
-├── pr/                  # Pull Request lifecycle management
-│   ├── manager.py       # Forks, branches, commits, and creates PRs
-│   ├── patrol.py        # Monitors open PRs for feedback and auto-pushes fixes
-│   └── janitor.py       # Sweeps and destroys garbage/low-quality PRs
 ├── llm/                 # Abstractions for Language Models
 │   ├── provider.py      # Factory and interface for LLM clients (MinimaxProvider, OpenRouterProvider, _PROVIDERS registry)
 │   ├── context.py       # System prompt construction and style guide injection
 │   └── router.py        # Task-based routing to different LLM models
 ├── notifications/       # Alerting system
 │   └── notifier.py      # Telegram/Slack/Discord webhook integrations
-├── agents/              # Sub-agents for specialized tasks
-│   └── registry.py      # Agent registry
+├── orchestrator/        # The brains of the operation connecting subsystems
+│   ├── human.py         # TerminatorLoop: relentless continuous execution + KB GC
+│   ├── memory.py        # SQLite persistence layer (aiosqlite) + knowledge_base + OpenRouter tracking
+│   └── pipeline.py      # ContribPipeline: discovery → bloodhound → DEV-QA loop → PR
+├── pr/                  # Pull Request lifecycle management
+│   ├── manager.py       # Forks, branches, commits, and creates PRs
+│   ├── patrol.py        # Monitors open PRs for feedback and auto-pushes fixes
+│   └── janitor.py       # Sweeps and destroys garbage/low-quality PRs
 └── tools/               # LLM Function Calling Tools
     └── protocol.py      # Tool registry for the LLM to interact with the environment
 
@@ -75,7 +75,7 @@ ast_rules/               # AST-grep rule files (YAML) for Bloodhound pre-filteri
 ├── js-*.yaml            # JavaScript vulnerability rules
 ├── ts-*.yaml            # TypeScript vulnerability rules
 ├── go-*.yaml            # Go vulnerability rules
-├── rust-*.yaml           # Rust vulnerability rules
+├── rust-*.yaml          # Rust vulnerability rules
 └── solidity-*.yaml      # Solidity vulnerability rules
 
 target_repo.json         # Circular Target Loop data: list of target repos with scan timestamps
@@ -85,9 +85,9 @@ target_repo.json         # Circular Target Loop data: list of target repos with 
 
 ```text
 Dockerfile               # Multi-stage build (python:3.11-slim), ast-grep binary, semgrep pip, wheel install
-docker-compose.yml        # DooD architecture; single `farm_agent` service with Docker socket mount
-.dockerignore             # Excludes venv/, tests/, .git/, .env, data/, logs/ from build context
-entrypoint.sh             # Minimal `exec "$@"` — no DB seeding (v3.0 Memory.init() handles schema)
+docker-compose.yml       # DooD architecture; single `farm_agent` service with Docker socket mount
+.dockerignore            # Excludes venv/, tests/, .git/, .env, data/, logs/ from build context
+entrypoint.sh            # Minimal `exec "$@"` — no DB seeding (v3.0 Memory.init() handles schema)
 ```
 
 ---
