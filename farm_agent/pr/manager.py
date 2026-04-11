@@ -44,10 +44,13 @@ def auto_check_pr_template(body: str, contrib_type: ContributionType | None = No
     lines = body.split("\n")
     for i, line in enumerate(lines):
         stripped = line.strip().lower()
-        if stripped.startswith(("- [ ]", "* [ ]")):
-            if any(term in stripped for term in allowed_terms):
+        if (
+            stripped.startswith(("- [ ]", "* [ ]"))
+            and any(term in stripped for term in allowed_terms)
+            and not any(d in stripped for d in ["breaking", "release", "deploy", "migration"])
+        ):
                 # Only check if it safely avoids danger terms
-                if not any(danger in stripped for danger in ["breaking", "release", "deploy", "migration"]):
+                # Only check if it safely avoids danger terms
                     # Replace the first unmet checkbox
                     lines[i] = line.replace("[ ]", "[x]", 1)
     return "\n".join(lines)
@@ -236,6 +239,7 @@ class PRManager:
 
         # Slugify the title
         slug = contribution.finding.title.lower()
+        import re
         slug = re.sub(r"[^a-z0-9]+", "-", slug).strip("-")[:50]
         return f"{prefix}/{slug}"
 
