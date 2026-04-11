@@ -232,9 +232,9 @@ class QAHardcoreScorer:
 
     async def evaluate(
         self,
-        dossier: "VulnerabilityDossier",
-        contribution: "Contribution",
-    ) -> "QAResult":
+        dossier: VulnerabilityDossier,
+        contribution: Contribution,
+    ) -> QAResult:
         """Score a patch against its originating vulnerability dossier.
 
         Returns a QAResult with score (0.0-10.0), critiques, and approval status.

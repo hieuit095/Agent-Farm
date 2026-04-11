@@ -1,6 +1,8 @@
 import sys
 from unittest.mock import MagicMock
 
+from farm_agent.orchestrator.pipeline import ContribPipeline
+
 # Mock missing dependencies to allow importing farm_agent
 sys.modules["yaml"] = MagicMock()
 sys.modules["pydantic"] = MagicMock()
@@ -19,7 +21,6 @@ sys.modules["chromadb"] = MagicMock()
 sys.modules["numpy"] = MagicMock()
 sys.modules["git"] = MagicMock()
 
-from farm_agent.orchestrator.pipeline import ContribPipeline
 
 
 def test_get_max_concurrency_minimax_capped():
