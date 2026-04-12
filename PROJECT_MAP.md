@@ -14,7 +14,7 @@ Farm-Agent is a highly autonomous, multi-layered AI system capable of full-lifec
 | **HTTPX** | Asynchronous HTTP client for communicating with GitHub and LLM APIs. |
 | **SQLite (aiosqlite)** | Persistent, thread-safe (WAL mode) database for memory, quotas, PR tracking, and knowledge base. |
 | **Minimax LLM** | Primary Large Language Model engine used for generation, analysis, and reasoning. Native integration with quota tracking. |
-| **OpenRouter** | Secondary LLM provider for Bloodhound Red Team vulnerability validation. Routes White-Hat audits through free/cheap models (e.g., dolphin-mistral-24b) to conserve Minimax quota. Configured via `OPENROUTER_API_KEY`. |
+| **OpenRouter** | Secondary LLM provider for Bloodhound Red Team vulnerability validation. Routes White-Hat audits through free/cheap models to conserve Minimax quota. Configured via `OPENROUTER_API_KEY`. |
 | **Pydantic & PyYAML**| Robust configuration parsing, validation, and settings management (`config.yaml`). |
 | **Docker (SDK)** | Ephemeral "Polyglot Sandbox" containers to execute tests and validate code patches safely. Runs in Docker-outside-of-Docker (DooD) mode. |
 | **ChromaDB** | Ephemeral, in-memory vector database for Retrieval-Augmented Generation (RAG) context to identify cross-file dependencies. |
@@ -42,7 +42,7 @@ farm_agent/
 │   ├── discovery.py     # RepoDiscovery (API search) + JsonTargetDiscovery (circular loop)
 │   └── guidelines.py    # Parsers for CONTRIBUTING.md and PR templates
 ├── orchestrator/        # The brains of the operation connecting subsystems
-│   ├── human.py         # TerminatorLoop: relentless continuous execution + KB GC
+│   ├── human.py         # SuperHumanLoop: relentless Terminator continuous execution + KB GC
 │   ├── memory.py        # SQLite persistence layer (aiosqlite) + knowledge_base + OpenRouter tracking
 │   └── pipeline.py      # ContribPipeline: discovery → bloodhound → DEV-QA loop → PR
 ├── analysis/            # Code scanning and issue identification
@@ -422,4 +422,4 @@ The following were removed during the v3.0 upgrade and no longer exist in the co
 - **`serve` CLI command** — Web Dashboard server (deleted from `main.py`)
 - **`NotificationConfig.on_merge`**, **`.on_close`**, **`.on_run_complete`** — unused notification hooks (deleted from `config.py`)
 - **`config.llm.use_vertex`** — bug that referenced a nonexistent field; fixed to use `config.llm.api_key` in 8 locations
-- **Simulated human delays** — `_simulate_typing_delay()`, `_take_break()`, `_calculate_daily_target()`, `HUMAN_THOUGHTS` dict, Vietnamese persona messages, stochastic delay constants (`HUNT_DELAY_*`, `PATROL_DELAY_*`, `STRESS_BREAK_SEC`, etc.), mandatory lunch break, and `_daily_pr_target` randomized quota — all removed from `human.py` and replaced with the relentless Terminator loop
+- **Simulated human delays** — `_simulate_typing_delay()`, `_take_break()`, `_calculate_daily_target()`, `HUMAN_THOUGHTS` dict, Vietnamese persona messages, stochastic delay constants (`HUNT_DELAY_*`, `PATROL_DELAY_*`, `STRESS_BREAK_SEC`, etc.), mandatory lunch break, and `_daily_pr_target` randomized quota — all removed from `human.py` and replaced with the relentless Terminator loop. The system strictly maximizes API usage.
