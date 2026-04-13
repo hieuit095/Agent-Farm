@@ -967,7 +967,6 @@ def reset_db(ctx, yes):
         cur.execute("DELETE FROM run_log")
         cur.execute("DELETE FROM analyzed_repos")
         conn.commit()
-        affected = cur.rowcount
         conn.close()
 
         console.print("[green]✅ Reset complete.[/green]")
@@ -981,7 +980,7 @@ def reset_db(ctx, yes):
 @click.pass_context
 def show_config(ctx):
     """Show current configuration."""
-    config = load_config(ctx.obj["config_path"])
+    load_config(ctx.obj["config_path"])
 console.print(
         Panel(
             f"[bold]GitHub[/bold]\n"

@@ -753,7 +753,7 @@ class Memory:
         try:
             raw = json_path.read_text(encoding="utf-8")
             entries = _json.loads(raw)
-        except (json.JSONDecodeError, OSError) as exc:
+        except (_json.JSONDecodeError, OSError) as exc:
             logger.error("Failed to read target_repo.json for seeding: %s", exc)
             return 0
 
@@ -815,22 +815,22 @@ class Memory:
 
         if excluded_languages:
             placeholders = ",".join(["?"] * len(excluded_languages))
-            query = f"""UPDATE target_repos 
-               SET scanned_at = ? 
-               WHERE repo_url = (SELECT repo_url FROM target_repos WHERE LOWER(language) NOT IN ({placeholders}) ORDER BY COALESCE(scanned_at, 0) ASC, rowid ASC LIMIT 1) 
+            query = f"""UPDATE target_repos
+               SET scanned_at = ?
+               WHERE repo_url = (SELECT repo_url FROM target_repos WHERE LOWER(language) NOT IN ({placeholders}) ORDER BY COALESCE(scanned_at, 0) ASC, rowid ASC LIMIT 1)
                RETURNING *"""
             params = (now_ts, *[lang.lower() for lang in excluded_languages])
         else:
-            query = """UPDATE target_repos 
-               SET scanned_at = ? 
-               WHERE repo_url = (SELECT repo_url FROM target_repos ORDER BY COALESCE(scanned_at, 0) ASC, rowid ASC LIMIT 1) 
+            query = """UPDATE target_repos
+               SET scanned_at = ?
+               WHERE repo_url = (SELECT repo_url FROM target_repos ORDER BY COALESCE(scanned_at, 0) ASC, rowid ASC LIMIT 1)
                RETURNING *"""
             params = (now_ts,)
 
         cursor = await self._db.execute(query, params)
         row = await cursor.fetchone()
         await self._db.commit()
-        
+
         if row is None:
             return None
 

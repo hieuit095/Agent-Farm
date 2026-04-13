@@ -485,7 +485,7 @@ class SuperHumanLoop:
             # ── Stochastic action: hunt (60%) or patrol (40%) ──
             if random.random() < HUNT_WEIGHT:
                 try:
-                    prs_opened, repos_scanned = await self._do_hunt()
+                    prs_opened, _repos_scanned = await self._do_hunt()
                     if prs_opened > 0:
                         self._prs_created_today += prs_opened
                         logger.info(

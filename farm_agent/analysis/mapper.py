@@ -89,10 +89,7 @@ class RepoMapper:
                 continue
 
             signatures = self._extract_signatures(node.path, content)
-            if signatures:
-                block = f"{node.path}\n" + "\n".join(f"  {s}" for s in signatures)
-            else:
-                block = node.path
+            block = f"{node.path}\n" + "\n".join(f"  {s}" for s in signatures) if signatures else node.path
 
             output_parts.append(block)
             total_chars += len(block)

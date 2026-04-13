@@ -170,10 +170,7 @@ class GitHubClient:
 
                 # Secondary rate limit (abuse detection) — retry with backoff
                 retry_after = response.headers.get("retry-after")
-                if retry_after:
-                    wait = int(retry_after)
-                else:
-                    wait = _403_backoff[min(network_attempts, len(_403_backoff) - 1)]
+                wait = int(retry_after) if retry_after else _403_backoff[min(network_attempts, len(_403_backoff) - 1)]
 
                 logger.warning(
                     "GitHub Secondary Rate Limit hit (403). "
@@ -460,10 +457,11 @@ class GitHubClient:
             f"/repos/{owner}/{repo}/git/trees/{branch}",
             params={"recursive": "1"},
         )
-        
+
         from pathlib import Path
+
         from farm_agent.core.models import TOKEN_BLACKLIST
-        
+
         tree = []
         for item in data.get("tree", []):
             path_parts = Path(item["path"]).parts
@@ -778,7 +776,7 @@ class GitHubClient:
                         "fetch_user_merged_prs: GET /user returned no login, using provided '%s'",
                         username,
                     )
-        except Exception:
+        except Exception as exc:
             logger.warning(
                 "fetch_user_merged_prs: could not validate username via GET /user: %s — "
                 "using provided '%s'",
@@ -1080,8 +1078,8 @@ class GitHubClient:
                 check_run_id, exc.response.status_code,
             )
             return ""
-        except Exception:
-            logger.warning("Failed to download CI log for job %d: %s", check_run_id, exc)
+        except Exception as e:
+            logger.warning("Failed to download CI log for job %d: %s", check_run_id, e)
             return ""
 
     async def delete_branch(self, owner: str, repo: str, branch_name: str) -> None:

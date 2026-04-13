@@ -44,12 +44,11 @@ def auto_check_pr_template(body: str, contrib_type: ContributionType | None = No
     lines = body.split("\n")
     for i, line in enumerate(lines):
         stripped = line.strip().lower()
-        if stripped.startswith(("- [ ]", "* [ ]")):
-            if any(term in stripped for term in allowed_terms):
-                # Only check if it safely avoids danger terms
-                if not any(danger in stripped for danger in ["breaking", "release", "deploy", "migration"]):
-                    # Replace the first unmet checkbox
-                    lines[i] = line.replace("[ ]", "[x]", 1)
+        if stripped.startswith(("- [ ]", "* [ ]")) and any(term in stripped for term in allowed_terms):
+            # Only check if it safely avoids danger terms
+            if not any(danger in stripped for danger in ["breaking", "release", "deploy", "migration"]):
+                # Replace the first unmet checkbox
+                lines[i] = line.replace("[ ]", "[x]", 1)
     return "\n".join(lines)
 
 
@@ -235,8 +234,10 @@ class PRManager:
         prefix = type_prefix.get(contribution.finding.type, "fix")
 
         # Slugify the title
+        import re as _re
+
         slug = contribution.finding.title.lower()
-        slug = re.sub(r"[^a-z0-9]+", "-", slug).strip("-")[:50]
+        slug = _re.sub(r"[^a-z0-9]+", "-", slug).strip("-")[:50]
         return f"{prefix}/{slug}"
 
     def _generate_pr_body(self, contribution: Contribution) -> str:
@@ -369,10 +370,7 @@ class PRManager:
         safe_title = escape_html_xss(_sanitize_text(finding.title, "issue title"))
         safe_description = escape_html_xss(_sanitize_text(finding.description, "issue description"))
 
-        if scope:
-            issue_title = f"{prefix}({scope}): {safe_title.lower()}"
-        else:
-            issue_title = f"{prefix}: {safe_title.lower()}"
+        issue_title = f"{prefix}({scope}): {safe_title.lower()}" if scope else f"{prefix}: {safe_title.lower()}"
 
         issue_body = (
             f"## Description\n\n"

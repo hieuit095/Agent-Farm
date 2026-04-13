@@ -56,7 +56,7 @@ farm_agent = "farm_agent.cli.main:cli"
 
 [tool.ruff]
 target-version = "py311"
-line-length = 100
+line-length = 150
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "W", "UP", "B", "SIM", "RUF"]

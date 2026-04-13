@@ -30,7 +30,6 @@ from farm_agent.core.models import (
     RepoContext,
     Repository,
     Severity,
-    VulnerabilityDossier,
 )
 from farm_agent.generator.engine import ContributionGenerator
 from farm_agent.generator.scorer import QAHardcoreScorer
@@ -824,17 +823,17 @@ class ContribPipeline:
             )
 
             # ── 3-Cycle DEV-QA Bounty Loop (FinOps Circuit Breaker) ────────────
-            MAX_DEV_QA_CYCLES = 3
+            max_dev_qa_cycles = 3
             qa_passed = False
             winning_contribution: Contribution | None = None
             failure_context = ""  # Accumulates sandbox/QA failure traces across cycles
 
             scorer = QAHardcoreScorer(llm=self._llm)
 
-            for cycle in range(MAX_DEV_QA_CYCLES):
+            for cycle in range(max_dev_qa_cycles):
                 logger.info(
                     "Starting DEV-QA Cycle %d/%d for %s",
-                    cycle + 1, MAX_DEV_QA_CYCLES, target.repo_url,
+                    cycle + 1, max_dev_qa_cycles, target.repo_url,
                 )
 
                 # 1. DEV generates patches (auto-injects QA Lessons + failure context)
@@ -922,7 +921,7 @@ class ContribPipeline:
                 logger.warning(
                     "Bailout: Complexity exceeded after %d DEV-QA cycles for %s. "
                     "Cutting losses to save tokens.",
-                    MAX_DEV_QA_CYCLES, target.repo_url,
+                    max_dev_qa_cycles, target.repo_url,
                 )
                 await discovery.mark_status(target.repo_url, "COMPLETED_TOO_COMPLEX")
 

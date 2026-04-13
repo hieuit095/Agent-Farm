@@ -7,10 +7,11 @@ install: ## Install package with dev dependencies
 	pip install -e ".[dev]"
 
 test: ## Run tests with coverage
-	pytest tests/ -v --tb=short --cov=farm_agent --cov-report=term-missing
+	PYTHONPATH=. pytest tests/ -v --tb=short -W ignore::pytest.PytestConfigWarning --cov=farm_agent --cov-report=term-missing
 
 test-quick: ## Run tests without coverage
-	pytest tests/ -v --tb=short
+	PYTHONPATH=. pytest tests/ -v --tb=short -W ignore::pytest.PytestConfigWarning -W ignore::pytest.PytestConfigWarning
+	PYTHONPATH=. pytest tests/ -v --tb=short -W ignore::pytest.PytestConfigWarning
 
 lint: ## Lint and format code
 	ruff check farm_agent/ --fix
