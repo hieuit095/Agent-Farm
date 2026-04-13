@@ -481,40 +481,6 @@ class ContribPipeline:
                     )
                     break
 
-                # ── Familiar Grounds: Prioritize friendly repos before discovery ──
-                # Repos where we have a merged PR are trusted — process them first
-                # before spending API tokens on new discoveries.
-                friendly_repos = []
-                if not dry_run and remaining >= 1:
-                    try:
-                        friendly_data = await self._memory.get_friendly_repos_for_hunting(
-                            limit=min(remaining, 2),  # max 2 friendly repos per round
-                            cooldown_days=7,
-                        )
-                        if friendly_data:
-                            logger.info(
-                                "🏠 Familiar Grounds: %d friendly repos off cooldown "
-                                "— processing first",
-                                len(friendly_data),
-                            )
-                            for fr in friendly_data:
-                                from farm_agent.core.models import Repository
-
-                                friendly_repos.append(
-                                    Repository(
-                                        owner=fr["full_name"].split("/")[0],
-                                        name=fr["full_name"].split("/")[1],
-                                        full_name=fr["full_name"],
-                                        language=fr.get("language") or None,
-                                        stars=fr.get("stars") or 0,
-                                        description=f"Merged PR: {fr.get('merged_pr_title', '')}",
-                                        html_url=f"https://github.com/{fr['full_name']}",
-                                        clone_url=f"https://github.com/{fr['full_name']}.git",
-                                    )
-                                )
-                    except Exception as exc:
-                        logger.debug("Familiar Grounds lookup failed (non-critical): %s", exc)
-
                 random.shuffle(langs)
                 stars = star_tiers[(rnd - 1) % len(star_tiers)]
                 criteria = DiscoveryCriteria(
@@ -754,11 +720,9 @@ class ContribPipeline:
         )
 
         # ── CRASH-SAFE MARK ─────────────────────────────────────────
-        # Update scanned_at IMMEDIATELY, before any GitHub API calls,
-        # LLM calls, or analysis. This guarantees that if the agent
-        # crashes, the next restart will pick a different target.
-        await discovery.mark_scanned(target.repo_url)
-        logger.info("Crash-safe mark: scanned_at updated for %s", target.repo_url)
+        # get_next_target() atomically sets scanned_at via UPDATE...RETURNING.
+        # The crash-safe guarantee is already embedded in the SELECT+UPDATE
+        # atomic operation — no separate mark needed.
 
         try:
             # Parse owner/name from URL
@@ -803,8 +767,38 @@ class ContribPipeline:
                 target.repo_url,
             )
 
+            # ── Contextual Intelligence: filter out non-production vulns ──
+            production_vulns = []
+            for v in dossier.vulnerabilities:
+                if v.context_type == "LOW_PRIORITY_CONTEXT":
+                    logger.warning(
+                        "[CONTEXT SKIP] Skipping vulnerability in non-production file: %s",
+                        v.file,
+                    )
+                else:
+                    production_vulns.append(v)
+
+            if not production_vulns:
+                logger.info(
+                    "All %d vulnerabilities were in non-production paths for %s — marking COMPLETED_NO_VULN",
+                    len(dossier.vulnerabilities),
+                    target.repo_url,
+                )
+                await discovery.mark_status(target.repo_url, "COMPLETED_NO_VULN")
+                return result
+
+            dossier.vulnerabilities = production_vulns
+
             # ── Build RepoContext with vulnerable file contents ───────────
-            file_tree = await self._github.get_file_tree(repo.owner, repo.name)
+            # Use GraphQL for repo tree (falls back to REST on any error)
+            try:
+                file_tree = await self._github.fetch_repo_structure_graphql(
+                    repo.owner, repo.name
+                )
+            except Exception as exc:
+                logger.info("GraphQL tree fetch failed for %s/%s, falling back to REST: %s",
+                             repo.owner, repo.name, exc)
+                file_tree = await self._github.get_file_tree(repo.owner, repo.name)
             relevant_files: dict[str, str] = {}
             for vuln in dossier.vulnerabilities:
                 if vuln.file and vuln.file != "NONE" and vuln.file not in relevant_files:
@@ -900,9 +894,9 @@ class ContribPipeline:
 
                 if not dry_run:
                     try:
-                        pr_result = await self._pr_manager.submit_pr(
-                            repo=repo,
+                        pr_result = await self._pr_manager.create_pr(
                             contribution=winning_contribution,
+                            target_repo=repo,
                         )
                         if pr_result:
                             result.prs_created += 1
@@ -1580,44 +1574,22 @@ class ContribPipeline:
 
             # Create PR
             try:
-                import random
-
-                base_coding_time = random.randint(300, 900)
-                patch_length = (
-                    len(str(contribution.changes)) if hasattr(contribution, "changes") else 500
-                )
-                typing_time = int(patch_length / 3.75)
-                total_coding_delay = min(base_coding_time + typing_time, 3600)
-
-                # CRIT-04 FIX: Move long coding delay OUTSIDE the lock.
-                # Parallel repos can "think" simultaneously — only the
-                # actual PR push is serialized.
-                if not dry_run:
-                    logger.info(
-                        f"⏳ Bắt đầu code cho {repo.full_name}... "
-                        f"(Simulating {total_coding_delay}s of heavy coding)"
-                    )
-                    await asyncio.sleep(total_coding_delay)
-
-                # INSIDE THE LOCK: Sequential PR pushing only
+                logger.info(f"Creating PR for {repo.full_name}...")
                 async with self._human_typing_lock:
                     if not dry_run:
-                        # P2-FIX: TOCTOU Quota defense. Repos process concurrently,
+                        # TOCTOU Quota defense. Repos process concurrently,
                         # so check quota atomically inside the lock before PR generation.
                         curr_prs = await self._memory.get_today_pr_count()
                         if curr_prs >= self.config.github.max_prs_per_day:
                             logger.warning(
-                                "🚫 TOCTOU PR LIMIT DEFENSE: Concurrent quota hit "
+                                "TOCTOU PR LIMIT DEFENSE: Concurrent quota hit "
                                 "(%d). Aborting PR for %s",
                                 curr_prs,
                                 repo.full_name,
                             )
                             return result
 
-                        logger.info("⏳ Chuẩn bị push code... (Taking a deep breath)")
-                        await asyncio.sleep(random.randint(15, 45))
-
-                    logger.info(f"📤 Creating PR for {repo.full_name}...")
+                    logger.info(f"Creating PR for {repo.full_name}...")
                     pr_result = await self._pr_manager.create_pr(
                         contribution, repo, guidelines=guidelines
                     )
@@ -1726,20 +1698,14 @@ class ContribPipeline:
                 "Happy to help."
             )
 
-        # Create the issue on GitHub
+        # Create the issue immediately (no artificial delay)
         try:
-            import random
-
-            thinking_time = random.randint(10, 30)
-            logger.info(f"⏳ Thinking before writing... ({thinking_time}s)")
-            await asyncio.sleep(thinking_time)
-
             issue_data = await self._github.create_issue(
                 owner=repo.owner,
                 repo=repo.name,
                 title=issue_title,
                 body=issue_body,
-                labels=["enhancement"],  # minimal labels, not pushy
+                labels=["enhancement"],
             )
 
             issue_number = issue_data.get("number", 0)
@@ -2010,14 +1976,26 @@ class ContribPipeline:
                     continue
             # ----------------------------------------------------------
 
-            # Create PR with "Closes #N" in body
+# Create PR immediately (no artificial delay)
             try:
-                import random
-
-                base_coding_time = random.randint(300, 900)
-                patch_length = (
-                    len(str(contribution.changes)) if hasattr(contribution, "changes") else 500
+                logger.info(
+                    "Creating PR for issue #%d in %s...", issue.number, repo.full_name
                 )
+                async with self._human_typing_lock:
+                    if not dry_run:
+                        curr_prs = await self._memory.get_today_pr_count()
+                        if curr_prs >= self.config.github.max_prs_per_day:
+                            logger.warning(
+                                "TOCTOU PR LIMIT DEFENSE: Concurrent quota hit "
+                                "(%d). Aborting PR for %s",
+                                curr_prs,
+                                repo.full_name,
+                            )
+                            return result
+
+                    logger.info(
+                        "Creating PR for issue #%d in %s...", issue.number, repo.full_name
+                    )
                 typing_time = int(patch_length / 3.75)
                 total_coding_delay = min(base_coding_time + typing_time, 3600)
 

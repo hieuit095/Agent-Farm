@@ -1,39 +1,34 @@
-# ╔══════════════════════════════════════════════════════════════════════╗
-# ║  Farm-Agent v3.0.0 — Docker Compose (DooD Architecture)            ║
-# ║                                                                    ║
-# ║  DooD = Docker-outside-of-Docker. The container mounts the host's  ║
-# ║  Docker socket so the Sandbox Guillotine can spawn sibling          ║
-# ║  containers for code validation.                                   ║
-# ║                                                                    ║
-# ║  Usage:                                                             ║
-# ║    docker compose up -d          # Start 24/7 superhuman daemon     ║
-# ║    docker compose logs -f        # Follow logs                      ║
-# ║    docker compose down           # Stop                            ║
-# ╚══════════════════════════════════════════════════════════════════════╝
+version: '3.8'
 
 services:
-  farm_agent:
+  agent-farm:
     build:
       context: .
       dockerfile: Dockerfile
-    image: farm-agent:3.0.0
-    container_name: farm_agent
+    container_name: agent-farm
     restart: unless-stopped
-    user: "0:0"
-    environment:
-      - TZ=Asia/Ho_Chi_Minh
     env_file:
       - .env
     volumes:
-      # ── DooD: mount host Docker socket for Sandbox Guillotine ──────────
-      - /var/run/docker.sock:/var/run/docker.sock:rw
-      # ── Data persistence (SQLite memory.db + ChromaDB) ──────────────────
-      - ./data:/app/data:rw
-      # ── Circular target loop queue ──────────────────────────────────────
-      - ./target_repo.json:/app/target_repo.json:rw
-      # ── Configuration (read-only) ───────────────────────────────────────
-      - ./config.yaml:/app/config.yaml:ro
-      # ── Environment variables (API keys, read-only) ────────────────────
-      - ./.env:/app/.env:ro
-      # ── Log persistence ─────────────────────────────────────────────────
-      - ./logs:/app/logs:rw
+      - ./data:/app/data
+      - ./target_repo.json:/app/target_repo.json
+      - /var/run/docker.sock:/var/run/docker.sock
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 2G
+    networks:
+      - internet_access
+      - sandbox_isolated
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  internet_access:
+    driver: bridge
+  sandbox_isolated:
+    internal: true

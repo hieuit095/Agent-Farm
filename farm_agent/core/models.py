@@ -272,6 +272,9 @@ class Vulnerability(BaseModel):
     poc: str
     fix: str
     impact: str
+    context_type: str = "PRODUCTION"
+    # PRODUCTION = core logic file, safe to patch
+    # LOW_PRIORITY_CONTEXT = test/example/demo/doc fixture — skip patch generation
 
 
 class VulnerabilityDossier(BaseModel):

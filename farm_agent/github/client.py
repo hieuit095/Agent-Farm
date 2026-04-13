@@ -216,40 +216,6 @@ class GitHubClient:
                     status_code=response.status_code,
                 )
 
-            # FIX 2: Header-aware backoff — inspect rate-limit headers before returning
-            remaining = response.headers.get("x-ratelimit-remaining")
-            if remaining is not None:
-                try:
-                    remaining_int = int(remaining)
-                    if remaining_int < 50:
-                        reset_ts = response.headers.get("x-ratelimit-reset", "?")
-                        logger.critical(
-                            "CRITICAL: x-ratelimit-remaining=%d (< 50) on %s %s. "
-                            "Forcing 60s sleep (reset at %s)",
-                            remaining_int, method, url, reset_ts,
-                        )
-                        await asyncio.sleep(60)
-                    # Also honor Retry-After header if present
-                    retry_after = response.headers.get("retry-after")
-                    if retry_after:
-                        wait = int(retry_after)
-                        logger.warning(
-                            "Retry-After header present (%s s) on %s %s. Sleeping %.1fs.",
-                            retry_after, method, url, wait + 1,
-                        )
-                        await asyncio.sleep(wait + 1)
-                except (ValueError, TypeError):
-                    pass  # non-numeric remaining, skip
-
-            # FIX 4: Humanize mutations — sleep after successful write operations
-            # GraphQL POSTs are read-only queries, not mutations — skip the delay
-            if method in ("POST", "PATCH", "PUT", "DELETE") and not is_graphql:
-                await asyncio.sleep(2.0)
-
-            # FIX 3: Search API hard-throttle — prevent exceeding 30 req/min limit
-            # /search/ endpoints have a separate 30-req/min cap that is easy to exceed
-            if "/search/" in url:
-                await asyncio.sleep(3.0)
 
             return response.json() if response.content else None
 
@@ -1311,72 +1277,4 @@ class GitHubClient:
             has_license=data.get("license") is not None,
         )
 
-    # ── VIP Friendly Repos Discovery ────────────────────────────────────────
 
-    async def discover_vip_friendly_repos(self, username: str, min_stars: int = 1000) -> list[dict]:
-        """Discover repos where the user has merged PRs and repo has > min_stars.
-
-        Fetches all merged PRs via GitHub Search API, deduplicates by repo,
-        then fetches star count for each and filters for repos exceeding
-        the star threshold. Used to populate "Familiar Grounds" with
-        high-impact repos the agent has already succeeded in.
-
-        Args:
-            username: GitHub username to query merged PRs for.
-            min_stars: Minimum star count threshold (default 1000).
-
-        Returns:
-            List of dicts with keys: repo, pr_number, title, html_url,
-            merged_at, stars.
-        """
-        import asyncio
-
-        # Step 1: Fetch all merged PRs authored by the user
-        merged_prs = await self.fetch_user_merged_prs(username)
-        if not merged_prs:
-            logger.info("discover_vip_friendly_repos(%s): no merged PRs found", username)
-            return []
-
-        # Step 2: Deduplicate by repo (keep most recent merged PR)
-        repo_map: dict[str, dict] = {}
-        for pr in merged_prs:
-            repo = pr.get("repo", "")
-            if not repo:
-                continue
-            merged_at = pr.get("merged_at") or ""
-            if repo not in repo_map or merged_at > repo_map[repo].get("merged_at", ""):
-                repo_map[repo] = pr
-
-        # Step 3: Fetch star count for each unique repo and filter
-        semaphore = asyncio.Semaphore(1)  # strictly serial — no parallel bursts
-
-        async def process_one(repo_full_name: str, pr: dict) -> dict | None:
-            async with semaphore:
-                await asyncio.sleep(3.0)  # rate limit between batches
-            owner = repo_full_name.split("/")[0]
-            repo_name = repo_full_name.split("/")[1]
-            try:
-                repo_details = await self.get_repo_details(owner, repo_name)
-                stars = getattr(repo_details, "stars", 0) or 0
-            except Exception:
-                return None
-
-            if stars < min_stars:
-                return None
-
-            result = dict(pr)
-            result["stars"] = stars
-            return result
-
-        results = await asyncio.gather(*[
-            process_one(repo_full_name, pr)
-            for repo_full_name, pr in repo_map.items()
-        ])
-
-        vip_repos = [r for r in results if r is not None]
-        logger.info(
-            "discover_vip_friendly_repos(%s): found %d VIP repos "
-            "(>%d stars) out of %d unique repos",
-            username, len(vip_repos), min_stars, len(repo_map),
-        )
-        return vip_repos

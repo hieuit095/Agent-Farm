@@ -69,13 +69,14 @@ def setup_logging(verbose: bool = False, config=None):
 
 def print_banner():
     banner = f"""[bold cyan]
-   ____            _        _ _      _    ___
-  / ___|___  _ __ | |_ _ __(_) |__  / \\  |_ _|
- | |   / _ \\| '_ \\| __| '__| | '_ \\/ _ \\  | |
- | |__| (_) | | | | |_| |  | | |_) / ___ \\ | |
-  \\____\\___/|_| |_|\\__|_|  |_|_.__/_/   \\_\\___|
+     _                    _     _____
+    / \   __ _  ___ _ __ | |_  |  ___|_ _ _ __ _ __ ___
+   / _ \ / _` |/ _ \ '_ \| __| | |_ / _` | '__| '_ ` _ \\
+  / ___ \ (_| |  __/ | | | |_  |  _| (_| | |  | | | | | |
+ /_/   \_\__, |\___|_| |_|\__| |_|  \__,_|_|  |_| |_| |_|
+         |___/
 
-  [dim]Senior Open Source Contributor v{__version__}[/dim]
+  [dim]Autonomous Agent Orchestration v{__version__}[/dim]
 [/bold cyan]"""
     console.print(banner)
 
@@ -982,7 +983,7 @@ def reset_db(ctx, yes):
 def show_config(ctx):
     """Show current configuration."""
     config = load_config(ctx.obj["config_path"])
-console.print(
+    console.print(
         Panel(
             f"[bold]GitHub[/bold]\n"
             f"  Token: {'****' + config.github.token[-4:] if config.github.token else 'NOT SET'}\n"
@@ -1054,9 +1055,9 @@ def vips(ctx, no_sync):
         )
 
         if not no_sync:
-            console.print("\n[bold cyan]🔄 Running Alumni Sync...[/bold cyan]")
-            new_repos = await loop._sync_historical_friendly_repos()
-            console.print(f"[green]✅ Sync complete — {new_repos} new repos indexed.[/green]\n")
+            console.print("\n[bold cyan]Syncing alumni data...[/bold cyan]")
+            alumni_count = await loop._sync_vip_friendly_repos()
+            console.print(f"[green]Sync complete — {alumni_count} repos indexed.[/green]\n")
         else:
             console.print("\n[dim]Skipping sync — showing cached data only.[/dim]\n")
 

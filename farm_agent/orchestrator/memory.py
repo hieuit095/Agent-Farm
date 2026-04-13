@@ -120,7 +120,7 @@ CREATE TABLE IF NOT EXISTS target_repos (
     status          TEXT DEFAULT 'PENDING',
     scanned_at      REAL,
     language        TEXT,
-    bounty_amount   INTEGER,
+    bounty_amount   TEXT,
     diamond_target  INTEGER DEFAULT 0
 );
 """
@@ -370,47 +370,7 @@ class Memory:
         cols = [d[0] for d in cursor.description]
         return [dict(zip(cols, row, strict=False)) for row in rows]
 
-    async def get_friendly_repos_for_hunting(
-        self,
-        limit: int = 3,
-        cooldown_days: int = 7,
-    ) -> list[dict]:
-        """Return merged repos that are off cooldown for re-hunting.
 
-        Friendly repos = repos where we have at least one merged PR.
-        Cooldown = repo must NOT have been analyzed in the last cooldown_days
-        to avoid spamming maintainers who trusted us.
-        """
-        cutoff = (datetime.now(UTC) - timedelta(days=cooldown_days)).isoformat()
-
-        cursor = await self._db.execute(
-            """
-            SELECT DISTINCT
-                sr.repo                         AS full_name,
-                ar.language,
-                ar.stars,
-                ar.analyzed_at,
-                sr.created_at                   AS merged_at,
-                sr.title                        AS merged_pr_title
-            FROM submitted_prs AS sr
-            LEFT JOIN analyzed_repos AS ar ON sr.repo = ar.full_name
-            WHERE sr.status = 'merged'
-              AND (ar.analyzed_at IS NULL OR ar.analyzed_at < ?)
-            ORDER BY sr.created_at DESC
-            LIMIT ?
-            """,
-            (cutoff, limit),
-        )
-        rows = await cursor.fetchall()
-        cols = [d[0] for d in cursor.description]
-        result = [dict(zip(cols, row, strict=False)) for row in rows]
-        logger.info(
-            "🏠 Familiar Grounds: found %d friendly repos off cooldown (limit=%d, cooldown=%dd)",
-            len(result),
-            limit,
-            cooldown_days,
-        )
-        return result
 
     # ── CI Fix Attempts ───────────────────────────────────────────────────
 
@@ -766,7 +726,7 @@ class Memory:
             language = entry_data.get("language") or None
             status = entry_data.get("status", "PENDING")
             bounty = entry_data.get("bounty_amount")
-            bounty_int = int(bounty) if bounty is not None else None
+            bounty_str = str(bounty) if bounty is not None else None
             diamond = 1 if entry_data.get("diamond_target") else 0
 
             scanned_at = None
@@ -786,7 +746,7 @@ class Memory:
                     """INSERT OR IGNORE INTO target_repos
                        (repo_url, status, scanned_at, language, bounty_amount, diamond_target)
                        VALUES (?, ?, ?, ?, ?, ?)""",
-                    (repo_url, status, scanned_at, language, bounty_int, diamond),
+                    (repo_url, status, scanned_at, language, bounty_str, diamond),
                 )
                 if cursor.rowcount == 1:
                     inserted += 1
@@ -1041,74 +1001,3 @@ class Memory:
         )
         await self._db.commit()
 
-    # ── VIP Repo Sync Throttle ────────────────────────────────────────────────
-
-    VIP_SYNC_TASK_KEY = "vip_repo_sync"
-
-    async def should_run_vip_sync(self) -> bool:
-        """Check if the VIP repo sync should run.
-
-        Returns True if task_key='vip_repo_sync' has no next_run scheduled
-        or its next_run timestamp is in the past.
-        """
-        next_run = await self.get_task_schedule(self.VIP_SYNC_TASK_KEY)
-        if next_run is None:
-            return True
-        try:
-            run_time = datetime.fromisoformat(next_run)
-            return datetime.now(UTC) >= run_time
-        except ValueError:
-            return True  # Invalid timestamp = treat as overdue
-
-    async def mark_vip_sync_done(self) -> None:
-        """Mark the VIP repo sync as completed, scheduling the next run in 24 hours."""
-        next_run = (datetime.now(UTC) + timedelta(hours=24)).isoformat()
-        await self.set_task_schedule(self.VIP_SYNC_TASK_KEY, next_run)
-        logger.info("VIP repo sync scheduled for next run at %s", next_run)
-
-    async def add_friendly_vip_repos(self, vip_repos: list[dict]) -> int:
-        """Add VIP repos as friendly repos using INSERT OR IGNORE.
-
-        Inserts each VIP repo's merged PR into submitted_prs with
-        status='merged' and type='vip_sync'. Uses INSERT OR IGNORE to
-        prevent TOCTOU races when multiple processes run concurrently.
-
-        Returns the number of new rows inserted.
-        """
-        if not vip_repos:
-            return 0
-
-        now_utc = datetime.now(UTC).isoformat()
-        new_count = 0
-
-        for repo_data in vip_repos:
-            try:
-                cursor = await self._db.execute(
-                    """INSERT OR IGNORE INTO submitted_prs
-                       (repo, pr_number, pr_url, title, type, status, created_at, updated_at)
-                       VALUES (?, ?, ?, ?, 'vip_sync', 'merged', ?, ?)""",
-                    (
-                        repo_data.get("repo", ""),
-                        repo_data.get("pr_number", 0),
-                        repo_data.get("html_url", ""),
-                        repo_data.get("title", ""),
-                        repo_data.get("merged_at", now_utc),
-                        now_utc,
-                    ),
-                )
-                if cursor.rowcount == 1:
-                    new_count += 1
-                    logger.debug(
-                        "VIP friendly repo added: %s (★ %d)",
-                        repo_data.get("repo"),
-                        repo_data.get("stars", 0),
-                    )
-            except Exception as exc:
-                logger.error(
-                    "add_friendly_vip_repos: failed to insert %s: %s",
-                    repo_data.get("repo"),
-                    exc,
-                )
-
-        await self._db.commit()
-        return new_count

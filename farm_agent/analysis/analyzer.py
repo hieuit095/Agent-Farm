@@ -997,6 +997,10 @@ class BloodhoundAnalyzer:
         self._sg_available: bool | None = None
         self._red_team_client: LLMProvider | None = None
 
+    def _forbidden_paths(self) -> list[str]:
+        """Return the lowercase set of directory names indicating non-production code."""
+        return [p.lower() for p in getattr(self._config, "forbidden_paths", [])]
+
     def _check_sg_available(self) -> bool:
         if self._sg_available is not None:
             return self._sg_available
@@ -1114,38 +1118,66 @@ class BloodhoundAnalyzer:
                 proc.communicate(), timeout=self.SG_SCAN_TIMEOUT
             )
 
-            if proc.returncode != 0:
+            # ast-grep exits with code 1 when it finds matches (diagnostic tool
+            # convention).  Only treat exit code >= 2 as a true failure.
+            if proc.returncode not in (0, 1):
                 stderr_text = stderr.decode("utf-8", errors="replace")[:500]
                 logger.debug("sg scan returned %d for rule %s: %s", proc.returncode, rule_file.name, stderr_text)
                 return []
 
+            raw = stdout.decode("utf-8", errors="replace").strip()
+            if not raw:
+                return []
+
+            try:
+                json_data = json.loads(raw)
+            except json.JSONDecodeError as e:
+                logger.warning("sg scan returned invalid JSON for rule %s: %s", rule_file.name, e)
+                return []
+
+            # ast-grep may emit:
+            #   - A JSON object with "matches" / "results" key → list of match dicts
+            #   - A JSON array directly → list of match dicts
+            #   - A JSON scalar or deeply nested struct → skip safely
+            raw_matches: list[dict] = []
+            if isinstance(json_data, list):
+                raw_matches = json_data
+            elif isinstance(json_data, dict):
+                for key in ("matches", "results"):
+                    val = json_data.get(key)
+                    if isinstance(val, list):
+                        raw_matches = val
+                        break
+
             matches = []
-            for line in stdout.decode("utf-8", errors="replace").splitlines():
-                line = line.strip()
-                if not line:
-                    continue
+            for item in raw_matches:
                 try:
-                    obj = json.loads(line)
-                except json.JSONDecodeError:
+                    if not isinstance(item, dict):
+                        continue
+
+                    file_path = item.get("file") or item.get("path") or ""
+                    if file_path:
+                        try:
+                            file_path = str(Path(file_path).relative_to(repo_path))
+                        except ValueError:
+                            pass
+
+                    range_obj = item.get("range") or {}
+                    start_obj = range_obj.get("start") if isinstance(range_obj, dict) else {}
+                    line_num = start_obj.get("line") if isinstance(start_obj, dict) else 0
+                    if not line_num:
+                        line_num = item.get("line", 0)
+
+                    text = item.get("text") or item.get("match") or ""
+
+                    matches.append({
+                        "file": str(file_path),
+                        "line": int(line_num) if line_num else 0,
+                        "match": str(text),
+                        "rule": rule_file.stem,
+                    })
+                except Exception:
                     continue
-
-                file_path = obj.get("file", obj.get("path", ""))
-                if file_path:
-                    try:
-                        file_path = str(Path(file_path).relative_to(repo_path))
-                    except ValueError:
-                        pass
-
-                start = obj.get("range", {}).get("start", {})
-                line_num = start.get("line", obj.get("line", 0))
-                text = obj.get("text", obj.get("match", ""))
-
-                matches.append({
-                    "file": file_path,
-                    "line": line_num,
-                    "match": text,
-                    "rule": rule_file.stem,
-                })
 
             if matches:
                 logger.info("Rule %s: %d matches", rule_file.name, len(matches))
@@ -1172,11 +1204,15 @@ class BloodhoundAnalyzer:
             self._semgrep_available = True
         return self._semgrep_available
 
-    async def _run_semgrep(self, repo_path: Path) -> list[dict]:
+    async def _run_semgrep(
+        self, repo_path: Path, extra_rulesets: list[str] | None = None
+    ) -> list[dict]:
         if not self._check_semgrep_available():
             return []
 
-        rulesets = getattr(self._config, "semgrep_rulesets", [])
+        rulesets = list(getattr(self._config, "semgrep_rulesets", []))
+        if extra_rulesets:
+            rulesets.extend(extra_rulesets)
         if not rulesets:
             logger.info("No Semgrep rulesets configured — skipping Semgrep radar")
             return []
@@ -1272,10 +1308,26 @@ class BloodhoundAnalyzer:
         self, repo_url: str, repo_name: str, matches: list[dict]
     ) -> VulnerabilityDossier:
         context_parts = []
+        max_chars = getattr(self._llm.config, "max_snippet_chars", 15000) if hasattr(self, "_llm") and hasattr(self._llm, "config") else 15000
+        
         for m in matches:
+            severity = m.get("severity", "UNKNOWN").upper()
+            if severity in ("INFO", "LOW"):
+                continue
+                
+            snippet = m.get('match', '')
+            if len(snippet) > max_chars:
+                logger.warning("[FINOPS] Snippet truncated to fit 32k context window.")
+                snippet = snippet[:max_chars]
+
             context_parts.append(
-                f"File: {m['file']}\nLine: {m['line']}\nRule: {m['rule']}\nSnippet:\n{m['match']}\n"
+                f"File: {m['file']}\nLine: {m['line']}\nRule: {m['rule']}\nSnippet:\n{snippet}\n"
             )
+            
+        if not context_parts:
+            # If everything was filtered out, skip LLM call
+            return VulnerabilityDossier(repo_url=repo_url, target_commit="unknown", vulnerabilities=[])
+
         context_str = "\n---\n".join(context_parts)
 
         system_prompt = """You are an elite, ruthless Red Team exploit developer and vulnerability researcher. 
@@ -1335,12 +1387,44 @@ You MUST respond strictly in the following JSON array format. No markdown, no co
                 logger.info("No OpenRouter provider — using default LLM for White-Hat audit")
                 response = await self._llm.complete(user_prompt, system=system_prompt, temperature=0.1)
 
-            return self._parse_audit_response(response, repo_url)
+            return self._parse_audit_response(response, repo_url, forbidden_paths=self._forbidden_paths())
         except Exception as exc:
+            # If OpenRouter rate-limits (429, 403, 5xx), fall back to default LLM
+            # rather than discarding the matches entirely.
+            from farm_agent.core.exceptions import LLMRateLimitError
+            if isinstance(exc, LLMRateLimitError):
+                logger.warning(
+                    "[RED TEAM OFFLINE] OpenRouter rate limit hit. Initiating Fallback to Minimax M2.7."
+                )
+                try:
+                    response = await self._llm.complete(user_prompt, system=system_prompt, temperature=0.1)
+                    return self._parse_audit_response(response, repo_url, forbidden_paths=self._forbidden_paths())
+                except Exception as fallback_exc:
+                    logger.error("White-Hat audit fallback LLM also failed: %s", fallback_exc)
+                    return VulnerabilityDossier(repo_url=repo_url, target_commit="unknown", vulnerabilities=[])
             logger.error("White-Hat audit LLM call failed: %s", exc)
             return VulnerabilityDossier(repo_url=repo_url, target_commit="unknown", vulnerabilities=[])
 
-    def _parse_audit_response(self, response: str, repo_url: str) -> VulnerabilityDossier:
+    def _classify_context(self, file_path: str, forbidden_paths: list[str] | None = None) -> str:
+        """Classify a file path as PRODUCTION or LOW_PRIORITY_CONTEXT.
+
+        If any segment of the normalized path matches a forbidden directory
+        name, the file is considered non-production (test, example, demo, etc.)
+        and tagged LOW_PRIORITY_CONTEXT.
+        """
+        if forbidden_paths is None:
+            forbidden_paths = []
+
+        normalized = file_path.replace("\\", "/").lower()
+        segments = normalized.split("/")
+
+        for segment in segments:
+            if segment in forbidden_paths:
+                return "LOW_PRIORITY_CONTEXT"
+
+        return "PRODUCTION"
+
+    def _parse_audit_response(self, response: str, repo_url: str, forbidden_paths: list[str] | None = None) -> VulnerabilityDossier:
         import re as _re
 
         text = response.strip()
@@ -1369,13 +1453,16 @@ You MUST respond strictly in the following JSON array format. No markdown, no co
             if not isinstance(item, dict):
                 continue
             try:
+                file_path = str(item.get("file", ""))
+                context_type = self._classify_context(file_path, forbidden_paths)
                 vulns.append(Vulnerability(
-                    file=str(item.get("file", "")),
+                    file=file_path,
                     line=int(item.get("line", 0)),
                     snippet=str(item.get("snippet", "")),
                     poc=str(item.get("poc", "")),
                     fix=str(item.get("fix", "")),
                     impact=str(item.get("impact", "")),
+                    context_type=context_type,
                 ))
             except (ValueError, TypeError):
                 continue
@@ -1415,11 +1502,17 @@ You MUST respond strictly in the following JSON array format. No markdown, no co
             # Semgrep radar
             use_semgrep = getattr(self._config, "use_semgrep", False)
             if use_semgrep:
-                tasks.append(self._run_semgrep(clone_path, language=repo.language))
-                rulesets = list(getattr(self._config, "semgrep_rulesets", []))
-                if repo.language and repo.language.lower() == "solidity":
-                    rulesets.extend(["p/solidity", "p/smart-contracts", "p/jwt"])
-                task_labels.append(f"semgrep({len(rulesets)} rulesets)")
+                extra_rulesets: list[str] = []
+                if repo.language:
+                    lang_lower = repo.language.lower()
+                    if lang_lower == "go":
+                        extra_rulesets.append("p/golang")
+                    elif lang_lower == "solidity":
+                        extra_rulesets.extend(["p/solidity", "p/smart-contracts", "p/jwt"])
+                tasks.append(self._run_semgrep(clone_path, extra_rulesets=extra_rulesets or None))
+                base_rulesets = list(getattr(self._config, "semgrep_rulesets", []))
+                total_rulesets = len(base_rulesets) + len(extra_rulesets)
+                task_labels.append(f"semgrep({total_rulesets} rulesets)")
 
             # If neither tool is available, return empty dossier
             if not tasks:

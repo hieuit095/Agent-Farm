@@ -1,9 +1,10 @@
 """Terminator Mode — relentless continuous execution loop.
 
-Runs hunt-circular and patrol in a tight loop with minimal safety sleep,
-preserving daily KB garbage collection and friendly-repos sync.
-All simulated human delays, coffee breaks, and randomized daily PR targets
-have been removed. The loop runs continuously and aggressively.
+Runs database-driven hunt-circular and patrol in a tight deterministic loop.
+All stochastic search, Familiar Grounds sync, and artificial delays have
+been purged. The loop pulls targets exclusively from the SQLite target_repos
+table (seeded by target_repo.json) and uses token pool rotation for rate
+limit handling.
 
 Usage:
     farm_agent superhuman              # Run the terminator loop
@@ -14,7 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import random
+
 from datetime import UTC, date, datetime
 
 from farm_agent.core.exceptions import FarmAgentError, GitHubAPIError, LLMRateLimitError
@@ -32,17 +33,13 @@ PATROL_ONLY_SLEEP = 60         # Seconds when in patrol-only mode (quota met)
 LLM_QUOTA_COOLDOWN = 300       # Seconds when LLM quota exhausted (5 min)
 LLM_QUOTA_COOLDOWN_WARP = 3    # Seconds in time-warp mode
 
-# Action selection weights
-HUNT_WEIGHT = 0.60
-PATROL_WEIGHT = 0.40
-
 
 class SuperHumanLoop:
     """Terminator execution loop: relentless continuous operation.
 
-    Runs hunt-circular and patrol with minimal sleep, preserving:
+    Runs database-driven hunt-circular and patrol with minimal sleep.
+    Preserves:
     - Daily KB garbage collection
-    - Friendly-repos sync (24-hour throttle)
     - max_prs_per_day safety cap
     - LLM rate-limit cooldown
     """
@@ -98,12 +95,12 @@ class SuperHumanLoop:
         return False
 
     async def _do_hunt(self) -> tuple[int, int]:
-        """Execute a single Hunt action.
+        """Execute a single Hunt action via database-driven circular targeting.
 
         Returns:
             Tuple of (prs_created, repos_analyzed).
         """
-        logger.info("[TERMINATOR] Hunt iteration starting...")
+        logger.info("[TERMINATOR] Hunt iteration starting (circular target)...")
         try:
             if self._target_repo_url:
                 result = await self._pipeline.run_single(
@@ -112,9 +109,7 @@ class SuperHumanLoop:
                     max_prs=self._target_repo_max_prs,
                 )
             else:
-                result = await self._pipeline.hunt(
-                    rounds=1,
-                    delay_sec=5,
+                result = await self._pipeline.run_circular(
                     dry_run=self._dry_run,
                     mode="both",
                 )
@@ -138,150 +133,7 @@ class SuperHumanLoop:
             logger.error("[TERMINATOR] Hunt failed (unexpected error): %s", exc)
             raise
 
-    # ── Familiar Grounds Sync ───────────────────────────────────────────────
 
-    async def _sync_historical_friendly_repos(self) -> int:
-        """Sync historically merged PRs from GitHub into the local friendly-repos DB."""
-        import time as time_module
-
-        min_stars, max_stars = self._pipeline.config.discovery.stars_range
-
-        username = ""
-        for attempt in range(3):
-            try:
-                if self._pipeline._github is None:
-                    await asyncio.sleep(2)
-                    continue
-                user: dict = await self._pipeline._github.get_authenticated_user()
-                username = user.get("login", "")
-                break
-            except Exception as exc:
-                if attempt < 2:
-                    await asyncio.sleep(2)
-                else:
-                    logger.warning("Cannot sync friendly repos — auth failed: %s", exc)
-                    return 0
-
-        if not username:
-            logger.warning("Cannot sync friendly repos — empty username")
-            return 0
-
-        logger.info("[TERMINATOR] Familiar Grounds sync: @%s ...", username)
-        start = time_module.time()
-
-        try:
-            merged_prs = await self._pipeline._github.fetch_user_merged_prs(username)
-        except Exception as exc:
-            logger.warning("GitHub search API failed during friendly-repos sync: %s", exc)
-            return 0
-
-        repo_map: dict[str, dict] = {}
-        for pr in merged_prs:
-            repo = pr.get("repo", "")
-            if not repo:
-                continue
-            merged_at = pr.get("merged_at") or ""
-            if repo not in repo_map or merged_at > repo_map[repo].get("merged_at", ""):
-                repo_map[repo] = pr
-
-        new_count = 0
-        now_utc = datetime.now(UTC).isoformat()
-
-        semaphore = asyncio.Semaphore(3)
-
-        async def process_one_repo(repo_full_name: str, pr: dict) -> bool:
-            async with semaphore:
-                await asyncio.sleep(1.0)
-                owner = repo_full_name.split("/")[0]
-                stars = 0
-                try:
-                    repo_details = await self._pipeline._github.get_repo_details(
-                        owner, repo_full_name.split("/")[1]
-                    )
-                    stars = getattr(repo_details, "stars", 0) or 0
-                except Exception:
-                    return False
-
-                if not (min_stars <= stars <= max_stars):
-                    return False
-
-                try:
-                    cursor = await self._memory._db.execute(
-                        """INSERT OR IGNORE INTO submitted_prs
-                           (repo, pr_number, pr_url, title, type, status, created_at, updated_at)
-                           VALUES (?, ?, ?, ?, 'historical_sync', 'merged', ?, ?)""",
-                        (
-                            repo_full_name,
-                            pr.get("pr_number", 0),
-                            pr.get("html_url") or "",
-                            pr.get("title") or "",
-                            pr.get("merged_at") or now_utc,
-                            now_utc,
-                        ),
-                    )
-                    new_row = cursor.rowcount == 1
-                    if new_row:
-                        logger.info("Friendly repo added: %s (★ %d)", repo_full_name, stars)
-                        return True
-                    await self._memory._db.execute(
-                        """UPDATE submitted_prs
-                           SET status = 'merged', updated_at = ?, pr_url = ?, title = ?
-                           WHERE repo = ? AND pr_number = ?""",
-                        (now_utc, pr.get("html_url") or "", pr.get("title") or "", repo_full_name, pr.get("pr_number", 0)),
-                    )
-                except Exception as exc:
-                    logger.error("Sync DB Error for %s: %s", repo_full_name, exc)
-                return False
-
-        results = await asyncio.gather(
-            *[process_one_repo(repo_full_name, pr) for repo_full_name, pr in repo_map.items()]
-        )
-        new_count = sum(1 for r in results if r)
-        await self._memory._db.commit()
-        elapsed = time_module.time() - start
-        logger.info("Familiar Grounds sync: %d new repos (%d scanned) in %.1fs", new_count, len(repo_map), elapsed)
-        return new_count
-
-    async def _sync_vip_friendly_repos(self) -> int:
-        """Discover and persist VIP repos (>1000 stars) where the user has merged PRs."""
-        try:
-            if not await self._memory.should_run_vip_sync():
-                return 0
-        except Exception as exc:
-            logger.warning("VIP sync throttle check failed: %s — proceeding anyway", exc)
-
-        username = ""
-        try:
-            user: dict = await self._pipeline._github.get_authenticated_user()
-            username = user.get("login", "")
-        except Exception as exc:
-            logger.warning("VIP repo sync: could not get authenticated user: %s", exc)
-            return 0
-
-        if not username:
-            logger.warning("VIP repo sync: empty username")
-            return 0
-
-        logger.info("[TERMINATOR] VIP Friendly sync: @%s ...", username)
-
-        try:
-            vip_repos = await self._pipeline._github.discover_vip_friendly_repos(username)
-        except Exception as exc:
-            logger.warning("VIP repo sync: GitHub API failed: %s", exc)
-            return 0
-
-        if not vip_repos:
-            await self._memory.mark_vip_sync_done()
-            return 0
-
-        try:
-            new_count = await self._memory.add_friendly_vip_repos(vip_repos)
-            await self._memory.mark_vip_sync_done()
-            logger.info("VIP Friendly sync: %d new repos inserted (%d found)", new_count, len(vip_repos))
-            return new_count
-        except Exception as exc:
-            logger.warning("VIP repo sync: DB insert failed: %s", exc)
-            return 0
 
     async def _run_janitor_sweep(self) -> dict:
         """Run the PR Janitor sweep."""
@@ -386,7 +238,6 @@ class SuperHumanLoop:
         A relentless while-true loop that cycles through hunt and patrol
         without artificial delays. Preserves:
         - Daily KB garbage collection
-        - Friendly-repos sync (24-hour throttle)
         - max_prs_per_day safety cap (switches to patrol-only)
         - LLM rate-limit cooldown
 
@@ -412,37 +263,22 @@ class SuperHumanLoop:
             self._poller_task = asyncio.create_task(
                 self._notifier.start_polling(
                     self._memory,
-                    on_update_callback=self._sync_historical_friendly_repos,
                     on_clean_callback=self._run_janitor_sweep,
                     on_accept_callback=self._run_accept_check,
                 )
             )
             self._poller_task.add_done_callback(self._poller_done_callback)
 
-        # ── Familiar Grounds: sync on startup ──
-        self._last_sync_time: float = 0.0
+        # ── Auth warmup ──
         try:
             if self._pipeline._github is None:
                 logger.info("[TERMINATOR] Auth warmup: initializing GitHub client...")
                 await self._pipeline._init_components()
-            await self._sync_historical_friendly_repos()
-            await self._sync_vip_friendly_repos()
         except Exception:
             pass
-        self._last_sync_time = __import__("time").time()
 
         while True:
             self._iteration += 1
-
-            # ── 24-hour friendly-repos sync ──
-            elapsed = __import__("time").time() - self._last_sync_time
-            if elapsed > 86400:
-                try:
-                    await self._sync_historical_friendly_repos()
-                    await self._sync_vip_friendly_repos()
-                except Exception:
-                    pass
-                self._last_sync_time = __import__("time").time()
 
             # ── Time-warp exit gate ──
             if time_warp and self._iteration > WARP_MAX_ITERATIONS:
@@ -482,31 +318,30 @@ class SuperHumanLoop:
                 await asyncio.sleep(TERMINATOR_SLEEP if not time_warp else TERMINATOR_SLEEP_WARP)
                 continue
 
-            # ── Stochastic action: hunt (60%) or patrol (40%) ──
-            if random.random() < HUNT_WEIGHT:
-                try:
-                    prs_opened, repos_scanned = await self._do_hunt()
-                    if prs_opened > 0:
-                        self._prs_created_today += prs_opened
-                        logger.info(
-                            "[TERMINATOR] Hunt: +%d PRs → %d/%d today",
-                            prs_opened, self._prs_created_today, max_prs,
-                        )
-                except LLMRateLimitError as exc:
-                    cooldown = LLM_QUOTA_COOLDOWN_WARP if time_warp else LLM_QUOTA_COOLDOWN
-                    logger.warning("[TERMINATOR] LLM quota exhausted — sleeping %ds: %s", cooldown, exc)
-                    self._daily_log.log_error("HUNT (LLM Quota)", str(exc))
-                    await asyncio.sleep(cooldown)
-                    continue
-                except (GitHubAPIError, FarmAgentError, Exception) as exc:
-                    logger.error("[TERMINATOR] Hunt error: %s", exc)
-                    self._daily_log.log_error("HUNT", str(exc))
-            else:
-                try:
-                    await self._do_patrol()
-                except (GitHubAPIError, FarmAgentError, Exception) as exc:
-                    logger.error("[TERMINATOR] Patrol error: %s", exc)
-                    self._daily_log.log_error("Patrol", str(exc))
+            # ── Deterministic action: hunt first, then patrol ──
+            try:
+                prs_opened, repos_scanned = await self._do_hunt()
+                if prs_opened > 0:
+                    self._prs_created_today += prs_opened
+                    logger.info(
+                        "[TERMINATOR] Hunt: +%d PRs → %d/%d today",
+                        prs_opened, self._prs_created_today, max_prs,
+                    )
+            except LLMRateLimitError as exc:
+                cooldown = LLM_QUOTA_COOLDOWN_WARP if time_warp else LLM_QUOTA_COOLDOWN
+                logger.warning("[TERMINATOR] LLM quota exhausted — sleeping %ds: %s", cooldown, exc)
+                self._daily_log.log_error("HUNT (LLM Quota)", str(exc))
+                await asyncio.sleep(cooldown)
+                continue
+            except (GitHubAPIError, FarmAgentError, Exception) as exc:
+                logger.error("[TERMINATOR] Hunt error: %s", exc)
+                self._daily_log.log_error("HUNT", str(exc))
+
+            try:
+                await self._do_patrol()
+            except (GitHubAPIError, FarmAgentError, Exception) as exc:
+                logger.error("[TERMINATOR] Patrol error: %s", exc)
+                self._daily_log.log_error("Patrol", str(exc))
 
             # ── Minimal safety sleep to prevent CPU pegging ──
             await asyncio.sleep(TERMINATOR_SLEEP if not time_warp else TERMINATOR_SLEEP_WARP)
@@ -535,7 +370,6 @@ class SuperHumanLoop:
                 self._poller_task = asyncio.create_task(
                     self._notifier.start_polling(
                         self._memory,
-                        on_update_callback=self._sync_historical_friendly_repos,
                         on_clean_callback=self._run_janitor_sweep,
                         on_accept_callback=self._run_accept_check,
                     )

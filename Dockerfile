@@ -40,6 +40,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     nodejs \
     npm \
+    unzip \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Rust
@@ -51,21 +52,31 @@ RUN curl -L https://foundry.paradigm.xyz | bash && \
     /root/.foundry/bin/foundryup
 ENV PATH="/root/.foundry/bin:${PATH}"
 
+# ── Install Go compiler ────────────────────────────────────────────────────
+# Required for sandbox test execution and Semgrep Go ruleset analysis.
+ARG GO_VERSION=1.21.6
+RUN curl -fsSL "https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz" -o /tmp/go.tar.gz && \
+    tar -C /usr/local -xzf /tmp/go.tar.gz && \
+    rm /tmp/go.tar.gz && \
+    /usr/local/go/bin/go version
+ENV PATH="/usr/local/go/bin:${PATH}"
+
 # ── Install ast-grep (sg) binary ───────────────────────────────────────────
 # Direct binary download — avoids pulling Node.js (~200MB savings).
 # Detects the architecture and downloads the matching release binary.
 RUN ARCH=$(uname -m) && \
     case "$ARCH" in \
-        x86_64)  SG_ARCH="x86_64-unknown-linux-musl" ;; \
-        aarch64) SG_ARCH="aarch64-unknown-linux-musl" ;; \
+        x86_64)  SG_ARCH="x86_64-unknown-linux-gnu" ;; \
+        aarch64) SG_ARCH="aarch64-unknown-linux-gnu" ;; \
         *)       echo "Unsupported architecture: $ARCH" && exit 1 ;; \
     esac && \
     curl -fsSL \
-        "https://github.com/ast-grep/ast-grep/releases/download/${SG_VERSION}/ast-grep-linux-${SG_ARCH}.zip" \
+        "https://github.com/ast-grep/ast-grep/releases/download/${SG_VERSION}/app-${SG_ARCH}.zip" \
         -o /tmp/sg.zip && \
     unzip -o /tmp/sg.zip -d /tmp/sg-extract && \
+    mv /tmp/sg-extract/ast-grep /usr/local/bin/ast-grep && \
     mv /tmp/sg-extract/sg /usr/local/bin/sg && \
-    chmod +x /usr/local/bin/sg && \
+    chmod +x /usr/local/bin/ast-grep /usr/local/bin/sg && \
     rm -rf /tmp/sg.zip /tmp/sg-extract && \
     sg --version
 

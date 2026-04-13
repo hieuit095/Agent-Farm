@@ -52,7 +52,7 @@ class GitHubConfig(BaseModel):
 class LLMConfig(BaseModel):
     """LLM provider configuration."""
 
-    provider: Literal["minimax"] = "minimax"
+    provider: Literal["minimax", "openrouter"] = "minimax"
     model: str = "MiniMax-M2.7"
     api_key: str = ""
     temperature: float = 0.3
@@ -64,6 +64,8 @@ class LLMConfig(BaseModel):
 
     # OpenRouter (Red Team engine for Bloodhound audits)
     openrouter_api_key: str = ""
+    red_team_model: str = "cognitivecomputations/dolphin-mistral-24b-venice-edition:free"
+    max_snippet_chars: int = 15000
 
     @model_validator(mode="after")
     def resolve_api_key_and_defaults(self):
@@ -90,6 +92,21 @@ class AnalysisConfig(BaseModel):
     max_file_size_kb: int = 500
     skip_patterns: list[str] = Field(
         default_factory=lambda: ["*.min.js", "*.min.css", "vendor/*", "node_modules/*", "*.lock"]
+    )
+
+    # Contextual Intelligence: directories that indicate non-production code.
+    # Findings in these paths are tagged LOW_PRIORITY_CONTEXT and skipped
+    # by the Orchestrator to prevent spam PRs against tests/examples/docs.
+    forbidden_paths: list[str] = Field(
+        default_factory=lambda: [
+            "tests", "test", "testing",
+            "examples", "example", "example_projects", "security_examples",
+            "fixtures", "fixture", "mocks", "mock",
+            "docs", "documentation", "doc",
+            "benchmarks", "benchmark", "perf",
+            "test_data", "testdata", "sample_data", "samples",
+            "demo", "demos", "playground",
+        ]
     )
 
     # Red Team engine (Bloodhound White-Hat audits via OpenRouter)
@@ -218,7 +235,11 @@ def load_config(path: str | Path | None = None) -> FarmAgentConfig:
 
     Priority: explicit path > ./config.yaml > ~/.farm_agent/config.yaml > defaults.
     Token fallback: GITHUB_TOKEN env var > gh auth token CLI (when token is empty in yaml).
+    Automatically loads .env file from current working directory.
     """
+    from dotenv import load_dotenv
+    load_dotenv()
+
     search_paths = [
         Path(path) if path else None,
         Path("config.yaml"),

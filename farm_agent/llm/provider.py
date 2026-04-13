@@ -425,6 +425,10 @@ class OpenRouterProvider(LLMProvider):
                 status = e.response.status_code
                 if status == 429:
                     raise LLMRateLimitError(f"OpenRouter rate limit (429): {e}") from e
+                if status == 403:
+                    raise LLMRateLimitError(f"OpenRouter quota exceeded (403): {e}") from e
+                if status >= 500:
+                    raise LLMRateLimitError(f"OpenRouter server error ({status}): {e}") from e
                 if status == 401:
                     raise LLMError("OpenRouter auth failed (401): check openrouter_api_key") from e
                 raise LLMError(f"OpenRouter HTTP {status}: {e}") from e

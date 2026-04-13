@@ -215,6 +215,8 @@ class DockerSandbox:
     _REMOVAL_GRACE_SECONDS = 10.0
     _TIMEOUT_EXIT_CODE = 137
     _EXECUTION_TIMEOUT_SECONDS = 60
+    _MAX_STDOUT_CHARS = 500
+    _MAX_STDERR_CHARS = 2000
 
     def __init__(self):
         """Initialize the Docker client from the local environment."""
@@ -421,6 +423,21 @@ class DockerSandbox:
                 exit_code = result["exit_code"]
                 stdout = result["stdout"]
                 stderr = result["stderr"]
+
+                # ── FinOps: truncate stdout/stderr to prevent context explosion ──
+                if len(stdout) > self._MAX_STDOUT_CHARS:
+                    logger.info(
+                        "Sandbox stdout truncated: %d -> %d chars",
+                        len(stdout), self._MAX_STDOUT_CHARS,
+                    )
+                    stdout = stdout[:self._MAX_STDOUT_CHARS]
+                if len(stderr) > self._MAX_STDERR_CHARS:
+                    logger.info(
+                        "Sandbox stderr truncated: %d -> %d chars (tail preserved)",
+                        len(stderr), self._MAX_STDERR_CHARS,
+                    )
+                    stderr = stderr[-self._MAX_STDERR_CHARS:]
+
                 timed_out = False
 
             except asyncio.TimeoutError:
