@@ -95,12 +95,28 @@ def extract_style_guide(prs_data: list[dict]) -> str:
 
     # Verb tense — check first word
     imperative_verbs = {
-        "add", "fix", "update", "remove", "change",
-        "improve", "refactor", "bump", "move", "use",
+        "add",
+        "fix",
+        "update",
+        "remove",
+        "change",
+        "improve",
+        "refactor",
+        "bump",
+        "move",
+        "use",
     }
     past_verbs = {
-        "added", "fixed", "updated", "removed", "changed",
-        "improved", "refactored", "bumped", "moved", "used",
+        "added",
+        "fixed",
+        "updated",
+        "removed",
+        "changed",
+        "improved",
+        "refactored",
+        "bumped",
+        "moved",
+        "used",
     }
     first_words = [re.sub(r"^[^a-zA-Z]+", "", t).split()[0].lower() for t in titles if t.strip()]
     imp = sum(1 for w in first_words if w in imperative_verbs)
@@ -131,7 +147,7 @@ def extract_style_guide(prs_data: list[dict]) -> str:
         return ""
 
     # Example titles for the LLM to mimic
-    example_section = "\n".join(f"  - \"{t}\"" for t in titles[:3])
+    example_section = "\n".join(f'  - "{t}"' for t in titles[:3])
 
     guide = (
         f"OBSERVED REPO STYLE (from {len(prs_data)} recent merged PRs):\n"
@@ -248,7 +264,9 @@ def build_generator_system_prompt(
         max_tokens: Token budget for the repo context section.
     """
     repo_context = build_repo_context_prompt(
-        context, max_tokens=max_tokens, style_guide=style_guide,
+        context,
+        max_tokens=max_tokens,
+        style_guide=style_guide,
     )
 
     # ── Style sections (existing behaviour) ──────────────────────────
@@ -279,8 +297,7 @@ def build_generator_system_prompt(
         truncation_notice = ""
         if len(project_map) > 60000:
             truncation_notice = (
-                "\nNote: The Project Map may be truncated. "
-                "Rely on the provided context first.\n"
+                "\nNote: The Project Map may be truncated. Rely on the provided context first.\n"
             )
 
         map_section = (

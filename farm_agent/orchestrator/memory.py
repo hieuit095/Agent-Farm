@@ -370,8 +370,6 @@ class Memory:
         cols = [d[0] for d in cursor.description]
         return [dict(zip(cols, row, strict=False)) for row in rows]
 
-
-
     # ── CI Fix Attempts ───────────────────────────────────────────────────
 
     async def get_ci_fix_attempts(self, repo: str, pr_number: int) -> int:
@@ -771,26 +769,27 @@ class Memory:
             return None
 
         import time
+
         now_ts = time.time()
 
         if excluded_languages:
             placeholders = ",".join(["?"] * len(excluded_languages))
-            query = f"""UPDATE target_repos 
-               SET scanned_at = ? 
-               WHERE repo_url = (SELECT repo_url FROM target_repos WHERE LOWER(language) NOT IN ({placeholders}) ORDER BY COALESCE(scanned_at, 0) ASC, rowid ASC LIMIT 1) 
+            query = f"""UPDATE target_repos
+               SET scanned_at = ?
+               WHERE repo_url = (SELECT repo_url FROM target_repos WHERE LOWER(language) NOT IN ({placeholders}) ORDER BY COALESCE(scanned_at, 0) ASC, rowid ASC LIMIT 1)
                RETURNING *"""
             params = (now_ts, *[lang.lower() for lang in excluded_languages])
         else:
-            query = """UPDATE target_repos 
-               SET scanned_at = ? 
-               WHERE repo_url = (SELECT repo_url FROM target_repos ORDER BY COALESCE(scanned_at, 0) ASC, rowid ASC LIMIT 1) 
+            query = """UPDATE target_repos
+               SET scanned_at = ?
+               WHERE repo_url = (SELECT repo_url FROM target_repos ORDER BY COALESCE(scanned_at, 0) ASC, rowid ASC LIMIT 1)
                RETURNING *"""
             params = (now_ts,)
 
         cursor = await self._db.execute(query, params)
         row = await cursor.fetchone()
         await self._db.commit()
-        
+
         if row is None:
             return None
 
@@ -1000,4 +999,3 @@ class Memory:
             (task_key, next_run, datetime.now(UTC).isoformat()),
         )
         await self._db.commit()
-
