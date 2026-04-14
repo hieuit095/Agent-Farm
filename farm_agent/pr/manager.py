@@ -15,6 +15,7 @@ from farm_agent.github.client import GitHubClient
 
 logger = logging.getLogger(__name__)
 
+
 def auto_check_pr_template(body: str, contrib_type: ContributionType | None = None) -> str:
     """Auto-check compliance checkboxes strictly based on contribution type.
 
@@ -47,7 +48,9 @@ def auto_check_pr_template(body: str, contrib_type: ContributionType | None = No
         if stripped.startswith(("- [ ]", "* [ ]")):
             if any(term in stripped for term in allowed_terms):
                 # Only check if it safely avoids danger terms
-                if not any(danger in stripped for danger in ["breaking", "release", "deploy", "migration"]):
+                if not any(
+                    danger in stripped for danger in ["breaking", "release", "deploy", "migration"]
+                ):
                     # Replace the first unmet checkbox
                     lines[i] = line.replace("[ ]", "[x]", 1)
     return "\n".join(lines)
@@ -252,9 +255,7 @@ class PRManager:
         finding = contribution.finding
 
         # Files changed summary (compact, no heavy formatting)
-        files_list = ", ".join(
-            c.path.split("/")[-1] for c in contribution.changes
-        )
+        files_list = ", ".join(c.path.split("/")[-1] for c in contribution.changes)
 
         # Build a tired-dev style body: short, direct, no fluff
         body_lines = [

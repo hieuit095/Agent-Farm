@@ -9,13 +9,12 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 import logging
 import re
 import time
 import uuid
 from fnmatch import fnmatch
-
-import json
 from pathlib import Path
 
 from farm_agent.core.config import AnalysisConfig
@@ -248,6 +247,7 @@ class CodeAnalyzer:
         priority_files = self._prioritize_files(analyzable, tree)[:50]
 
         sem = asyncio.Semaphore(50)
+
         async def fetch_file(node: FileNode) -> tuple[str, str | None]:
             async with sem:
                 try:
@@ -530,30 +530,30 @@ class CodeAnalyzer:
             "Return ONLY valid YAML. Do not include commentary before or after it.\n"
             "If no issues found, return exactly 'findings: []'.\n\n"
             f"{profile_ctx}"
-            '═══════════════════════════════════════════════════════════════\n'
+            "═══════════════════════════════════════════════════════════════\n"
             '⛔ ZERO-TOLERANCE "ANTI-FARMING" CONSTRAINT — FOLLOW OR BE IGNORED:\n'
-            'You are a senior engineer. Do NOT act like a spammy AI bot.\n\n'
-            'STRICTLY FORBIDDEN from reporting:\n'
-            '1. ANYTHING related to documentation, README, docstrings, or comments.\n'
-            '2. Typos, grammar, spelling, or formatting issues (PEP8, Prettier, etc.).\n'
-            '3. Naming conventions, import ordering, or whitespace issues.\n'
+            "You are a senior engineer. Do NOT act like a spammy AI bot.\n\n"
+            "STRICTLY FORBIDDEN from reporting:\n"
+            "1. ANYTHING related to documentation, README, docstrings, or comments.\n"
+            "2. Typos, grammar, spelling, or formatting issues (PEP8, Prettier, etc.).\n"
+            "3. Naming conventions, import ordering, or whitespace issues.\n"
             '4. Missing type hints, unused imports, or "missing docstring" warnings.\n'
-            '5. Exploratory or curiosity-driven tasks: '
+            "5. Exploratory or curiosity-driven tasks: "
             '"understand how X works", "read this file", "investigate Y".\n'
-            '6. Adding or removing comments, TODOs, or FIXMEs.\n'
-            '7. Changes that are purely cosmetic, stylistic, or subjective.\n'
+            "6. Adding or removing comments, TODOs, or FIXMEs.\n"
+            "7. Changes that are purely cosmetic, stylistic, or subjective.\n"
             '8. "Test" files, "test" functions, or test-related modifications.\n\n'
-            'ONLY report if it is ONE of the following:\n'
-            '- A REAL logic bug that causes runtime crashes or incorrect behavior.\n'
-            '- A proven security vulnerability with a concrete attack vector.\n'
-            '- A memory leak, race condition, or concurrency bug.\n'
-            '- A mathematically provable performance regression (O(n²) → O(n) '
-            'with measurements).\n'
-            '- A null/dereference that WILL crash if triggered.\n\n'
-            'If the code works fine, OUTPUT NOTHING. '
-            'Do NOT invent fake issues to look busy.\n'
-            'Quality over quantity — return findings: [] if nothing real exists.\n'
-            '═══════════════════════════════════════════════════════════════\n\n'
+            "ONLY report if it is ONE of the following:\n"
+            "- A REAL logic bug that causes runtime crashes or incorrect behavior.\n"
+            "- A proven security vulnerability with a concrete attack vector.\n"
+            "- A memory leak, race condition, or concurrency bug.\n"
+            "- A mathematically provable performance regression (O(n²) → O(n) "
+            "with measurements).\n"
+            "- A null/dereference that WILL crash if triggered.\n\n"
+            "If the code works fine, OUTPUT NOTHING. "
+            "Do NOT invent fake issues to look busy.\n"
+            "Quality over quantity — return findings: [] if nothing real exists.\n"
+            "═══════════════════════════════════════════════════════════════\n\n"
             "ANTI-FALSE-POSITIVE RULES (mandatory checks before reporting):\n"
             "1. ALREADY HANDLED — Is the code already protected by try/except, "
             "guards, or fallback patterns? If yes, do NOT report.\n"
@@ -883,7 +883,6 @@ class CodeAnalyzer:
 
     def _filter_severity(self, findings: list[Finding]) -> list[Finding]:
         """Filter findings by minimum severity threshold."""
-        order = [Severity.LOW, Severity.MEDIUM, Severity.HIGH, Severity.CRITICAL]
         # Define a mapping from Severity enum to an integer order for comparison
         severity_order = {
             Severity.LOW.value: 0,
@@ -893,16 +892,14 @@ class CodeAnalyzer:
         }
         try:
             threshold_enum = Severity(self._config.severity_threshold)
-            threshold = severity_order.get(threshold_enum.value, 1) # Default to MEDIUM's order
+            threshold = severity_order.get(threshold_enum.value, 1)  # Default to MEDIUM's order
         except ValueError:
-            threshold = severity_order.get(Severity.MEDIUM.value, 1) # Default to MEDIUM's order
+            threshold = severity_order.get(Severity.MEDIUM.value, 1)  # Default to MEDIUM's order
         return [f for f in findings if severity_order.get(f.severity.value, 0) >= threshold]
 
     # ── Maintainer Vibe Check ─────────────────────────────────────────────
 
-    async def check_maintainer_vibe(
-        self, repo_full_name: str, comments_context: str
-    ) -> str:
+    async def check_maintainer_vibe(self, repo_full_name: str, comments_context: str) -> str:
         """Classify maintainer persona from recent PR review comments.
 
         Uses the LLM to analyze comment tone and returns one of:
@@ -934,27 +931,25 @@ class CodeAnalyzer:
         )
 
         try:
-            response = await self._llm.complete(
-                prompt, system=system, temperature=0.1
-            )
+            response = await self._llm.complete(prompt, system=system, temperature=0.1)
             classification = response.strip().upper()
             # Extract the classification word from potential surrounding text
             for label in ("HOSTILE", "STRICT", "WELCOMING"):
                 if label in classification:
-                    logger.info(
-                        "Vibe check for %s: %s", repo_full_name, label
-                    )
+                    logger.info("Vibe check for %s: %s", repo_full_name, label)
                     return label
             # Fallback if response is unexpected
             logger.warning(
                 "Vibe check: unexpected LLM response for %s: %s",
-                repo_full_name, classification[:50],
+                repo_full_name,
+                classification[:50],
             )
             return "WELCOMING"
         except Exception as exc:
             logger.warning(
                 "Vibe check LLM call failed for %s: %s, assuming WELCOMING",
-                repo_full_name, exc,
+                repo_full_name,
+                exc,
             )
             return "WELCOMING"
 
@@ -1009,8 +1004,7 @@ class BloodhoundAnalyzer:
 
         if shutil.which("sg") is None:
             logger.error(
-                "ast-grep (sg) binary not found in PATH. "
-                "Bloodhound requires sg. Aborting scan."
+                "ast-grep (sg) binary not found in PATH. Bloodhound requires sg. Aborting scan."
             )
             self._sg_available = False
         else:
@@ -1036,10 +1030,16 @@ class BloodhoundAnalyzer:
             api_key = getattr(self._llm.config, "openrouter_api_key", "")
 
         if not api_key:
-            logger.debug("No OpenRouter API key configured — will use default LLM for Red Team audit")
+            logger.debug(
+                "No OpenRouter API key configured — will use default LLM for Red Team audit"
+            )
             return None
 
-        red_team_model = getattr(self._config, "red_team_model", "cognitivecomputations/dolphin-mistral-24b-venice-edition:free")
+        red_team_model = getattr(
+            self._config,
+            "red_team_model",
+            "cognitivecomputations/dolphin-mistral-24b-venice-edition:free",
+        )
         rt_config = LLMConfig(
             provider="openrouter",
             model=red_team_model,
@@ -1073,7 +1073,9 @@ class BloodhoundAnalyzer:
             return []
 
         rule_files = sorted(rules_dir.glob(f"{prefix}-*.yaml"))
-        logger.info("Language '%s' → prefix '%s' → %d rule files", language, prefix, len(rule_files))
+        logger.info(
+            "Language '%s' → prefix '%s' → %d rule files", language, prefix, len(rule_files)
+        )
         return rule_files
 
     async def _clone_repo_shallow(self, repo: Repository) -> Path | None:
@@ -1110,7 +1112,12 @@ class BloodhoundAnalyzer:
     async def _run_sg_scan(self, rule_file: Path, repo_path: Path) -> list[dict]:
         try:
             proc = await asyncio.create_subprocess_exec(
-                "sg", "scan", "--rule", str(rule_file), "--json=compact", str(repo_path),
+                "sg",
+                "scan",
+                "--rule",
+                str(rule_file),
+                "--json=compact",
+                str(repo_path),
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
@@ -1122,7 +1129,12 @@ class BloodhoundAnalyzer:
             # convention).  Only treat exit code >= 2 as a true failure.
             if proc.returncode not in (0, 1):
                 stderr_text = stderr.decode("utf-8", errors="replace")[:500]
-                logger.debug("sg scan returned %d for rule %s: %s", proc.returncode, rule_file.name, stderr_text)
+                logger.debug(
+                    "sg scan returned %d for rule %s: %s",
+                    proc.returncode,
+                    rule_file.name,
+                    stderr_text,
+                )
                 return []
 
             raw = stdout.decode("utf-8", errors="replace").strip()
@@ -1157,10 +1169,8 @@ class BloodhoundAnalyzer:
 
                     file_path = item.get("file") or item.get("path") or ""
                     if file_path:
-                        try:
+                        with contextlib.suppress(ValueError):
                             file_path = str(Path(file_path).relative_to(repo_path))
-                        except ValueError:
-                            pass
 
                     range_obj = item.get("range") or {}
                     start_obj = range_obj.get("start") if isinstance(range_obj, dict) else {}
@@ -1170,12 +1180,14 @@ class BloodhoundAnalyzer:
 
                     text = item.get("text") or item.get("match") or ""
 
-                    matches.append({
-                        "file": str(file_path),
-                        "line": int(line_num) if line_num else 0,
-                        "match": str(text),
-                        "rule": rule_file.stem,
-                    })
+                    matches.append(
+                        {
+                            "file": str(file_path),
+                            "line": int(line_num) if line_num else 0,
+                            "match": str(text),
+                            "rule": rule_file.stem,
+                        }
+                    )
                 except Exception:
                     continue
 
@@ -1183,7 +1195,7 @@ class BloodhoundAnalyzer:
                 logger.info("Rule %s: %d matches", rule_file.name, len(matches))
             return matches
 
-        except asyncio.TimeoutError:
+        except TimeoutError:
             logger.warning("sg scan timed out for rule %s", rule_file.name)
             return []
         except Exception as exc:
@@ -1253,10 +1265,8 @@ class BloodhoundAnalyzer:
             for result in results:
                 file_path = result.get("path", "")
                 if file_path:
-                    try:
+                    with contextlib.suppress(ValueError):
                         file_path = str(Path(file_path).relative_to(repo_path))
-                    except ValueError:
-                        pass
 
                 line_num = result.get("start", {}).get("line", 0)
                 lines_text = result.get("extra", {}).get("lines", "")
@@ -1264,18 +1274,22 @@ class BloodhoundAnalyzer:
 
                 rule_name = f"semgrep:{check_id}"
 
-                matches.append({
-                    "file": file_path,
-                    "line": line_num,
-                    "match": lines_text,
-                    "rule": rule_name,
-                })
+                matches.append(
+                    {
+                        "file": file_path,
+                        "line": line_num,
+                        "match": lines_text,
+                        "rule": rule_name,
+                    }
+                )
 
             logger.info("Semgrep found %d matches for %s", len(matches), repo_path.name)
             return matches
 
-        except asyncio.TimeoutError:
-            logger.warning("Semgrep scan timed out (%ds) for %s", self.SEMGREP_TIMEOUT, repo_path.name)
+        except TimeoutError:
+            logger.warning(
+                "Semgrep scan timed out (%ds) for %s", self.SEMGREP_TIMEOUT, repo_path.name
+            )
             return []
         except json.JSONDecodeError:
             logger.warning("Semgrep returned invalid JSON for %s", repo_path.name)
@@ -1301,21 +1315,27 @@ class BloodhoundAnalyzer:
                 seen.add(key)
                 unique.append(m)
 
-        logger.info("ast-grep found %d unique matches across %d rules", len(unique), len(rule_files))
+        logger.info(
+            "ast-grep found %d unique matches across %d rules", len(unique), len(rule_files)
+        )
         return unique
 
     async def _white_hat_audit(
         self, repo_url: str, repo_name: str, matches: list[dict]
     ) -> VulnerabilityDossier:
         context_parts = []
-        max_chars = getattr(self._llm.config, "max_snippet_chars", 15000) if hasattr(self, "_llm") and hasattr(self._llm, "config") else 15000
-        
+        max_chars = (
+            getattr(self._llm.config, "max_snippet_chars", 15000)
+            if hasattr(self, "_llm") and hasattr(self._llm, "config")
+            else 15000
+        )
+
         for m in matches:
             severity = m.get("severity", "UNKNOWN").upper()
             if severity in ("INFO", "LOW"):
                 continue
-                
-            snippet = m.get('match', '')
+
+            snippet = m.get("match", "")
             if len(snippet) > max_chars:
                 logger.warning("[FINOPS] Snippet truncated to fit 32k context window.")
                 snippet = snippet[:max_chars]
@@ -1323,15 +1343,17 @@ class BloodhoundAnalyzer:
             context_parts.append(
                 f"File: {m['file']}\nLine: {m['line']}\nRule: {m['rule']}\nSnippet:\n{snippet}\n"
             )
-            
+
         if not context_parts:
             # If everything was filtered out, skip LLM call
-            return VulnerabilityDossier(repo_url=repo_url, target_commit="unknown", vulnerabilities=[])
+            return VulnerabilityDossier(
+                repo_url=repo_url, target_commit="unknown", vulnerabilities=[]
+            )
 
         context_str = "\n---\n".join(context_parts)
 
-        system_prompt = """You are an elite, ruthless Red Team exploit developer and vulnerability researcher. 
-Your singular goal is to discover and weaponize ZERO-DAY vulnerabilities in the provided code snippets. 
+        system_prompt = """You are an elite, ruthless Red Team exploit developer and vulnerability researcher.
+Your singular goal is to discover and weaponize ZERO-DAY vulnerabilities in the provided code snippets.
 DO NOT act as a polite auditor. Think strictly like an attacker.
 
 Your core directives:
@@ -1339,7 +1361,7 @@ Your core directives:
 2. CHAINING: Do not just look at the single line; deduce how this snippet connects to user input or global state to form an exploit chain.
 3. RUTHLESSNESS: If the code relies on "security by obscurity" or weak default configurations, tear it apart.
 
-You will receive an ast-grep match report. 
+You will receive an ast-grep match report.
 - If the code is genuinely secure and cannot be exploited in any scenario, you MUST return [{"file": "NONE"}].
 - If it is exploitable, you must provide the exact attack path.
 
@@ -1373,11 +1395,14 @@ You MUST respond strictly in the following JSON array format. No markdown, no co
                     if usage >= daily_limit:
                         logger.warning(
                             "OpenRouter daily limit reached (%d/%d) — falling back to default LLM",
-                            usage, daily_limit,
+                            usage,
+                            daily_limit,
                         )
                         client = None
                     else:
-                        logger.info("OpenRouter Red Team audit (%d/%d today)", usage + 1, daily_limit)
+                        logger.info(
+                            "OpenRouter Red Team audit (%d/%d today)", usage + 1, daily_limit
+                        )
 
             if client is not None:
                 response = await client.complete(user_prompt, system=system_prompt, temperature=0.1)
@@ -1385,25 +1410,38 @@ You MUST respond strictly in the following JSON array format. No markdown, no co
                     await self._memory.record_openrouter_usage()
             else:
                 logger.info("No OpenRouter provider — using default LLM for White-Hat audit")
-                response = await self._llm.complete(user_prompt, system=system_prompt, temperature=0.1)
+                response = await self._llm.complete(
+                    user_prompt, system=system_prompt, temperature=0.1
+                )
 
-            return self._parse_audit_response(response, repo_url, forbidden_paths=self._forbidden_paths())
+            return self._parse_audit_response(
+                response, repo_url, forbidden_paths=self._forbidden_paths()
+            )
         except Exception as exc:
             # If OpenRouter rate-limits (429, 403, 5xx), fall back to default LLM
             # rather than discarding the matches entirely.
             from farm_agent.core.exceptions import LLMRateLimitError
+
             if isinstance(exc, LLMRateLimitError):
                 logger.warning(
                     "[RED TEAM OFFLINE] OpenRouter rate limit hit. Initiating Fallback to Minimax M2.7."
                 )
                 try:
-                    response = await self._llm.complete(user_prompt, system=system_prompt, temperature=0.1)
-                    return self._parse_audit_response(response, repo_url, forbidden_paths=self._forbidden_paths())
+                    response = await self._llm.complete(
+                        user_prompt, system=system_prompt, temperature=0.1
+                    )
+                    return self._parse_audit_response(
+                        response, repo_url, forbidden_paths=self._forbidden_paths()
+                    )
                 except Exception as fallback_exc:
                     logger.error("White-Hat audit fallback LLM also failed: %s", fallback_exc)
-                    return VulnerabilityDossier(repo_url=repo_url, target_commit="unknown", vulnerabilities=[])
+                    return VulnerabilityDossier(
+                        repo_url=repo_url, target_commit="unknown", vulnerabilities=[]
+                    )
             logger.error("White-Hat audit LLM call failed: %s", exc)
-            return VulnerabilityDossier(repo_url=repo_url, target_commit="unknown", vulnerabilities=[])
+            return VulnerabilityDossier(
+                repo_url=repo_url, target_commit="unknown", vulnerabilities=[]
+            )
 
     def _classify_context(self, file_path: str, forbidden_paths: list[str] | None = None) -> str:
         """Classify a file path as PRODUCTION or LOW_PRIORITY_CONTEXT.
@@ -1424,7 +1462,9 @@ You MUST respond strictly in the following JSON array format. No markdown, no co
 
         return "PRODUCTION"
 
-    def _parse_audit_response(self, response: str, repo_url: str, forbidden_paths: list[str] | None = None) -> VulnerabilityDossier:
+    def _parse_audit_response(
+        self, response: str, repo_url: str, forbidden_paths: list[str] | None = None
+    ) -> VulnerabilityDossier:
         import re as _re
 
         text = response.strip()
@@ -1436,17 +1476,21 @@ You MUST respond strictly in the following JSON array format. No markdown, no co
         bracket_start = text.find("[")
         bracket_end = text.rfind("]")
         if bracket_start != -1 and bracket_end != -1 and bracket_end > bracket_start:
-            text = text[bracket_start:bracket_end + 1]
+            text = text[bracket_start : bracket_end + 1]
 
         try:
             parsed = json.loads(text)
         except json.JSONDecodeError:
             logger.warning("Failed to parse LLM audit response as JSON")
-            return VulnerabilityDossier(repo_url=repo_url, target_commit="unknown", vulnerabilities=[])
+            return VulnerabilityDossier(
+                repo_url=repo_url, target_commit="unknown", vulnerabilities=[]
+            )
 
         if not isinstance(parsed, list):
             logger.warning("LLM audit response is not a JSON array")
-            return VulnerabilityDossier(repo_url=repo_url, target_commit="unknown", vulnerabilities=[])
+            return VulnerabilityDossier(
+                repo_url=repo_url, target_commit="unknown", vulnerabilities=[]
+            )
 
         vulns = []
         for item in parsed:
@@ -1455,19 +1499,23 @@ You MUST respond strictly in the following JSON array format. No markdown, no co
             try:
                 file_path = str(item.get("file", ""))
                 context_type = self._classify_context(file_path, forbidden_paths)
-                vulns.append(Vulnerability(
-                    file=file_path,
-                    line=int(item.get("line", 0)),
-                    snippet=str(item.get("snippet", "")),
-                    poc=str(item.get("poc", "")),
-                    fix=str(item.get("fix", "")),
-                    impact=str(item.get("impact", "")),
-                    context_type=context_type,
-                ))
+                vulns.append(
+                    Vulnerability(
+                        file=file_path,
+                        line=int(item.get("line", 0)),
+                        snippet=str(item.get("snippet", "")),
+                        poc=str(item.get("poc", "")),
+                        fix=str(item.get("fix", "")),
+                        impact=str(item.get("impact", "")),
+                        context_type=context_type,
+                    )
+                )
             except (ValueError, TypeError):
                 continue
 
-        return VulnerabilityDossier(repo_url=repo_url, target_commit="unknown", vulnerabilities=vulns)
+        return VulnerabilityDossier(
+            repo_url=repo_url, target_commit="unknown", vulnerabilities=vulns
+        )
 
     async def run_bloodhound(self, repo: Repository) -> VulnerabilityDossier:
         """Execute the full Bloodhound pipeline for a repository.
@@ -1518,7 +1566,9 @@ You MUST respond strictly in the following JSON array format. No markdown, no co
             if not tasks:
                 logger.warning(
                     "No radar tools available (ast-grep=%s, semgrep=%s) for %s — skipping bloodhound",
-                    sg_available, use_semgrep, repo.full_name,
+                    sg_available,
+                    use_semgrep,
+                    repo.full_name,
                 )
                 return empty_dossier
 
@@ -1549,13 +1599,16 @@ You MUST respond strictly in the following JSON array format. No markdown, no co
                 return empty_dossier
 
             dossier = await self._white_hat_audit(
-                repo_url=repo.url, repo_name=repo.full_name, matches=unique_matches,
+                repo_url=repo.url,
+                repo_name=repo.full_name,
+                matches=unique_matches,
             )
 
             if dossier.has_bugs():
                 logger.info(
                     "Bloodhound: %d validated vulnerabilities in %s",
-                    len(dossier.vulnerabilities), repo.full_name,
+                    len(dossier.vulnerabilities),
+                    repo.full_name,
                 )
             else:
                 logger.info("Bloodhound: all matches were false positives for %s", repo.full_name)

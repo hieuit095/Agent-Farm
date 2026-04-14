@@ -30,7 +30,6 @@ from farm_agent.core.models import (
     RepoContext,
     Repository,
     Severity,
-    VulnerabilityDossier,
 )
 from farm_agent.generator.engine import ContributionGenerator
 from farm_agent.generator.scorer import QAHardcoreScorer
@@ -510,7 +509,7 @@ class ContribPipeline:
                 # Filter to valid targets (skip already-analyzed repos)
                 # ── Prepend friendly repos that are off cooldown ──
                 targets: list[Repository] = []
-                for repo in friendly_repos:
+                for repo in []:  # friendly_repos removed
                     if await self._memory.has_analyzed(repo.full_name):
                         logger.debug(
                             "🏠 Skipping %s (on cooldown or already analyzed)", repo.full_name
@@ -792,12 +791,14 @@ class ContribPipeline:
             # ── Build RepoContext with vulnerable file contents ───────────
             # Use GraphQL for repo tree (falls back to REST on any error)
             try:
-                file_tree = await self._github.fetch_repo_structure_graphql(
-                    repo.owner, repo.name
-                )
+                file_tree = await self._github.fetch_repo_structure_graphql(repo.owner, repo.name)
             except Exception as exc:
-                logger.info("GraphQL tree fetch failed for %s/%s, falling back to REST: %s",
-                             repo.owner, repo.name, exc)
+                logger.info(
+                    "GraphQL tree fetch failed for %s/%s, falling back to REST: %s",
+                    repo.owner,
+                    repo.name,
+                    exc,
+                )
                 file_tree = await self._github.get_file_tree(repo.owner, repo.name)
             relevant_files: dict[str, str] = {}
             for vuln in dossier.vulnerabilities:
@@ -828,13 +829,17 @@ class ContribPipeline:
             for cycle in range(MAX_DEV_QA_CYCLES):
                 logger.info(
                     "Starting DEV-QA Cycle %d/%d for %s",
-                    cycle + 1, MAX_DEV_QA_CYCLES, target.repo_url,
+                    cycle + 1,
+                    MAX_DEV_QA_CYCLES,
+                    target.repo_url,
                 )
 
                 # 1. DEV generates patches (auto-injects QA Lessons + failure context)
                 try:
                     contributions = await self._generator.generate_from_dossier(
-                        dossier, context, github_client=self._github,
+                        dossier,
+                        context,
+                        github_client=self._github,
                         failure_context=failure_context,
                     )
                 except RuntimeError as e:
@@ -853,11 +858,13 @@ class ContribPipeline:
 
                 # 2. QA evaluates the first (best) contribution
                 qa_result: QAResult = await scorer.evaluate(
-                    dossier, contributions[0],
+                    dossier,
+                    contributions[0],
                 )
                 logger.info(
                     "QA Score: %.1f/10.0 — Approved: %s",
-                    qa_result.score, qa_result.approved,
+                    qa_result.score,
+                    qa_result.approved,
                 )
 
                 if qa_result.approved:
@@ -866,16 +873,15 @@ class ContribPipeline:
                     winning_contribution = contributions[0]
                     logger.info(
                         "QA PASSED on cycle %d with score %.1f",
-                        cycle + 1, qa_result.score,
+                        cycle + 1,
+                        qa_result.score,
                     )
                     break
                 else:
                     # 3. QA rejected — record critiques as lessons and inject into failure context
                     critique_text = "; ".join(qa_result.critiques)
                     for critique in qa_result.critiques:
-                        await self._memory.record_qa_lesson(
-                            repo.full_name, critique
-                        )
+                        await self._memory.record_qa_lesson(repo.full_name, critique)
                     failure_context += (
                         f"\n[CYCLE {cycle + 1} QA REJECTED — Score: {qa_result.score:.1f}/10.0]"
                         f"\nQA Critiques: {critique_text}"
@@ -916,7 +922,8 @@ class ContribPipeline:
                 logger.warning(
                     "Bailout: Complexity exceeded after %d DEV-QA cycles for %s. "
                     "Cutting losses to save tokens.",
-                    MAX_DEV_QA_CYCLES, target.repo_url,
+                    MAX_DEV_QA_CYCLES,
+                    target.repo_url,
                 )
                 await discovery.mark_status(target.repo_url, "COMPLETED_TOO_COMPLEX")
 
@@ -1976,11 +1983,9 @@ class ContribPipeline:
                     continue
             # ----------------------------------------------------------
 
-# Create PR immediately (no artificial delay)
+            # Create PR immediately (no artificial delay)
             try:
-                logger.info(
-                    "Creating PR for issue #%d in %s...", issue.number, repo.full_name
-                )
+                logger.info("Creating PR for issue #%d in %s...", issue.number, repo.full_name)
                 async with self._human_typing_lock:
                     if not dry_run:
                         curr_prs = await self._memory.get_today_pr_count()
@@ -1993,9 +1998,7 @@ class ContribPipeline:
                             )
                             return result
 
-                    logger.info(
-                        "Creating PR for issue #%d in %s...", issue.number, repo.full_name
-                    )
+                    logger.info("Creating PR for issue #%d in %s...", issue.number, repo.full_name)
                 typing_time = int(patch_length / 3.75)
                 total_coding_delay = min(base_coding_time + typing_time, 3600)
 

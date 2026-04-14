@@ -43,6 +43,7 @@ _FORBIDDEN_PATTERNS = re.compile(
 
 class TemplateViolationError(Exception):
     """Raised when the LLM generates forbidden placeholders or lazy code."""
+
     pass
 
 
@@ -97,6 +98,7 @@ def _sanitize_text(text: str, field_name: str) -> str:
         )
     return text
 
+
 from farm_agent.analysis.mapper import RepoMapper
 from farm_agent.core.config import ContributionConfig
 from farm_agent.core.exceptions import ContextMissingError, GenerationError
@@ -126,12 +128,16 @@ MAX_TOOL_CALLS = 3
 class ContributionGenerator:
     """Generate code contributions from analysis findings."""
 
-    def __init__(self, llm: LLMProvider, config: ContributionConfig, *, memory=None, pipeline_config=None):
+    def __init__(
+        self, llm: LLMProvider, config: ContributionConfig, *, memory=None, pipeline_config=None
+    ):
         self._llm = llm
         self._config = config
         self._memory = memory  # Optional Memory for repo_preferences
         # Configurable patch retry limit (from PipelineConfig or default)
-        self._max_patch_retries = getattr(pipeline_config, "max_patch_retries", 2) if pipeline_config else 2
+        self._max_patch_retries = (
+            getattr(pipeline_config, "max_patch_retries", 2) if pipeline_config else 2
+        )
         # Adversarial Reviewer — completely independent entity with its own LLM
         self._reviewer = ReviewerAgent(llm, max_review_tokens=800)
 
@@ -153,6 +159,7 @@ class ContributionGenerator:
         5. Self-review the generated code
         """
         import asyncio
+
         try:
             # 0: Fetch repo style from merged PRs (optional)
             async def _fetch_style() -> str:
@@ -160,9 +167,11 @@ class ContributionGenerator:
                     return ""
                 try:
                     prs_data = await github_client.get_recent_merged_prs(
-                        context.repo.owner, context.repo.name,
+                        context.repo.owner,
+                        context.repo.name,
                     )
                     from farm_agent.llm.context import extract_style_guide
+
                     return extract_style_guide(prs_data)
                 except Exception as exc:
                     logger.debug("Style mimicry skipped: %s", exc)
@@ -174,12 +183,16 @@ class ContributionGenerator:
                     return ""
                 try:
                     mapper = RepoMapper()
+
                     async def _fetch(path: str) -> str:
                         content = await github_client.get_file_content(
-                            context.repo.owner, context.repo.name, path,
+                            context.repo.owner,
+                            context.repo.name,
+                            path,
                         )
                         context.relevant_files[path] = content
                         return content
+
                     return await mapper.generate_map(context.file_tree, _fetch)
                 except Exception as exc:
                     logger.debug("Project map generation skipped: %s", exc)
@@ -288,7 +301,9 @@ class ContributionGenerator:
             # 1 & 2: Generate the fix via agentic loop
             prompt = self._build_generation_prompt(finding, context, repo_prefs=repo_prefs)
             system = self._build_system_prompt(
-                context, style_guide=style_guide, project_map=project_map,
+                context,
+                style_guide=style_guide,
+                project_map=project_map,
             )
 
             response = await self._agentic_generate(
@@ -309,7 +324,9 @@ class ContributionGenerator:
                 patch_attempt += 1
                 logger.warning(
                     "Patch attempt %d/%d failed for %s — re-prompting LLM",
-                    patch_attempt, MAX_PATCH_RETRIES, finding.title,
+                    patch_attempt,
+                    MAX_PATCH_RETRIES,
+                    finding.title,
                 )
                 # Build a correction prompt with the actual file content
                 file_content = context.relevant_files.get(finding.file_path, "")
@@ -322,8 +339,7 @@ class ContributionGenerator:
                     "Please review and provide the EXACT, VERBATIM block of code "
                     "you want to replace. Copy it character-for-character from the "
                     "file above. Do not use `...` to skip lines. Do not modify "
-                    "indentation or whitespace.\n\n"
-                    + prompt  # Re-include the original task prompt
+                    "indentation or whitespace.\n\n" + prompt  # Re-include the original task prompt
                 )
                 response = await self._agentic_generate(
                     retry_prompt,
@@ -418,7 +434,8 @@ class ContributionGenerator:
 
                 # Build rewrite prompt: append critique to original generation prompt
                 rewrite_prompt = self._build_generation_prompt(
-                    finding, context,
+                    finding,
+                    context,
                     repo_prefs=repo_prefs,
                     adversarial_critique=critique,
                 )
@@ -430,11 +447,15 @@ class ContributionGenerator:
                 )
                 latest_changes = self._parse_changes(response, context)
                 if not latest_changes:
-                    logger.warning("Rewrite attempt produced no valid changes for: %s", finding.title)
+                    logger.warning(
+                        "Rewrite attempt produced no valid changes for: %s", finding.title
+                    )
                     return None
 
                 # Regenerate commit message and branch name for the rewritten patch
-                new_commit_msg = await self._generate_commit_message(finding, latest_changes, context)
+                new_commit_msg = await self._generate_commit_message(
+                    finding, latest_changes, context
+                )
                 new_branch_name = self._generate_branch_name(finding)
 
                 latest_contribution = Contribution(
@@ -571,7 +592,9 @@ class ContributionGenerator:
             logger.warning("Context miss for '%s' — attempting direct fetch.", vuln.file)
             try:
                 direct_content = await github_client.get_file_content(
-                    context.repo.owner, context.repo.name, vuln.file,
+                    context.repo.owner,
+                    context.repo.name,
+                    vuln.file,
                 )
                 if direct_content:
                     context.relevant_files[vuln.file] = direct_content
@@ -583,7 +606,8 @@ class ContributionGenerator:
         if not target_file_content:
             logger.error(
                 "No file content for '%s' — cannot generate patch for vuln at line %d",
-                vuln.file, vuln.line,
+                vuln.file,
+                vuln.line,
             )
             return None
 
@@ -649,7 +673,9 @@ class ContributionGenerator:
                     violations = _FORBIDDEN_PATTERNS.findall(response)[:5]
                     logger.warning(
                         "Lazy code detected (Cycle %d/%d). Violations: %s. Retrying...",
-                        cycle + 1, MAX_CYCLES, violations,
+                        cycle + 1,
+                        MAX_CYCLES,
+                        violations,
                     )
                     retry_warning = (
                         "\n\nSYSTEM WARNING: Your previous attempt was REJECTED because "
@@ -666,7 +692,9 @@ class ContributionGenerator:
                 if not changes:
                     logger.warning(
                         "No valid changes parsed for vuln at %s:%d (cycle %d)",
-                        vuln.file, vuln.line, cycle + 1,
+                        vuln.file,
+                        vuln.line,
+                        cycle + 1,
                     )
                     retry_warning = (
                         "\n\nSYSTEM WARNING: Your previous attempt produced no valid "
@@ -686,9 +714,7 @@ class ContributionGenerator:
                             )
 
                 # ── Build and return the Contribution ──────────────────
-                commit_msg = (
-                    f"fix(security): address {vuln.impact.lower()} in {vuln.file}"
-                )
+                commit_msg = f"fix(security): address {vuln.impact.lower()} in {vuln.file}"
                 branch_name = (
                     f"fix/security-{vuln.file.replace('/', '-').replace('.', '-')}-{vuln.line}"
                 )
@@ -731,7 +757,9 @@ class ContributionGenerator:
         # ── Hard Abort ──────────────────────────────────────────────────
         logger.error(
             "Failed to generate strict code after %d attempts for %s:%d. Aborting.",
-            MAX_CYCLES, vuln.file, vuln.line,
+            MAX_CYCLES,
+            vuln.file,
+            vuln.line,
         )
         raise RuntimeError(
             f"Failed to generate strict code after {MAX_CYCLES} attempts. "
@@ -816,11 +844,13 @@ class ContributionGenerator:
 
         # Parse the corrected changes
         import json as _json
+
         try:
             parsed = _json.loads(text)
         except _json.JSONDecodeError:
             # Try to extract JSON from markdown fences
             import re as _re
+
             stripped = _re.sub(r"```(?:json)?\s*", "", text, flags=_re.IGNORECASE)
             stripped = _re.sub(r"```\s*$", "", stripped)
             try:
@@ -843,6 +873,7 @@ class ContributionGenerator:
 
         # Parse changes inline (same logic as _parse_changes but self-contained)
         from farm_agent.core.models import FileChange
+
         corrected_changes: list[FileChange] = []
         for item in parsed.get("changes", []):
             path = str(item.get("path", "")).strip().strip("`\"'")
@@ -913,7 +944,9 @@ class ContributionGenerator:
         """
         if github_client is None:
             return await self._llm.complete(
-                prompt, system=system, temperature=0.2,
+                prompt,
+                system=system,
+                temperature=0.2,
             )
 
         # Build tool executor
@@ -945,14 +978,17 @@ class ContributionGenerator:
             for tc in response.tool_calls:
                 if tc.tool_name != "read_file":
                     logger.warning(
-                        "Ignoring unknown tool call: %s", tc.tool_name,
+                        "Ignoring unknown tool call: %s",
+                        tc.tool_name,
                     )
                     continue
 
                 filepath = tc.arguments.get("filepath", "")
                 logger.info(
                     "🔧 Tool call: read_file('%s') [%d/%d]",
-                    filepath, tool_calls_made + 1, MAX_TOOL_CALLS,
+                    filepath,
+                    tool_calls_made + 1,
+                    MAX_TOOL_CALLS,
                 )
 
                 result = await tool.read_file(filepath)
@@ -961,26 +997,32 @@ class ContributionGenerator:
                     context.relevant_files[filepath] = str(result.data)
 
                 # Append assistant's tool-call decision
-                messages.append({
-                    "role": "assistant",
-                    "content": None,
-                    "tool_calls": [{
-                        "id": f"call_{tool_calls_made}",
-                        "type": "function",
-                        "function": {
-                            "name": "read_file",
-                            "arguments": json.dumps(tc.arguments),
-                        },
-                    }],
-                })
+                messages.append(
+                    {
+                        "role": "assistant",
+                        "content": None,
+                        "tool_calls": [
+                            {
+                                "id": f"call_{tool_calls_made}",
+                                "type": "function",
+                                "function": {
+                                    "name": "read_file",
+                                    "arguments": json.dumps(tc.arguments),
+                                },
+                            }
+                        ],
+                    }
+                )
 
                 # Append tool result
                 content = result.data if result.success else result.error
-                messages.append({
-                    "role": "tool",
-                    "tool_call_id": f"call_{tool_calls_made}",
-                    "content": str(content),
-                })
+                messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": f"call_{tool_calls_made}",
+                        "content": str(content),
+                    }
+                )
 
             # If we've hit the tool call limit, stop offering tools
             if tool_calls_made >= MAX_TOOL_CALLS:
@@ -991,11 +1033,17 @@ class ContributionGenerator:
 
         # Shouldn't reach here, but safety fallback
         return await self._llm.complete(
-            prompt, system=system, temperature=0.2,
+            prompt,
+            system=system,
+            temperature=0.2,
         )
 
     def _build_generation_prompt(
-        self, finding: Finding, context: RepoContext, *, repo_prefs: dict | None = None,
+        self,
+        finding: Finding,
+        context: RepoContext,
+        *,
+        repo_prefs: dict | None = None,
         adversarial_critique: str | None = None,
     ) -> str:
         """Build the generation prompt based on finding type."""
@@ -1349,22 +1397,30 @@ class ContributionGenerator:
                 # ── Discipline Protocol: Block scratchpad/note files ────────────
                 if is_new:
                     _SCRATCHPAD_PATTERNS = (
-                        "note", "explore", "exploration", "scratchpad",
-                        "temp_", "tmp_", "draft", "wip_", "thought",
+                        "note",
+                        "explore",
+                        "exploration",
+                        "scratchpad",
+                        "temp_",
+                        "tmp_",
+                        "draft",
+                        "wip_",
+                        "thought",
                     )
                     path_lower = path.lower()
                     is_scratchpad = any(p in path_lower for p in _SCRATCHPAD_PATTERNS)
                     # Block .md/.txt placed in src/ or source/ directories
-                    is_md_in_src = (
-                        path_lower.startswith(("src/", "source/", "app/", "lib/"))
-                        and path_lower.endswith((".md", ".txt"))
-                    )
+                    is_md_in_src = path_lower.startswith(
+                        ("src/", "source/", "app/", "lib/")
+                    ) and path_lower.endswith((".md", ".txt"))
                     if is_scratchpad or is_md_in_src:
                         logger.warning(
                             "🗑️ Discipline Protocol: rejecting new file '%s' "
                             "(scratchpad=%s, md_in_src=%s) — "
                             "non-code or note file in source dir is forbidden.",
-                            path, is_scratchpad, is_md_in_src,
+                            path,
+                            is_scratchpad,
+                            is_md_in_src,
                         )
                         raise GenerationError(
                             f"Generator produced a forbidden scratchpad/note file: {path}"
@@ -1452,7 +1508,9 @@ class ContributionGenerator:
                                         for j, rline in enumerate(replace_lines):
                                             if j < len(candidate):
                                                 # Borrow indent from the corresponding original line
-                                                orig_indent = candidate[j][: len(candidate[j]) - len(candidate[j].lstrip())]
+                                                orig_indent = candidate[j][
+                                                    : len(candidate[j]) - len(candidate[j].lstrip())
+                                                ]
                                             elif candidate:
                                                 # Extra lines: use indent of the last matched line
                                                 last = candidate[-1]
@@ -1467,7 +1525,9 @@ class ContributionGenerator:
                                         matched = True
                                         logger.debug(
                                             "Indent-agnostic match for %s (lines %d-%d)",
-                                            path, start_idx + 1, start_idx + window,
+                                            path,
+                                            start_idx + 1,
+                                            start_idx + window,
                                         )
                                         break
 
@@ -1478,7 +1538,11 @@ class ContributionGenerator:
                             search_line_count = len(search.split("\n"))
                             replace_line_count = len(replace.split("\n"))
                             MAX_REPLACE_TO_SEARCH_RATIO = 2
-                            if search_line_count > 0 and (replace_line_count / search_line_count) > MAX_REPLACE_TO_SEARCH_RATIO:
+                            if (
+                                search_line_count > 0
+                                and (replace_line_count / search_line_count)
+                                > MAX_REPLACE_TO_SEARCH_RATIO
+                            ):
                                 logger.warning(
                                     "Diff Minimizer blocked: replace/search ratio %.1f exceeds limit %d in %s",
                                     replace_line_count / search_line_count,
@@ -1503,7 +1567,6 @@ class ContributionGenerator:
                                 len(search),
                                 search.replace("\n", "\\n"),
                             )
-
 
                     logger.info(
                         "Edits for %s: %d/%d applied",
@@ -1555,7 +1618,8 @@ class ContributionGenerator:
                     logger.warning(
                         "🗑️ Gag Order triggered — AI disclosure detected in %s. "
                         "Aborting contribution for file %s.",
-                        attr, change.path,
+                        attr,
+                        change.path,
                     )
                     raise GenerationError(
                         f"L LM output contains forbidden AI disclosure: {change.path}"

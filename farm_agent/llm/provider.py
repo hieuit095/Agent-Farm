@@ -166,14 +166,18 @@ class LLMProvider(ABC):
 
         # Pattern 1: fenced tool_call block
         for match in re.finditer(
-            r"```tool_call\s*\n(.*?)\n\s*```", text, re.DOTALL,
+            r"```tool_call\s*\n(.*?)\n\s*```",
+            text,
+            re.DOTALL,
         ):
             try:
                 data = json.loads(match.group(1).strip())
-                calls.append(ToolCallRequest(
-                    tool_name=data.get("name", ""),
-                    arguments=data.get("arguments", {}),
-                ))
+                calls.append(
+                    ToolCallRequest(
+                        tool_name=data.get("name", ""),
+                        arguments=data.get("arguments", {}),
+                    )
+                )
             except (json.JSONDecodeError, AttributeError):
                 pass
 
@@ -185,11 +189,13 @@ class LLMProvider(ABC):
             end = text.rfind("}")
             if start != -1 and end != -1 and end > start:
                 try:
-                    data = json.loads(text[start:end+1])
-                    calls.append(ToolCallRequest(
-                        tool_name=data.get("name", ""),
-                        arguments=data.get("arguments", {}),
-                    ))
+                    data = json.loads(text[start : end + 1])
+                    calls.append(
+                        ToolCallRequest(
+                            tool_name=data.get("name", ""),
+                            arguments=data.get("arguments", {}),
+                        )
+                    )
                 except (json.JSONDecodeError, AttributeError):
                     pass
 
@@ -288,6 +294,7 @@ class MinimaxProvider(LLMProvider):
         for attempt in range(3):
             try:
                 import asyncio as _asyncio
+
                 # ── PROACTIVE THROTTLING: wait for semaphore slot + pace ─────────
                 async with self._semaphore:
                     await _asyncio.sleep(2.0)  # human-like think gap between LLM calls
@@ -299,9 +306,12 @@ class MinimaxProvider(LLMProvider):
                 choices = data.get("choices", [])
                 if not choices:
                     # Treat empty choices as retriable (upstream rate limit or overload)
-                    last_error = LLMError(f"Minimax returned empty choices (attempt {attempt+1}/3)")
+                    last_error = LLMError(
+                        f"Minimax returned empty choices (attempt {attempt + 1}/3)"
+                    )
                     if attempt < 2:
                         import asyncio as _asyncio
+
                         await _asyncio.sleep(10 * (attempt + 1))
                         continue
                     raise last_error
@@ -309,9 +319,10 @@ class MinimaxProvider(LLMProvider):
                 return _strip_reasoning_artifacts(content)
 
             except httpx.TimeoutException as e:
-                last_error = LLMError(f"Minimax timeout (attempt {attempt+1}/3): {e}")
+                last_error = LLMError(f"Minimax timeout (attempt {attempt + 1}/3): {e}")
                 if attempt < 2:
                     import asyncio as _asyncio
+
                     await _asyncio.sleep(10 * (attempt + 1))  # 10s, 20s backoff
                     continue
                 raise last_error from e
@@ -404,9 +415,12 @@ class OpenRouterProvider(LLMProvider):
 
                 choices = data.get("choices", [])
                 if not choices:
-                    last_error = LLMError(f"OpenRouter returned empty choices (attempt {attempt + 1}/3)")
+                    last_error = LLMError(
+                        f"OpenRouter returned empty choices (attempt {attempt + 1}/3)"
+                    )
                     if attempt < 2:
                         import asyncio as _asyncio
+
                         await _asyncio.sleep(5 * (attempt + 1))
                         continue
                     raise last_error
@@ -418,6 +432,7 @@ class OpenRouterProvider(LLMProvider):
                 last_error = LLMError(f"OpenRouter timeout (attempt {attempt + 1}/3): {e}")
                 if attempt < 2:
                     import asyncio as _asyncio
+
                     await _asyncio.sleep(5 * (attempt + 1))
                     continue
                 raise last_error from e
