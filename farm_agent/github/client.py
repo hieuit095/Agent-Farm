@@ -1105,26 +1105,206 @@ class GitHubClient:
             else:
                 raise
 
-    async def close_pull_request(
+    # ── Git Data API ────────────────────────────────────────────────────────
+
+    async def get_branch_tip(self, owner: str, repo: str, branch: str) -> tuple[str, str]:
+        """Get the commit SHA and tree SHA of the tip of a branch.
+
+        Returns (commit_sha, tree_sha) tuple needed to create new commits.
+
+        Args:
+            owner: Repository owner
+            repo: Repository name
+            branch: Branch name (e.g. 'main')
+
+        Returns:
+            Tuple of (commit_sha, tree_sha)
+        """
+        data = await self._get(f"/repos/{owner}/{repo}/git/refs/heads/{branch}")
+        commit_sha = data["object"]["sha"]
+
+        # Get the tree SHA from the commit
+        commit_data = await self._get(f"/repos/{owner}/{repo}/git/commits/{commit_sha}")
+        tree_sha = commit_data["tree"]["sha"]
+
+        return commit_sha, tree_sha
+
+    async def wait_for_fork_accessibility(
+        self, owner: str, repo: str, *, max_wait: int = 30, poll_interval: float = 2.0
+    ) -> bool:
+        """Poll until the fork is accessible via API (handles GitHub async fork processing).
+
+        GitHub forks take a few seconds to process. Without this, subsequent API calls
+        to the fork will return 404.
+
+        Args:
+            owner: Fork owner (authenticated user)
+            repo: Fork repo name
+            max_wait: Maximum seconds to wait
+            poll_interval: Seconds between polls
+
+        Returns:
+            True if fork became accessible, False if max_wait exceeded
+        """
+        import time
+
+        deadline = time.time() + max_wait
+        while time.time() < deadline:
+            try:
+                await self._get(f"/repos/{owner}/{repo}")
+                logger.info("Fork %s/%s is accessible", owner, repo)
+                return True
+            except GitHubAPIError as exc:
+                if getattr(exc, "status_code", None) == 404:
+                    logger.debug(
+                        "Fork %s/%s not yet accessible, polling... (%.1fs remaining)",
+                        owner, repo, deadline - time.time(),
+                    )
+                    await asyncio.sleep(poll_interval)
+                    continue
+                raise
+            except Exception:
+                await asyncio.sleep(poll_interval)
+                continue
+
+        logger.warning(
+            "Fork %s/%s did not become accessible within %ds — proceeding anyway",
+            owner, repo, max_wait,
+        )
+        return False
+
+    async def create_git_blob(
+        self, owner: str, repo: str, content: str, encoding: str = "utf-8"
+    ) -> str:
+        """Create a git blob from file content.
+
+        Args:
+            owner: Repository owner
+            repo: Repository name
+            content: File content as string
+            encoding: Content encoding ('utf-8' or 'base64')
+
+        Returns:
+            The blob SHA
+        """
+        import base64
+
+        if encoding == "base64":
+            encoded = content
+        else:
+            encoded = base64.b64encode(content.encode("utf-8")).decode("utf-8")
+
+        payload = {
+            "content": encoded,
+            "encoding": "base64" if encoding != "base64" else "base64",
+        }
+
+        data = await self._post(f"/repos/{owner}/{repo}/git/blobs", json=payload)
+        blob_sha = data.get("sha", "")
+        logger.debug("Created blob %s in %s/%s", blob_sha[:8], owner, repo)
+        return blob_sha
+
+    async def create_git_tree(
         self,
         owner: str,
         repo: str,
-        pr_number: int,
-        *,
-        comment: str | None = None,
-    ) -> None:
-        """Close a PR with an optional comment explaining why."""
-        if comment:
-            await self._post(
-                f"/repos/{owner}/{repo}/issues/{pr_number}/comments",
-                json={"body": comment},
-            )
-        await self._request(
-            "PATCH",
-            f"/repos/{owner}/{repo}/pulls/{pr_number}",
-            json={"state": "closed"},
+        base_tree_sha: str,
+        tree_entries: list[dict],
+    ) -> str:
+        """Create a git tree from file entries.
+
+        Args:
+            owner: Repository owner
+            repo: Repository name
+            base_tree_sha: SHA of base tree (for recursive traversal)
+            tree_entries: List of dicts with keys: path, mode, type, sha
+                          (sha=null for deletions)
+
+        Returns:
+            The new tree SHA
+        """
+        payload = {
+            "base_tree": base_tree_sha,
+            "tree": tree_entries,
+        }
+
+        data = await self._post(f"/repos/{owner}/{repo}/git/trees", json=payload)
+        tree_sha = data.get("sha", "")
+        logger.debug("Created tree %s in %s/%s", tree_sha[:8], owner, repo)
+        return tree_sha
+
+    async def create_git_commit(
+        self,
+        owner: str,
+        repo: str,
+        message: str,
+        tree_sha: str,
+        parent_shas: list[str],
+        author_name: str,
+        author_email: str,
+        author_date: str | None = None,
+        signoff: str | None = None,
+    ) -> str:
+        """Create a git commit pointing to a tree.
+
+        Args:
+            owner: Repository owner
+            repo: Repository name
+            message: Commit message
+            tree_sha: SHA of the tree this commit points to
+            parent_shas: List of parent commit SHAs
+            author_name: Author display name
+            author_email: Author email address
+            author_date: Optional ISO8601 author date (for backdating)
+            signoff: If provided, appends 'Signed-off-by: signoff' to message
+
+        Returns:
+            The new commit SHA
+        """
+        # Append DCO signoff if not already in message
+        if signoff and "Signed-off-by:" not in message:
+            message = f"{message}\n\nSigned-off-by: {signoff}"
+
+        payload: dict[str, Any] = {
+            "message": message,
+            "tree": tree_sha,
+            "parents": parent_shas,
+        }
+
+        author_info: dict[str, str] = {"name": author_name, "email": author_email}
+        if author_date:
+            author_info["date"] = author_date
+        payload["author"] = author_info
+
+        data = await self._post(f"/repos/{owner}/{repo}/git/commits", json=payload)
+        commit_sha = data.get("sha", "")
+        logger.debug("Created commit %s in %s/%s", commit_sha[:8], owner, repo)
+        return commit_sha
+
+    async def update_git_ref(
+        self, owner: str, repo: str, branch: str, commit_sha: str
+    ) -> dict:
+        """Update a Git ref to point to a new commit.
+
+        Args:
+            owner: Repository owner
+            repo: Repository name
+            branch: Branch name (e.g. 'main' or 'feat/my-branch')
+            commit_sha: SHA of the commit to point to
+
+        Returns:
+            API response dict
+        """
+        payload = {"sha": commit_sha, "force": False}
+        data = await self._patch(
+            f"/repos/{owner}/{repo}/git/refs/heads/{branch}",
+            json=payload,
         )
-        logger.info("Closed PR #%d on %s/%s", pr_number, owner, repo)
+        logger.info("Updated ref for %s/%s branch '%s' to %s", owner, repo, branch, commit_sha[:8])
+        return data
+
+    async def _patch(self, url: str, **kwargs) -> Any:
+        return await self._request("PATCH", url, use_primary_only=True, **kwargs)
 
     # ── Reactions ──────────────────────────────────────────────────────────
 

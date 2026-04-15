@@ -156,108 +156,91 @@ class PRManager:
         signoff = self._build_signoff(user)
 
         try:
-            # 1. Fork
+            # 1. Fork (with polling to wait for GitHub's async fork processing)
             fork = await self._fork_if_needed(username, target_repo)
             fork_owner = fork.owner
             fork_name = fork.name
 
-            # 2. Create branch — use natural naming (no tool branding)
+            # Wait for fork to become accessible via API before proceeding
+            # GitHub forks take a few seconds to process; 404 without this
+            await self._github.wait_for_fork_accessibility(fork_owner, fork_name)
+
+            # 2. Create branch on the fork
             branch = contribution.branch_name or self._human_branch_name(contribution)
             await self._github.create_branch(fork_owner, fork_name, branch)
 
-            # 3. Local Git staging, committing, and pushing
+            # 3. Gather all file changes (patches + tests)
             all_changes = contribution.changes + contribution.tests_added
             if not all_changes:
                 logger.warning("WARNING: No actual code changes detected. Aborting PR.")
                 raise PRCreationError("Aborted PR creation: no changes to commit.")
 
-            import tempfile
-            import asyncio
-            from pathlib import Path
+            # 4. Use Git Data API to create commit without cloning locally
+            # 4a. Get base branch tip (commit SHA + tree SHA) from the fork
+            base_branch = target_repo.default_branch
+            base_commit_sha, base_tree_sha = await self._github.get_branch_tip(
+                fork_owner, fork_name, base_branch
+            )
 
-            with tempfile.TemporaryDirectory() as tmpdir:
-                tmp_path = Path(tmpdir)
-                token = self._github._primary_token
-                auth_url = f"https://x-access-token:{token}@github.com/{fork_owner}/{fork_name}.git"
+            # 4b. Create blobs for each file change and collect tree entries
+            tree_entries = []
+            for change in all_changes:
+                if change.is_deleted:
+                    # Deletion: entry with sha=null removes the file
+                    tree_entries.append({
+                        "path": change.path,
+                        "mode": "100644",
+                        "type": "blob",
+                        "sha": None,
+                    })
+                else:
+                    # Create blob from new content
+                    blob_sha = await self._github.create_git_blob(
+                        fork_owner, fork_name, change.new_content
+                    )
+                    tree_entries.append({
+                        "path": change.path,
+                        "mode": "100644",
+                        "type": "blob",
+                        "sha": blob_sha,
+                    })
 
-                # 3a. Clone fork locally
-                proc = await asyncio.create_subprocess_exec(
-                    "git", "clone", "--depth=1", auth_url, str(tmp_path),
-                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
-                )
-                await proc.communicate()
-                if proc.returncode != 0:
-                    raise PRCreationError("Failed to clone fork repository locally for commit.")
+            # 4c. Create tree from all file entries (base_tree enables recursive diff)
+            new_tree_sha = await self._github.create_git_tree(
+                fork_owner, fork_name, base_tree_sha, tree_entries
+            )
 
-                # 3b. Create and checkout new branch
-                proc = await asyncio.create_subprocess_exec(
-                    "git", "checkout", "-b", branch,
-                    cwd=str(tmp_path),
-                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
-                )
-                await proc.communicate()
+            # 4d. Build commit message with DCO signoff
+            commit_msg = contribution.commit_message
+            if signoff and "Signed-off-by:" not in commit_msg:
+                commit_msg = f"{commit_msg}\n\nSigned-off-by: {signoff}"
 
-                # 3c. Apply patches to disk
-                for change in all_changes:
-                    file_path = tmp_path / change.path
-                    file_path.parent.mkdir(parents=True, exist_ok=True)
-                    with open(file_path, "w", encoding="utf-8") as f:
-                        f.write(change.new_content)
+            # Author with backdated timestamp (anti-spam jitter: 15-45 min in the past)
+            import random
+            from datetime import UTC, datetime, timedelta
+            author_name = user.get("name") or user.get("login", "Farm-Agent")
+            author_email = user.get("email") or f"{user.get('id', '9919')}+{user.get('login', 'farm_agent')}@users.noreply.github.com"
+            author_date = (datetime.now(UTC) - timedelta(minutes=random.randint(15, 45))).strftime("%Y-%m-%dT%H:%M:%SZ")
 
-                # Checkpoint 1: git diff / status explicitly logged
-                proc = await asyncio.create_subprocess_exec(
-                    "git", "status", "--short",
-                    cwd=str(tmp_path),
-                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
-                )
-                stdout, _ = await proc.communicate()
-                status_output = stdout.decode("utf-8").strip()
-                logger.info("Sandbox/Workspace Git Status BEFORE commit:\n%s", status_output)
+            # 4e. Create commit
+            new_commit_sha = await self._github.create_git_commit(
+                fork_owner, fork_name,
+                message=commit_msg,
+                tree_sha=new_tree_sha,
+                parent_shas=[base_commit_sha],
+                author_name=author_name,
+                author_email=author_email,
+                author_date=author_date,
+                signoff=signoff,
+            )
 
-                if not status_output:
-                    logger.warning("WARNING: No actual code changes detected. Aborting PR.")
-                    raise PRCreationError("Aborted PR creation: no changes to commit.")
+            # 4f. Update branch ref to point to new commit
+            await self._github.update_git_ref(fork_owner, fork_name, branch, new_commit_sha)
 
-                # Checkpoint 2: git add -A and git commit
-                proc = await asyncio.create_subprocess_exec(
-                    "git", "add", "-A",
-                    cwd=str(tmp_path),
-                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
-                )
-                await proc.communicate()
+            logger.info("Git Data API commit %s pushed to branch %s", new_commit_sha[:8], branch)
 
-                commit_msg = contribution.commit_message
-                if signoff and "Signed-off-by:" not in commit_msg:
-                    commit_msg = f"{commit_msg}\n\nSigned-off-by: {signoff}"
-
-                author_name = user.get("name") or user.get("login", "Farm-Agent")
-                author_email = user.get("email") or f"{user.get('id', '9919')}+{user.get('login', 'farm_agent')}@users.noreply.github.com"
-
-                await (await asyncio.create_subprocess_exec("git", "config", "user.name", author_name, cwd=str(tmp_path))).communicate()
-                await (await asyncio.create_subprocess_exec("git", "config", "user.email", author_email, cwd=str(tmp_path))).communicate()
-
-                proc = await asyncio.create_subprocess_exec(
-                    "git", "commit", "-m", commit_msg,
-                    cwd=str(tmp_path),
-                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
-                )
-                stdout, stderr = await proc.communicate()
-                if proc.returncode != 0:
-                    logger.warning("WARNING: git commit failed (nothing to commit?): %s", stderr.decode('utf-8'))
-                    raise PRCreationError("Aborted PR creation: no changes to commit.")
-
-                # Checkpoint 3: push and jitter
-                proc = await asyncio.create_subprocess_exec(
-                    "git", "push", "origin", branch,
-                    cwd=str(tmp_path),
-                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
-                )
-                stdout, stderr = await proc.communicate()
-                if proc.returncode != 0:
-                    raise PRCreationError(f"Failed to push to branch {branch}: {stderr.decode('utf-8')}")
-
-                logger.info("Git push completed successfully.")
-                await asyncio.sleep(5)  # Anti-Spam Jitter
+            # Anti-Spam Jitter (after push — mimics natural delay)
+            await asyncio.sleep(5)
 
             # 3b. Create linked issue if repo likely requires it
             issue_number = closes_issue
