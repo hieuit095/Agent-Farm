@@ -280,7 +280,7 @@ class Vulnerability(BaseModel):
 class VulnerabilityDossier(BaseModel):
     """Dossier of validated vulnerabilities for a repository.
 
-    Produced by BloodhoundAnalyzer after ast-grep pre-filter and
+    Produced by BloodhoundAnalyzer after Semgrep pre-filter and
     LLM White-Hat audit. If has_bugs() returns False, the repo
     is clean and no further processing is needed.
     """

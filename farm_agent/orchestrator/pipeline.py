@@ -32,11 +32,12 @@ from farm_agent.core.models import (
     Severity,
     VulnerabilityDossier,
 )
-from farm_agent.generator.engine import ContributionGenerator
+from farm_agent.generator.engine import ContributionGenerator, GenerationResult
 from farm_agent.generator.scorer import QAHardcoreScorer
 from farm_agent.github.client import GitHubClient
 from farm_agent.github.discovery import DatabaseTargetDiscovery, RepoDiscovery
 from farm_agent.github.guidelines import fetch_repo_guidelines
+from farm_agent.github.security_gate import run_security_gate
 from farm_agent.issues.solver import IssueSolver
 from farm_agent.llm.provider import create_llm_provider
 from farm_agent.orchestrator.memory import Memory
@@ -272,7 +273,7 @@ class ContribPipeline:
         )
 
         # PR Manager
-        self._pr_manager = PRManager(github=self._github)
+        self._pr_manager = PRManager(github=self._github, llm=self._llm)
 
         # ── Polyglot Sandbox — Docker-based patch validation ─────────────────
         from farm_agent.core.sandbox import DockerSandbox
@@ -459,6 +460,8 @@ class ContribPipeline:
 
         await self._init_components()
         total = PipelineResult()
+
+        friendly_repos: list[Repository] = []
 
         cfg_min, cfg_max = self.config.discovery.stars_range
         star_tiers = [
@@ -743,7 +746,7 @@ class ContribPipeline:
                 return result
 
             # ── Bloodhound Pre-Filter ──────────────────────────────────
-            # Run ast-grep pre-scan before expensive LLM analysis.
+            # Run Semgrep pre-scan before expensive LLM analysis.
             # If the target is clean, mark COMPLETED_NO_VULN and skip.
             bloodhound = BloodhoundAnalyzer(
                 llm=self._llm,
@@ -789,6 +792,25 @@ class ContribPipeline:
 
             dossier.vulnerabilities = production_vulns
 
+            # ── Diplomat Protocol: Security Disclosure Gate ────────────────
+            # Check if the maintainer requests private/responsible disclosure.
+            # If so, abort the pipeline for this repo and save findings locally.
+            security_gate_result = await run_security_gate(
+                github=self._github,
+                owner=repo.owner,
+                repo=repo.name,
+                dossier=dossier,
+                notifier=self._notifier,
+            )
+            if security_gate_result is not None:
+                logger.warning(
+                    "[COMPLIANCE SKIP] Private security disclosure requested by maintainers. "
+                    "Aborting pipeline for %s.",
+                    target.repo_url,
+                )
+                await discovery.mark_status(target.repo_url, "COMPLIANCE_SKIP_PRIVATE_DISCLOSURE")
+                return result
+
             # ── Build RepoContext with vulnerable file contents ───────────
             # Use GraphQL for repo tree (falls back to REST on any error)
             try:
@@ -825,6 +847,18 @@ class ContribPipeline:
 
             scorer = QAHardcoreScorer(llm=self._llm)
 
+            # ── Diplomat Protocol Task 2: Load repo style guide for QA penalty ──
+            repo_style_guide_text = ""
+            if self._memory:
+                try:
+                    cached_sg = await self._memory.get_style_guide(repo.full_name)
+                    if cached_sg and cached_sg.get("style_summary"):
+                        repo_style_guide_text = cached_sg["style_summary"]
+                except Exception:
+                    pass
+            if not repo_style_guide_text and guidelines and guidelines.style_guide:
+                repo_style_guide_text = guidelines.style_guide.raw_summary
+
             for cycle in range(MAX_DEV_QA_CYCLES):
                 logger.info(
                     "Starting DEV-QA Cycle %d/%d for %s",
@@ -833,10 +867,11 @@ class ContribPipeline:
 
                 # 1. DEV generates patches (auto-injects QA Lessons + failure context)
                 try:
-                    contributions = await self._generator.generate_from_dossier(
+                    gen_result: GenerationResult = await self._generator.generate_from_dossier(
                         dossier, context, github_client=self._github,
                         failure_context=failure_context,
                     )
+                    contributions = gen_result.contributions
                 except RuntimeError as e:
                     logger.error("Generation failed: %s", e)
                     failure_context += f"\n[CYCLE {cycle + 1} GENERATION FAILURE] {e}"
@@ -846,6 +881,17 @@ class ContribPipeline:
                     failure_context += f"\n[CYCLE {cycle + 1} GENERATION FAILURE] {e}"
                     continue
 
+                # ── False Positive Escape Hatch ─────────────────────────────────
+                # If the DEV agent determined ALL findings are false positives,
+                # gracefully abort the DEV-QA loop — no point forcing code generation.
+                if gen_result.all_false_positives:
+                    logger.info(
+                        "[CONTEXT SKIP] AI determined all findings are False Positives "
+                        "for %s — aborting DEV-QA loop.",
+                        target.repo_url,
+                    )
+                    break
+
                 if not contributions:
                     logger.warning("No contributions generated in cycle %d", cycle + 1)
                     failure_context += f"\n[CYCLE {cycle + 1} No valid code generated — anti-template interceptor may have triggered.]"
@@ -854,6 +900,7 @@ class ContribPipeline:
                 # 2. QA evaluates the first (best) contribution
                 qa_result: QAResult = await scorer.evaluate(
                     dossier, contributions[0],
+                    repo_style_guide=repo_style_guide_text,
                 )
                 logger.info(
                     "QA Score: %.1f/10.0 — Approved: %s",
@@ -984,13 +1031,34 @@ class ContribPipeline:
             return result
 
         # Fetch repo guidelines (CONTRIBUTING.md, PR template)
-        guidelines = await fetch_repo_guidelines(self._github, repo.owner, repo.name)
+        guidelines = await fetch_repo_guidelines(
+            self._github, repo.owner, repo.name,
+            memory=self._memory, llm=self._llm,
+        )
         if guidelines.has_guidelines:
             logger.info(
                 "📋 Repo guidelines: commit=%s, %d template sections",
                 guidelines.commit_format,
                 len(guidelines.required_sections),
             )
+
+        # ── Diplomat Protocol: Security Disclosure Gate ──────────────────
+        # Check if the maintainer requests private/responsible disclosure.
+        # If so, abort the pipeline for this repo and save findings locally.
+        security_gate_result = await run_security_gate(
+            github=self._github,
+            owner=repo.owner,
+            repo=repo.name,
+            notifier=self._notifier,
+        )
+        if security_gate_result is not None:
+            logger.warning(
+                "[COMPLIANCE SKIP] Private security disclosure requested by maintainers. "
+                "Aborting pipeline for %s.",
+                repo.full_name,
+            )
+            result.repos_analyzed = 1
+            return result
 
         # ── Maintainer Vibe Check ──────────────────────────────────────────
         logger.info(
@@ -1618,9 +1686,11 @@ class ContribPipeline:
                     )
 
                 if not dry_run and getattr(self, "_notifier", None):
-                    self._create_notification_task(
-                        f"🚀 <b>[HUNT]</b> New PR Created!\nRepo: <code>{repo.full_name}</code>\n"
-                        f"URL: {pr_result.pr_url}"
+                    await self._safe_send_notification(
+                        f"✅ **PR SUCCESS**\n"
+                        f"Target: {repo.full_name}\n"
+                        f"URL: {pr_result.pr_url}\n"
+                        f"Vulnerability: {contribution.finding.type.value}"
                     )
 
                 # 5. Post-PR compliance check & auto-fix
@@ -1643,6 +1713,12 @@ class ContribPipeline:
                 error = f"PR creation failed for {finding.title}: {e}"
                 logger.error(error)
                 result.errors.append(error)
+                if not dry_run and getattr(self, "_notifier", None):
+                    await self._safe_send_notification(
+                        f"❌ **PR FAILED**\n"
+                        f"Target: {repo.full_name}\n"
+                        f"Error: {str(e)[:200]}"
+                    )
 
         result.repos_analyzed = 1
         return result
@@ -1784,7 +1860,7 @@ class ContribPipeline:
             return result
 
         # Fetch repo guidelines
-        guidelines = await fetch_repo_guidelines(self._github, repo.owner, repo.name)
+        guidelines = await fetch_repo_guidelines(self._github, repo.owner, repo.name, memory=self._memory, llm=self._llm)
 
         # Build repo context with more files for deeper understanding
         file_tree = await self._github.get_file_tree(repo.owner, repo.name)
@@ -1978,6 +2054,10 @@ class ContribPipeline:
 
 # Create PR immediately (no artificial delay)
             try:
+                patch_length = sum(
+                    len(c.new_content) for c in contribution.changes if c.new_content
+                )
+                base_coding_time = max(60, patch_length // 15)
                 logger.info(
                     "Creating PR for issue #%d in %s...", issue.number, repo.full_name
                 )
@@ -2047,9 +2127,11 @@ class ContribPipeline:
                 )
 
                 if not dry_run and getattr(self, "_notifier", None):
-                    self._create_notification_task(
-                        f"🚀 <b>[HUNT]</b> New PR Created!\nRepo: <code>{repo.full_name}</code>\n"
-                        f"URL: {pr_result.pr_url}"
+                    await self._safe_send_notification(
+                        f"✅ **PR SUCCESS**\n"
+                        f"Target: {repo.full_name}\n"
+                        f"URL: {pr_result.pr_url}\n"
+                        f"Vulnerability: {contribution.finding.type.value}"
                     )
 
                 # Post-PR compliance
@@ -2070,6 +2152,12 @@ class ContribPipeline:
                 error = f"PR creation failed for issue #{issue.number}: {e}"
                 logger.error(error)
                 result.errors.append(error)
+                if not dry_run and getattr(self, "_notifier", None):
+                    await self._safe_send_notification(
+                        f"❌ **PR FAILED**\n"
+                        f"Target: {repo.full_name}\n"
+                        f"Error: {str(e)[:200]}"
+                    )
 
         result.repos_analyzed = 1
         return result

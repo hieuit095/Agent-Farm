@@ -1,0 +1,149 @@
+{
+  "version": "1.0.0",
+  "lastScanned": 1776225081698,
+  "projectRoot": "c:\\Users\\USER\\Documents\\GitHub\\Agent-Farm",
+  "techStack": {
+    "languages": [
+      {
+        "name": "Python",
+        "version": null,
+        "confidence": "high",
+        "markers": [
+          "pyproject.toml",
+          "requirements.txt"
+        ]
+      },
+      {
+        "name": "C/C++",
+        "version": null,
+        "confidence": "high",
+        "markers": [
+          "Makefile"
+        ]
+      }
+    ],
+    "frameworks": [
+      {
+        "name": "pytest",
+        "version": null,
+        "category": "testing"
+      }
+    ],
+    "packageManager": "pip",
+    "runtime": null
+  },
+  "build": {
+    "buildCommand": "make build",
+    "testCommand": "make test",
+    "lintCommand": "ruff check",
+    "devCommand": null,
+    "scripts": {}
+  },
+  "conventions": {
+    "namingStyle": null,
+    "importStyle": null,
+    "testPattern": null,
+    "fileOrganization": null
+  },
+  "structure": {
+    "isMonorepo": false,
+    "workspaces": [],
+    "mainDirectories": [
+      "docs",
+      "scripts",
+      "tests"
+    ],
+    "gitBranches": {
+      "defaultBranch": "main",
+      "branchingStrategy": null
+    }
+  },
+  "customNotes": [],
+  "directoryMap": {
+    "daily_log": {
+      "path": "daily_log",
+      "purpose": null,
+      "fileCount": 0,
+      "lastAccessed": 1776225081674,
+      "keyFiles": []
+    },
+    "data": {
+      "path": "data",
+      "purpose": "Data files",
+      "fileCount": 3,
+      "lastAccessed": 1776225081677,
+      "keyFiles": [
+        "memory.db",
+        "memory.db-shm",
+        "memory.db-wal"
+      ]
+    },
+    "docs": {
+      "path": "docs",
+      "purpose": "Documentation",
+      "fileCount": 2,
+      "lastAccessed": 1776225081677,
+      "keyFiles": [
+        "ARCHITECTURE.md",
+        "HUONG_DAN_SU_DUNG.md"
+      ]
+    },
+    "farm_agent": {
+      "path": "farm_agent",
+      "purpose": null,
+      "fileCount": 1,
+      "lastAccessed": 1776225081678,
+      "keyFiles": [
+        "__init__.py"
+      ]
+    },
+    "logs": {
+      "path": "logs",
+      "purpose": null,
+      "fileCount": 0,
+      "lastAccessed": 1776225081678,
+      "keyFiles": []
+    },
+    "scripts": {
+      "path": "scripts",
+      "purpose": "Build/utility scripts",
+      "fileCount": 5,
+      "lastAccessed": 1776225081678,
+      "keyFiles": [
+        "cleanup_forks.py",
+        "inject_ci_trap.py",
+        "inject_maintainer_feedback.py",
+        "perf_benchmark_io.py",
+        "vip_repos_radar.py"
+      ]
+    },
+    "secret_findings": {
+      "path": "secret_findings",
+      "purpose": null,
+      "fileCount": 0,
+      "lastAccessed": 1776225081679,
+      "keyFiles": []
+    },
+    "sg-extract": {
+      "path": "sg-extract",
+      "purpose": null,
+      "fileCount": 2,
+      "lastAccessed": 1776225081679,
+      "keyFiles": [
+        "ast-grep",
+        "sg"
+      ]
+    },
+    "tests": {
+      "path": "tests",
+      "purpose": "Test files",
+      "fileCount": 1,
+      "lastAccessed": 1776225081679,
+      "keyFiles": [
+        "test_async_io_pipeline.py"
+      ]
+    }
+  },
+  "hotPaths": [],
+  "userDirectives": []
+}

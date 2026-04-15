@@ -123,6 +123,15 @@ CREATE TABLE IF NOT EXISTS target_repos (
     bounty_amount   TEXT,
     diamond_target  INTEGER DEFAULT 0
 );
+
+CREATE TABLE IF NOT EXISTS repo_style_guides (
+    repo            TEXT PRIMARY KEY,
+    style_summary   TEXT NOT NULL,
+    contributing_md TEXT DEFAULT '',
+    pr_template     TEXT DEFAULT '',
+    created_at      TEXT,
+    updated_at      TEXT
+);
 """
 
 
@@ -756,6 +765,7 @@ class Memory:
         await self._db.commit()
         if inserted > 0:
             logger.info("Seeded %d target repos from %s", inserted, json_path)
+        logger.info(f"Successfully seeded {inserted} targets from target_repo.json into SQLite.")
         return inserted
 
     async def get_next_target(self, excluded_languages: list[str] | None = None) -> dict | None:
@@ -795,7 +805,9 @@ class Memory:
             return None
 
         cols = [d[0] for d in cursor.description]
-        return dict(zip(cols, row, strict=False))
+        result = dict(zip(cols, row, strict=False))
+        logger.info(f"[TARGET ACQUIRED] Repo: {result.get('repo_url')} | Language: {result.get('language')} | Bounty: {result.get('bounty_amount')} | Diamond: {result.get('diamond_target')}")
+        return result
 
     async def mark_target_status(
         self,
@@ -1000,4 +1012,44 @@ class Memory:
             (task_key, next_run, datetime.now(UTC).isoformat()),
         )
         await self._db.commit()
+
+    # ── Repo Style Guides (Diplomat Protocol) ─────────────────────────────
+
+    async def save_style_guide(
+        self,
+        repo: str,
+        style_summary: str,
+        contributing_md: str = "",
+        pr_template: str = "",
+    ) -> None:
+        """Save a summarized repo style guide to avoid re-parsing on subsequent hunts."""
+        if self._db is None:
+            return
+        now = datetime.now(UTC).isoformat()
+        await self._db.execute(
+            """INSERT OR REPLACE INTO repo_style_guides
+               (repo, style_summary, contributing_md, pr_template, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (repo, style_summary, contributing_md[:8000], pr_template[:8000], now, now),
+        )
+        await self._db.commit()
+        logger.debug("Saved style guide for %s (%d chars)", repo, len(style_summary))
+
+    async def get_style_guide(self, repo: str) -> dict | None:
+        """Retrieve a cached style guide summary for a repo.
+
+        Returns a dict with keys: repo, style_summary, contributing_md, pr_template,
+        or None if not cached.
+        """
+        if self._db is None:
+            return None
+        cursor = await self._db.execute(
+            "SELECT repo, style_summary, contributing_md, pr_template FROM repo_style_guides WHERE repo = ?",
+            (repo,),
+        )
+        row = await cursor.fetchone()
+        if not row:
+            return None
+        cols = [d[0] for d in cursor.description]
+        return dict(zip(cols, row, strict=False))
 

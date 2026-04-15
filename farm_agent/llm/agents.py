@@ -120,7 +120,8 @@ class CodeGenAgent(BaseAgent):
         return (
             "You are an expert programmer. Generate clean, "
             "well-documented, production-ready code. Follow "
-            "the project's existing style and conventions."
+            "the project's existing style and conventions. "
+            "STRICT NO-PLACEHOLDER POLICY. You are FORBIDDEN from using `// ...`, `TODO`, or any comments implying 'code remains the same'. You MUST output the ENTIRE function or block you are modifying."
         )
 
     def build_prompt(self, context: dict) -> str:

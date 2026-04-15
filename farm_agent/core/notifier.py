@@ -62,9 +62,14 @@ class TelegramNotifier:
         try:
             response = await self._client.post(url, json=payload)
             response.raise_for_status()
-            logger.debug("Telegram message sent successfully.")
+            logger.info("Telegram message delivered successfully.")
         except Exception as e:
-            logger.error("Failed to send Telegram notification: %s", e)
+            response_text = ""
+            if hasattr(e, "response") and e.response is not None:
+                response_text = e.response.text[:500]
+            elif isinstance(e, httpx.HTTPStatusError):
+                response_text = str(e.response.text)[:500]
+            logger.error("Failed to deliver Telegram message: %s", response_text or str(e))
             await _persist_failed_alert(text, "telegram")
     async def _register_commands(self) -> None:
         """Register the bot's command menu with Telegram."""

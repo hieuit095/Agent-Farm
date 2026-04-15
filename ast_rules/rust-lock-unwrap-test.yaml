@@ -1,6 +1,0 @@
-id: rust-lock-unwrap
-language: rust
-rule:
-  pattern: $MUTEX.lock().unwrap()
-message: "lock().unwrap() will panic if the mutex is poisoned."
-severity: warning

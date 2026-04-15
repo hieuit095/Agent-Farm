@@ -43,7 +43,7 @@ analysis:
   # Red Team engine — Bloodhound White-Hat audits via OpenRouter
   red_team_model: "cognitivecomputations/dolphin-mistral-24b-venice-edition:free"
   red_team_daily_limit: 1000
-  # Semgrep radar — runs concurrently with ast-grep in Bloodhound pipeline
+  # Semgrep radar — Sentinel Radar security scanner in Bloodhound pipeline
   use_semgrep: true
   semgrep_rulesets:
     - "p/security-audit"

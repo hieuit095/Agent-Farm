@@ -234,6 +234,7 @@ class QAHardcoreScorer:
         self,
         dossier: "VulnerabilityDossier",
         contribution: "Contribution",
+        repo_style_guide: str | None = None,
     ) -> "QAResult":
         """Score a patch against its originating vulnerability dossier.
 
@@ -263,6 +264,14 @@ class QAHardcoreScorer:
                 )
         diff_str = "\n\n".join(diff_parts) if diff_parts else "No diff available."
 
+        if not diff_str.strip() or diff_str == "No diff available.":
+            from farm_agent.core.models import QAResult
+            return QAResult(
+                score=0.0,
+                critiques=["Your Search block did not match the file. Copy the lines EXACTLY from the source including all whitespace."],
+                approved=False,
+            )
+
         # ── Build vulnerability context ──────────────────────────────────
         vuln_parts = []
         for v in dossier.vulnerabilities:
@@ -277,6 +286,19 @@ class QAHardcoreScorer:
         vuln_str = "\n---\n".join(vuln_parts)
 
         # ── System prompt: strict JSON enforcement ──────────────────────
+        # Diplomat Protocol Task 2: Inject repo style guide into QA prompt
+        # so QA penalizes violations of repo-specific coding conventions.
+        style_penalty_clause = ""
+        if repo_style_guide:
+            style_penalty_clause = (
+                "\n\n## REPO-SPECIFIC STYLE COMPLIANCE (MANDATORY)\n\n"
+                "You MUST also evaluate whether the patch follows these repo-specific rules. "
+                "Violations of these rules MUST be reflected in lower scores and called out as critiques.\n\n"
+                f"{repo_style_guide}\n\n"
+                "If the patch violates ANY of the above rules, deduct at least 1.0 point per violation "
+                "and add a critique describing the specific violation."
+            )
+
         system_prompt = (
             "You are a grumpy, cynical Senior Open-Source Maintainer reviewing a pull request. "
             "Your job is to find reasons to REJECT the PR. "
@@ -290,8 +312,14 @@ class QAHardcoreScorer:
             "If the file is a deliberately-insecure example or test fixture (e.g., 'eval.py' in a security "
             "linter's examples/), fixing it destroys the file's purpose. Score MUST be below 5.0.\n\n"
             "3. **Production-Only Gate**: Only patches to genuine production source code should score >= 9.0. "
-            "Patches to test helpers, example code, documentation snippets, or CI config files should score "
+            "Patches to test helpers, example code, documentation snippets should score "
             "5.0 or below — they are noise PRs that waste maintainers' time.\n\n"
+            "**CRITICAL EXCEPTION — CI/CD Infrastructure**: Security vulnerabilities in CI/CD "
+            "infrastructure (e.g., .github/workflows, CI scripts, Dockerfiles, deployment configs) "
+            "such as shell injections, untrusted input deserialization, or compromised dependencies "
+            "ARE considered critical production fixes. Grade them highly (9.0+) if the fix correctly "
+            "sanitizes inputs, pins dependencies, or secures the pipeline. CI/CD compromise can lead "
+            "to supply-chain attacks and is production-critical.\n\n"
             "## Weighted Grading Criteria\n\n"
             "- Path Relevance (20%): Is this in production code?\n"
             "- Logic (25%): Does the fix correctly address the vulnerability?\n"
@@ -304,10 +332,12 @@ class QAHardcoreScorer:
             "The 'approved' boolean MUST be true ONLY if the score is >= 9.0.\n"
             "Be ruthless. A score of 9.0+ means the patch is production-ready "
             "with zero issues. Most patches should score 5-8.\n"
-            "If the file is in a test/example/demo/docs directory, the MAXIMUM score is 4.0 — NO EXCEPTIONS.\n\n"
+            "If the file is in a test/example/demo/docs directory, the MAXIMUM score is 4.0 — NO EXCEPTIONS.\n"
+            "For CI/CD infrastructure files (.github/workflows, Dockerfile, etc.), the CI/CD exception above applies.\n\n"
             "DO NOT include any text before or after the JSON object. "
             "DO NOT wrap it in markdown fences. "
             "Return ONLY the raw JSON."
+            f"{style_penalty_clause}"
         )
 
         user_prompt = (

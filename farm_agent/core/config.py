@@ -113,10 +113,9 @@ class AnalysisConfig(BaseModel):
     red_team_model: str = "cognitivecomputations/dolphin-mistral-24b-venice-edition:free"
     red_team_daily_limit: int = 1000
 
-    # Semgrep radar (runs concurrently with ast-grep in Bloodhound pipeline)
-    use_semgrep: bool = True
+    # Semgrep radar
     semgrep_rulesets: list[str] = Field(
-        default_factory=lambda: ["p/security-audit", "p/cwe-top-25", "p/default"]
+        default_factory=lambda: ["p/security-audit", "p/cwe-top-25", "p/default", "p/golang", "p/rust", "p/smart-contracts"]
     )
 
 

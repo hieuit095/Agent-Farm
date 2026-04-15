@@ -7183,31 +7183,6 @@
   },
   {
     "entry_type": "repo",
-    "repo_url": "https://github.com/devops-kung-fu/bomber",
-    "target": "https://github.com/devops-kung-fu/bomber",
-    "language": "Go",
-    "issue_info": {
-      "number": 0,
-      "title": "Deep Recon",
-      "body": "An SBOM vulnerability scanner supporting CycloneDX, SPDX, and Syft formats with multiple vulnerability providers (OSV, GitHub Advisory, Sonatype, Snyk)."
-    },
-    "rule": "SBOM parser validation to prevent malicious input injection",
-    "verification_status": "VERIFIED",
-    "status": "PENDING",
-    "stars": 608,
-    "bounty_amount": "GitHub Sponsors",
-    "repo_fund_status": "Funded (GITHUB)",
-    "priority_score": "Standard Recon",
-    "roi_summary": "SBOM vulnerability scanner with active GitHub Sponsors; 47% merge rate and explicit sponsorship request in README.",
-    "friendliness_score": 7,
-    "ai_policy": "Welcoming",
-    "diamond_target": false,
-    "scanned_at": "2026-04-07T22:14:14.820795Z",
-    "legitimacy_score": 6,
-    "reasoning": "FUNDING_YML present with GitHub Sponsors integration. 87 merged PRs, detailed CONTRIBUTING guide. Project explicitly requests sponsorship to keep it 'bug-free and feature rich'."
-  },
-  {
-    "entry_type": "repo",
     "repo_url": "https://github.com/samber/ro",
     "target": "https://github.com/samber/ro",
     "language": "Go",

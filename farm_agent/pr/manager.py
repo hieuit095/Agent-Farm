@@ -6,7 +6,12 @@ Generates detailed PR descriptions with context and testing info.
 
 from __future__ import annotations
 
+import asyncio
+import csv
 import logging
+import re
+from datetime import UTC, datetime
+from pathlib import Path
 
 from farm_agent.core.exceptions import PRCreationError
 from farm_agent.core.models import Contribution, ContributionType, PRResult, PRStatus, Repository
@@ -56,9 +61,51 @@ def auto_check_pr_template(body: str, contrib_type: ContributionType | None = No
 class PRManager:
     """Manage the full pull request lifecycle."""
 
-    def __init__(self, github: GitHubClient):
+    PR_LEDGER_PATH = Path("logs/pr_history.csv")
+    _LEDGER_HEADER = ["timestamp", "repo_url", "pr_url", "status", "error_details", "vulnerability_type"]
+
+    def __init__(self, github: GitHubClient, llm=None):
         self._github = github
+        self._llm = llm
         self._user: dict | None = None
+        self._ledger_lock = asyncio.Lock() if hasattr(asyncio, "Lock") else None
+
+    async def append_to_ledger(
+        self,
+        repo_url: str,
+        pr_url: str,
+        status: str,
+        error_details: str = "",
+        vulnerability_type: str = "",
+    ) -> None:
+        """Append a PR attempt to the persistent CSV ledger.
+
+        Thread-safe / async-safe via lock.  Creates the file with headers
+        on first write.  Never overwrites existing rows.
+        """
+        if self._ledger_lock is None:
+            self._ledger_lock = asyncio.Lock()
+
+        async with self._ledger_lock:
+            self.PR_LEDGER_PATH.parent.mkdir(parents=True, exist_ok=True)
+            needs_header = not self.PR_LEDGER_PATH.exists()
+            row = [
+                datetime.now(UTC).isoformat(),
+                repo_url,
+                pr_url,
+                status,
+                error_details,
+                vulnerability_type,
+            ]
+            try:
+                with open(self.PR_LEDGER_PATH, "a", newline="", encoding="utf-8") as fh:
+                    writer = csv.writer(fh)
+                    if needs_header:
+                        writer.writerow(self._LEDGER_HEADER)
+                    writer.writerow(row)
+                logger.debug("PR ledger entry written: %s — %s", repo_url, status)
+            except Exception as exc:
+                logger.warning("Failed to write PR ledger entry: %s", exc)
 
     async def _get_user(self) -> dict:
         """Get and cache the authenticated user."""
@@ -118,41 +165,135 @@ class PRManager:
             branch = contribution.branch_name or self._human_branch_name(contribution)
             await self._github.create_branch(fork_owner, fork_name, branch)
 
-            # 3. Commit changes
-            for change in contribution.changes + contribution.tests_added:
-                # Get existing file SHA for updates
-                sha = None
-                if not change.is_new_file:
-                    try:
-                        await self._github.get_file_content(fork_owner, fork_name, change.path)
-                        # We need the SHA to update - fetch via contents API
+            # 3. Local Git staging, committing, and pushing
+            all_changes = contribution.changes + contribution.tests_added
+            if not all_changes:
+                logger.warning("WARNING: No actual code changes detected. Aborting PR.")
+                raise PRCreationError("Aborted PR creation: no changes to commit.")
 
-                        resp = await self._github._get(
-                            f"/repos/{fork_owner}/{fork_name}/contents/{change.path}",
-                            params={"ref": branch},
-                        )
-                        sha = resp.get("sha")
-                    except Exception:
-                        pass  # New file or couldn't get SHA
+            import tempfile
+            import asyncio
+            from pathlib import Path
 
-                await self._github.create_or_update_file(
-                    fork_owner,
-                    fork_name,
-                    change.path,
-                    change.new_content,
-                    contribution.commit_message,
-                    branch,
-                    sha=sha,
-                    signoff=signoff,
+            with tempfile.TemporaryDirectory() as tmpdir:
+                tmp_path = Path(tmpdir)
+                token = self._github._primary_token
+                auth_url = f"https://x-access-token:{token}@github.com/{fork_owner}/{fork_name}.git"
+
+                # 3a. Clone fork locally
+                proc = await asyncio.create_subprocess_exec(
+                    "git", "clone", "--depth=1", auth_url, str(tmp_path),
+                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
                 )
+                await proc.communicate()
+                if proc.returncode != 0:
+                    raise PRCreationError("Failed to clone fork repository locally for commit.")
+
+                # 3b. Create and checkout new branch
+                proc = await asyncio.create_subprocess_exec(
+                    "git", "checkout", "-b", branch,
+                    cwd=str(tmp_path),
+                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+                )
+                await proc.communicate()
+
+                # 3c. Apply patches to disk
+                for change in all_changes:
+                    file_path = tmp_path / change.path
+                    file_path.parent.mkdir(parents=True, exist_ok=True)
+                    with open(file_path, "w", encoding="utf-8") as f:
+                        f.write(change.new_content)
+
+                # Checkpoint 1: git diff / status explicitly logged
+                proc = await asyncio.create_subprocess_exec(
+                    "git", "status", "--short",
+                    cwd=str(tmp_path),
+                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+                )
+                stdout, _ = await proc.communicate()
+                status_output = stdout.decode("utf-8").strip()
+                logger.info("Sandbox/Workspace Git Status BEFORE commit:\n%s", status_output)
+
+                if not status_output:
+                    logger.warning("WARNING: No actual code changes detected. Aborting PR.")
+                    raise PRCreationError("Aborted PR creation: no changes to commit.")
+
+                # Checkpoint 2: git add -A and git commit
+                proc = await asyncio.create_subprocess_exec(
+                    "git", "add", "-A",
+                    cwd=str(tmp_path),
+                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+                )
+                await proc.communicate()
+
+                commit_msg = contribution.commit_message
+                if signoff and "Signed-off-by:" not in commit_msg:
+                    commit_msg = f"{commit_msg}\n\nSigned-off-by: {signoff}"
+
+                author_name = user.get("name") or user.get("login", "Farm-Agent")
+                author_email = user.get("email") or f"{user.get('id', '9919')}+{user.get('login', 'farm_agent')}@users.noreply.github.com"
+
+                await (await asyncio.create_subprocess_exec("git", "config", "user.name", author_name, cwd=str(tmp_path))).communicate()
+                await (await asyncio.create_subprocess_exec("git", "config", "user.email", author_email, cwd=str(tmp_path))).communicate()
+
+                proc = await asyncio.create_subprocess_exec(
+                    "git", "commit", "-m", commit_msg,
+                    cwd=str(tmp_path),
+                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+                )
+                stdout, stderr = await proc.communicate()
+                if proc.returncode != 0:
+                    logger.warning("WARNING: git commit failed (nothing to commit?): %s", stderr.decode('utf-8'))
+                    raise PRCreationError("Aborted PR creation: no changes to commit.")
+
+                # Checkpoint 3: push and jitter
+                proc = await asyncio.create_subprocess_exec(
+                    "git", "push", "origin", branch,
+                    cwd=str(tmp_path),
+                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+                )
+                stdout, stderr = await proc.communicate()
+                if proc.returncode != 0:
+                    raise PRCreationError(f"Failed to push to branch {branch}: {stderr.decode('utf-8')}")
+
+                logger.info("Git push completed successfully.")
+                await asyncio.sleep(5)  # Anti-Spam Jitter
 
             # 3b. Create linked issue if repo likely requires it
             issue_number = closes_issue
             if not issue_number and guidelines and guidelines.has_guidelines:
                 issue_number = await self._create_issue_for_finding(contribution, target_repo)
 
-            # 4. Create PR
-            if guidelines and guidelines.has_guidelines:
+            # 4. Create PR body — Diplomat Protocol Task 3: LLM-powered template filling
+            from farm_agent.core.models import ContributionType as _CT2
+
+            _type_info = {
+                _CT2.SECURITY_FIX: ("🔒", "Reliability Improvement"),
+                _CT2.CODE_QUALITY: ("✨", "Code Quality"),
+                _CT2.README_FIX: ("📝", "Documentation"),
+                _CT2.UI_UX_FIX: ("🎨", "UI/UX Improvement"),
+                _CT2.PERFORMANCE_OPT: ("⚡", "Performance"),
+                _CT2.FEATURE_ADD: ("🚀", "New Feature"),
+                _CT2.REFACTOR: ("♻️", "Refactoring"),
+            }
+            pr_emoji, pr_label = _type_info.get(contribution.finding.type, ("🔧", "Fix"))
+            pr_files_list = "\n".join(
+                f"- `{c.path}` {'(new)' if c.is_new_file else '(modified)'}"
+                for c in contribution.changes
+            )
+
+            if guidelines and guidelines.has_guidelines and guidelines.pr_template and self._llm:
+                from farm_agent.github.guidelines import llm_fill_pr_template
+
+                pr_body = await llm_fill_pr_template(
+                    template=guidelines.pr_template,
+                    contribution=contribution,
+                    llm=self._llm,
+                    emoji=pr_emoji,
+                    label=pr_label,
+                    files_list=pr_files_list,
+                )
+            elif guidelines and guidelines.has_guidelines:
                 from farm_agent.github.guidelines import adapt_pr_body
 
                 pr_body = adapt_pr_body(contribution, guidelines)
@@ -180,6 +321,12 @@ class PRManager:
 
             head = f"{fork_owner}:{branch}"
 
+            if ":" not in head:
+                raise PRCreationError(
+                    f"Invalid PR head format: '{head}'. Cross-repo PRs require "
+                    f"'{{fork_owner}}:{{branch}}' format. Got bare branch name."
+                )
+
             pr_data = await self._github.create_pull_request(
                 target_repo.owner,
                 target_repo.name,
@@ -200,9 +347,25 @@ class PRManager:
             )
 
             logger.info("✅ PR #%d created: %s", result.pr_number, result.pr_url)
+
+            await self.append_to_ledger(
+                repo_url=target_repo.html_url,
+                pr_url=result.pr_url,
+                status="SUCCESS",
+                error_details="",
+                vulnerability_type=contribution.finding.type.value,
+            )
+
             return result
 
         except Exception as e:
+            await self.append_to_ledger(
+                repo_url=target_repo.html_url,
+                pr_url="",
+                status="FAILED",
+                error_details=str(e)[:500],
+                vulnerability_type=contribution.finding.type.value if contribution else "unknown",
+            )
             raise PRCreationError(f"Failed to create PR: {e}") from e
 
     async def _fork_if_needed(self, username: str, repo: Repository) -> Repository:

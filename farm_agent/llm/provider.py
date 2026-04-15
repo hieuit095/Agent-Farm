@@ -317,15 +317,44 @@ class MinimaxProvider(LLMProvider):
                 raise last_error from e
             except httpx.HTTPStatusError as e:
                 status = e.response.status_code
-                if status == 429:
-                    raise LLMRateLimitError(f"Minimax rate limit (429): {e}") from e
+                # ── Exponential backoff for rate limits and server overload ──
+                # 429 (Rate Limit), 529 (Overloaded), and 402 (Payment Required)
+                # trigger retries with exponential backoff instead of crashing the run.
                 if status == 401:
                     raise LLMError("Minimax auth failed (401): check api_key") from e
+                if status in (429, 529, 402):
+                    backoff = min(5 * (2 ** attempt), 60)
+                    logger.warning(
+                        "Minimax HTTP %d (attempt %d/3) — backing off %.1fs before retry: %s",
+                        status, attempt + 1, backoff, e,
+                    )
+                    import asyncio as _asyncio
+                    await _asyncio.sleep(backoff)
+                    last_error = LLMRateLimitError(
+                        f"Minimax HTTP {status} (attempt {attempt+1}/3): {e}"
+                    )
+                    if attempt < 2:
+                        continue
+                    raise last_error from e
+                if status >= 500:
+                    backoff = min(5 * (2 ** attempt), 60)
+                    logger.warning(
+                        "Minimax server error %d (attempt %d/3) — backing off %.1fs: %s",
+                        status, attempt + 1, backoff, e,
+                    )
+                    import asyncio as _asyncio
+                    await _asyncio.sleep(backoff)
+                    last_error = LLMError(f"Minimax server error {status} (attempt {attempt+1}/3): {e}")
+                    if attempt < 2:
+                        continue
+                    raise last_error from e
                 raise LLMError(f"Minimax HTTP {status}: {e}") from e
             except (LLMError, LLMRateLimitError):
                 raise
             except Exception as e:
                 raise LLMError(f"Minimax error: {e}") from e
+
+        raise last_error or LLMError("Minimax: all retries exhausted")
 
     async def close(self):
         await self._client.aclose()
@@ -423,14 +452,39 @@ class OpenRouterProvider(LLMProvider):
                 raise last_error from e
             except httpx.HTTPStatusError as e:
                 status = e.response.status_code
-                if status == 429:
-                    raise LLMRateLimitError(f"OpenRouter rate limit (429): {e}") from e
-                if status == 403:
-                    raise LLMRateLimitError(f"OpenRouter quota exceeded (403): {e}") from e
-                if status >= 500:
-                    raise LLMRateLimitError(f"OpenRouter server error ({status}): {e}") from e
+                # ── Exponential backoff for rate limits and server overload ──
+                # 429 (Rate Limit), 529 (Overloaded), 402 (Payment Required),
+                # and 403 (Forbidden/Quota) trigger retries with backoff.
                 if status == 401:
                     raise LLMError("OpenRouter auth failed (401): check openrouter_api_key") from e
+                if status in (429, 529, 402, 403):
+                    backoff = min(5 * (2 ** attempt), 60)
+                    logger.warning(
+                        "OpenRouter HTTP %d (attempt %d/3) — backing off %.1fs before retry: %s",
+                        status, attempt + 1, backoff, e,
+                    )
+                    import asyncio as _asyncio
+                    await _asyncio.sleep(backoff)
+                    last_error = LLMRateLimitError(
+                        f"OpenRouter HTTP {status} (attempt {attempt+1}/3): {e}"
+                    )
+                    if attempt < 2:
+                        continue
+                    raise last_error from e
+                if status >= 500:
+                    backoff = min(5 * (2 ** attempt), 60)
+                    logger.warning(
+                        "OpenRouter server error %d (attempt %d/3) — backing off %.1fs: %s",
+                        status, attempt + 1, backoff, e,
+                    )
+                    import asyncio as _asyncio
+                    await _asyncio.sleep(backoff)
+                    last_error = LLMRateLimitError(
+                        f"OpenRouter server error {status} (attempt {attempt+1}/3): {e}"
+                    )
+                    if attempt < 2:
+                        continue
+                    raise last_error from e
                 raise LLMError(f"OpenRouter HTTP {status}: {e}") from e
             except (LLMError, LLMRateLimitError):
                 raise

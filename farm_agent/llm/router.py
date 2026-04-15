@@ -57,15 +57,40 @@ class TaskRouter:
         file_count: int = 1,
         token_estimate: int = 1000,
     ) -> RoutingDecision:
-        """Route a task to the best model."""
-        model = MINIMAX_M27
+        """Route a task to the best model based on type, complexity, and strategy."""
+        from farm_agent.llm.models import get_models_for_task, ModelTier
+
+        light_tasks = {TaskType.QUICK_FIX, TaskType.DOCS, TaskType.BULK}
+        heavy_tasks = {TaskType.ANALYSIS, TaskType.CODE_GEN, TaskType.PLANNING}
+
+        if task_type in light_tasks and complexity <= 3 and self._strategy != CostStrategy.PERFORMANCE:
+            model = MINIMAX_ABAB65S_CHAT
+            reason = f"Light task ({task_type.value}, complexity={complexity}) routed to fast model."
+        elif task_type in heavy_tasks and complexity >= 7:
+            model = MINIMAX_M27
+            reason = f"Heavy task ({task_type.value}, complexity={complexity}) routed to flagship model."
+        elif token_estimate > 100_000:
+            model = MINIMAX_M27
+            reason = f"Large context ({token_estimate} tokens) routed to flagship model."
+        else:
+            best = get_models_for_task(task_type)
+            model = best[0] if best else MINIMAX_M27
+            reason = f"Task ({task_type.value}) routed by best-fit score."
+
+        if self._strategy == CostStrategy.ECONOMY and model.tier == ModelTier.FLASH:
+            candidates = get_models_for_task(task_type)
+            economy_pick = [c for c in candidates if c.tier == ModelTier.LITE]
+            if economy_pick:
+                model = economy_pick[0]
+                reason = f"Economy strategy downgraded to {model.name}."
+
         self._task_count[model.name] = self._task_count.get(model.name, 0) + 1
 
         return RoutingDecision(
             model=model,
             task_type=task_type,
-            reason="Minimax ecosystem exclusively.",
-            fallback=MINIMAX_ABAB65S_CHAT,
+            reason=reason,
+            fallback=MINIMAX_ABAB65S_CHAT if model.name != MINIMAX_ABAB65S_CHAT.name else MINIMAX_M27,
         )
 
     def get_default_assignments(self) -> dict[str, str]:

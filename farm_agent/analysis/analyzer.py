@@ -564,7 +564,14 @@ class CodeAnalyzer:
             "4. TRIVIAL FIX — Would the fix add complexity without real benefit? "
             "(e.g., adding type hints to a 10-line script). If yes, do NOT report.\n"
             "5. COSMETIC — Is this purely stylistic with no functional impact? "
-            "(e.g., prefer f-strings over .format()). If yes, do NOT report.\n\n"
+            "(e.g., prefer f-strings over .format()). If yes, do NOT report.\n"
+            "6. GLOBAL CONTEXT SANITY CHECK — CRITICAL: Before fixing swallowed errors "
+            "(_ = func(), bare except, unused result), ask yourself: "
+            "'Is this explicitly intentional? Is this part of a fallback loop, a mock/test file, "
+            "or a backward-compatibility shim?' If the code implies the developer *intentionally* "
+            "ignored the rule (e.g., _ = legacy_func() where legacy_func returns status codes, "
+            "or try/except pass for expected degradation), mark it as a False Positive and SKIP. "
+            "The maintainer may be deliberately swallowing errors as a fallback mechanism.\n\n"
             "Report ONLY issues that a senior developer would actually fix in a PR review. "
             "Quality over quantity — 1 genuine finding beats 5 false positives.\n"
             "Maximum 3 findings per analyzer."
@@ -963,24 +970,15 @@ class CodeAnalyzer:
 
 
 class BloodhoundAnalyzer:
-    """AST-grep pre-filter → LLM White-Hat audit pipeline.
+    """Semgrep-powered security radar → LLM White-Hat audit pipeline.
 
-    Uses local ast-grep (sg) rules to find exact bug patterns first,
+    Uses Semgrep rules to find exact bug patterns first,
     then sends ONLY the flagged snippets to the LLM for validation,
     POC generation, and fix suggestion. This drastically reduces LLM
     API costs compared to blind-reading entire codebases.
     """
 
-    LANGUAGE_RULE_PREFIX: dict[str, str] = {
-        "Python": "python",
-        "JavaScript": "js",
-        "TypeScript": "ts",
-        "Go": "go",
-        "Rust": "rust",
-        "Solidity": "solidity",
-    }
 
-    SG_SCAN_TIMEOUT = 120
     SEMGREP_TIMEOUT = 180
 
     def __init__(
@@ -994,29 +992,11 @@ class BloodhoundAnalyzer:
         self._github = github
         self._config = config
         self._memory = memory
-        self._sg_available: bool | None = None
         self._red_team_client: LLMProvider | None = None
 
     def _forbidden_paths(self) -> list[str]:
         """Return the lowercase set of directory names indicating non-production code."""
         return [p.lower() for p in getattr(self._config, "forbidden_paths", [])]
-
-    def _check_sg_available(self) -> bool:
-        if self._sg_available is not None:
-            return self._sg_available
-
-        import shutil
-
-        if shutil.which("sg") is None:
-            logger.error(
-                "ast-grep (sg) binary not found in PATH. "
-                "Bloodhound requires sg. Aborting scan."
-            )
-            self._sg_available = False
-        else:
-            logger.info("ast-grep (sg) binary found — Bloodhound ready")
-            self._sg_available = True
-        return self._sg_available
 
     def _get_red_team_provider(self) -> LLMProvider | None:
         """Lazily create an OpenRouter LLM provider for Red Team audits.
@@ -1055,26 +1035,6 @@ class BloodhoundAnalyzer:
         )
         return self._red_team_client
 
-    def _resolve_rule_files(self, language: str | None) -> list[Path]:
-        rules_dir = Path("ast_rules")
-        if not rules_dir.is_dir():
-            logger.warning("ast_rules/ directory not found at %s", rules_dir.resolve())
-            return []
-
-        if not language:
-            all_rules = sorted(rules_dir.glob("*.yaml"))
-            if all_rules:
-                logger.info("No language specified — using all %d rule files", len(all_rules))
-            return all_rules
-
-        prefix = self.LANGUAGE_RULE_PREFIX.get(language)
-        if prefix is None:
-            logger.info("No ast-grep rule prefix for language '%s' — skipping bloodhound", language)
-            return []
-
-        rule_files = sorted(rules_dir.glob(f"{prefix}-*.yaml"))
-        logger.info("Language '%s' → prefix '%s' → %d rule files", language, prefix, len(rule_files))
-        return rule_files
 
     async def _clone_repo_shallow(self, repo: Repository) -> Path | None:
         import shutil as shutil_mod
@@ -1107,88 +1067,6 @@ class BloodhoundAnalyzer:
             shutil_mod.rmtree(tmp_dir, ignore_errors=True)
             return None
 
-    async def _run_sg_scan(self, rule_file: Path, repo_path: Path) -> list[dict]:
-        try:
-            proc = await asyncio.create_subprocess_exec(
-                "sg", "scan", "--rule", str(rule_file), "--json=compact", str(repo_path),
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            stdout, stderr = await asyncio.wait_for(
-                proc.communicate(), timeout=self.SG_SCAN_TIMEOUT
-            )
-
-            # ast-grep exits with code 1 when it finds matches (diagnostic tool
-            # convention).  Only treat exit code >= 2 as a true failure.
-            if proc.returncode not in (0, 1):
-                stderr_text = stderr.decode("utf-8", errors="replace")[:500]
-                logger.debug("sg scan returned %d for rule %s: %s", proc.returncode, rule_file.name, stderr_text)
-                return []
-
-            raw = stdout.decode("utf-8", errors="replace").strip()
-            if not raw:
-                return []
-
-            try:
-                json_data = json.loads(raw)
-            except json.JSONDecodeError as e:
-                logger.warning("sg scan returned invalid JSON for rule %s: %s", rule_file.name, e)
-                return []
-
-            # ast-grep may emit:
-            #   - A JSON object with "matches" / "results" key → list of match dicts
-            #   - A JSON array directly → list of match dicts
-            #   - A JSON scalar or deeply nested struct → skip safely
-            raw_matches: list[dict] = []
-            if isinstance(json_data, list):
-                raw_matches = json_data
-            elif isinstance(json_data, dict):
-                for key in ("matches", "results"):
-                    val = json_data.get(key)
-                    if isinstance(val, list):
-                        raw_matches = val
-                        break
-
-            matches = []
-            for item in raw_matches:
-                try:
-                    if not isinstance(item, dict):
-                        continue
-
-                    file_path = item.get("file") or item.get("path") or ""
-                    if file_path:
-                        try:
-                            file_path = str(Path(file_path).relative_to(repo_path))
-                        except ValueError:
-                            pass
-
-                    range_obj = item.get("range") or {}
-                    start_obj = range_obj.get("start") if isinstance(range_obj, dict) else {}
-                    line_num = start_obj.get("line") if isinstance(start_obj, dict) else 0
-                    if not line_num:
-                        line_num = item.get("line", 0)
-
-                    text = item.get("text") or item.get("match") or ""
-
-                    matches.append({
-                        "file": str(file_path),
-                        "line": int(line_num) if line_num else 0,
-                        "match": str(text),
-                        "rule": rule_file.stem,
-                    })
-                except Exception:
-                    continue
-
-            if matches:
-                logger.info("Rule %s: %d matches", rule_file.name, len(matches))
-            return matches
-
-        except asyncio.TimeoutError:
-            logger.warning("sg scan timed out for rule %s", rule_file.name)
-            return []
-        except Exception as exc:
-            logger.error("sg scan failed for rule %s: %s", rule_file.name, exc)
-            return []
 
     def _check_semgrep_available(self) -> bool:
         if hasattr(self, "_semgrep_available") and self._semgrep_available is not None:
@@ -1233,20 +1111,44 @@ class BloodhoundAnalyzer:
                 *cmd,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                limit=1024 * 1024 * 50, # 50MB limit to prevent memory crash
             )
             stdout, stderr = await asyncio.wait_for(
                 proc.communicate(), timeout=self.SEMGREP_TIMEOUT
             )
 
+            stdout_text = stdout.decode("utf-8", errors="replace")
+            stderr_text = stderr.decode("utf-8", errors="replace")
+
             if proc.returncode not in (0, 1):
-                stderr_text = stderr.decode("utf-8", errors="replace")[:500]
                 logger.warning(
                     "Semgrep returned exit code %d: %s",
                     proc.returncode,
-                    stderr_text,
+                    stderr_text[:1000],
                 )
 
-            data = json.loads(stdout.decode("utf-8", errors="replace"))
+            # Robust parsing: Clean JSON extractor
+            try:
+                data = json.loads(stdout_text)
+            except json.JSONDecodeError:
+                logger.warning("Semgrep returned invalid JSON. Logging raw output for diagnostics:")
+                logger.warning("STDOUT (first 1000 chars): %s", stdout_text[:1000])
+                logger.warning("STDERR (first 1000 chars): %s", stderr_text[:1000])
+                
+                # Attempt to extract JSON from plain text warnings
+                start_idx = stdout_text.find('{')
+                end_idx = stdout_text.rfind('}')
+                if start_idx != -1 and end_idx != -1 and end_idx > start_idx:
+                    clean_json = stdout_text[start_idx:end_idx+1]
+                    try:
+                        data = json.loads(clean_json)
+                        logger.info("Successfully extracted Clean JSON from Semgrep output")
+                    except json.JSONDecodeError:
+                        logger.error("Clean JSON extraction failed. Could not parse Semgrep output.")
+                        return []
+                else:
+                    return []
+
             results = data.get("results", [])
 
             matches = []
@@ -1284,25 +1186,6 @@ class BloodhoundAnalyzer:
             logger.error("Semgrep scan failed for %s: %s", repo_path.name, exc)
             return []
 
-    async def _run_ast_grep(self, rule_files: list[Path], repo_path: Path) -> list[dict]:
-        logger.info("Running %d ast-grep rules against %s", len(rule_files), repo_path.name)
-        scan_tasks = [self._run_sg_scan(rf, repo_path) for rf in rule_files]
-        all_results = await asyncio.gather(*scan_tasks)
-
-        all_matches = []
-        for result in all_results:
-            all_matches.extend(result)
-
-        seen: set[tuple[str, int, str]] = set()
-        unique = []
-        for m in all_matches:
-            key = (m["file"], m["line"], m["rule"])
-            if key not in seen:
-                seen.add(key)
-                unique.append(m)
-
-        logger.info("ast-grep found %d unique matches across %d rules", len(unique), len(rule_files))
-        return unique
 
     async def _white_hat_audit(
         self, repo_url: str, repo_name: str, matches: list[dict]
@@ -1339,7 +1222,7 @@ Your core directives:
 2. CHAINING: Do not just look at the single line; deduce how this snippet connects to user input or global state to form an exploit chain.
 3. RUTHLESSNESS: If the code relies on "security by obscurity" or weak default configurations, tear it apart.
 
-You will receive an ast-grep match report. 
+You will receive a Semgrep match report. 
 - If the code is genuinely secure and cannot be exploited in any scenario, you MUST return [{"file": "NONE"}].
 - If it is exploitable, you must provide the exact attack path.
 
@@ -1389,21 +1272,40 @@ You MUST respond strictly in the following JSON array format. No markdown, no co
 
             return self._parse_audit_response(response, repo_url, forbidden_paths=self._forbidden_paths())
         except Exception as exc:
-            # If OpenRouter rate-limits (429, 403, 5xx), fall back to default LLM
-            # rather than discarding the matches entirely.
-            from farm_agent.core.exceptions import LLMRateLimitError
+            # ── Universal LLM fallback for ANY provider error ──────────────────
+            # If OpenRouter fails for ANY reason (402 Payment Required,
+            # 429 Rate Limit, 529 Overloaded, 5xx Server Error, auth failures,
+            # or any other LLMError/LLMRateLimitError), fall back to the
+            # default LLM rather than discarding the matches entirely.
+            from farm_agent.core.exceptions import LLMError, LLMRateLimitError
+
             if isinstance(exc, LLMRateLimitError):
                 logger.warning(
                     "[RED TEAM OFFLINE] OpenRouter rate limit hit. Initiating Fallback to Minimax M2.7."
                 )
-                try:
-                    response = await self._llm.complete(user_prompt, system=system_prompt, temperature=0.1)
-                    return self._parse_audit_response(response, repo_url, forbidden_paths=self._forbidden_paths())
-                except Exception as fallback_exc:
-                    logger.error("White-Hat audit fallback LLM also failed: %s", fallback_exc)
-                    return VulnerabilityDossier(repo_url=repo_url, target_commit="unknown", vulnerabilities=[])
-            logger.error("White-Hat audit LLM call failed: %s", exc)
-            return VulnerabilityDossier(repo_url=repo_url, target_commit="unknown", vulnerabilities=[])
+            elif isinstance(exc, LLMError):
+                status_str = str(exc)
+                if "402" in status_str:
+                    logger.warning(
+                        "[RED TEAM OFFLINE] OpenRouter 402 Payment Required. Initiating Fallback to Minimax M2.7."
+                    )
+                else:
+                    logger.warning(
+                        "[RED TEAM OFFLINE] OpenRouter LLM error — initiating Fallback to Minimax M2.7: %s",
+                        exc,
+                    )
+            else:
+                logger.warning(
+                    "[RED TEAM OFFLINE] Unexpected error from OpenRouter — initiating Fallback to Minimax M2.7: %s",
+                    exc,
+                )
+
+            try:
+                response = await self._llm.complete(user_prompt, system=system_prompt, temperature=0.1)
+                return self._parse_audit_response(response, repo_url, forbidden_paths=self._forbidden_paths())
+            except Exception as fallback_exc:
+                logger.error("White-Hat audit fallback LLM also failed: %s", fallback_exc)
+                return VulnerabilityDossier(repo_url=repo_url, target_commit="unknown", vulnerabilities=[])
 
     def _classify_context(self, file_path: str, forbidden_paths: list[str] | None = None) -> str:
         """Classify a file path as PRODUCTION or LOW_PRIORITY_CONTEXT.
@@ -1472,8 +1374,8 @@ You MUST respond strictly in the following JSON array format. No markdown, no co
     async def run_bloodhound(self, repo: Repository) -> VulnerabilityDossier:
         """Execute the full Bloodhound pipeline for a repository.
 
-        Runs ast-grep and optionally Semgrep concurrently, merges
-        findings, then sends to the Red Team LLM for validation.
+        Runs Semgrep as the Sentinel Radar, validates findings
+        via the Red Team LLM, and returns a VulnerabilityDossier.
         """
         empty_dossier = VulnerabilityDossier(
             repo_url=repo.url, target_commit="unknown", vulnerabilities=[]
@@ -1487,39 +1389,28 @@ You MUST respond strictly in the following JSON array format. No markdown, no co
             return empty_dossier
 
         try:
-            # ── Concurrent Radar: ast-grep + Semgrep ──
+            # ── Concurrent Radar: Semgrep ──
             tasks = []
             task_labels = []
 
-            # ast-grep radar
-            sg_available = self._check_sg_available()
-            if sg_available:
-                rule_files = self._resolve_rule_files(repo.language)
-                if rule_files:
-                    tasks.append(self._run_ast_grep(rule_files, clone_path))
-                    task_labels.append(f"ast-grep({len(rule_files)} rules)")
-
             # Semgrep radar
-            use_semgrep = getattr(self._config, "use_semgrep", False)
-            if use_semgrep:
-                extra_rulesets: list[str] = []
-                if repo.language:
-                    lang_lower = repo.language.lower()
-                    if lang_lower == "go":
-                        extra_rulesets.append("p/golang")
-                    elif lang_lower == "solidity":
-                        extra_rulesets.extend(["p/solidity", "p/smart-contracts", "p/jwt"])
-                tasks.append(self._run_semgrep(clone_path, extra_rulesets=extra_rulesets or None))
-                base_rulesets = list(getattr(self._config, "semgrep_rulesets", []))
-                total_rulesets = len(base_rulesets) + len(extra_rulesets)
-                task_labels.append(f"semgrep({total_rulesets} rulesets)")
+            extra_rulesets: list[str] = []
+            if repo.language:
+                lang_lower = repo.language.lower()
+                if lang_lower == "go":
+                    extra_rulesets.append("p/golang")
+                elif lang_lower == "solidity":
+                    extra_rulesets.extend(["p/solidity", "p/smart-contracts", "p/jwt"])
+                elif lang_lower == "rust":
+                    extra_rulesets.append("p/rust")
+            tasks.append(self._run_semgrep(clone_path, extra_rulesets=extra_rulesets or None))
+            base_rulesets = list(getattr(self._config, "semgrep_rulesets", []))
+            total_rulesets = len(base_rulesets) + len(extra_rulesets)
+            task_labels.append(f"semgrep({total_rulesets} rulesets)")
 
-            # If neither tool is available, return empty dossier
+            # If tool is not available
             if not tasks:
-                logger.warning(
-                    "No radar tools available (ast-grep=%s, semgrep=%s) for %s — skipping bloodhound",
-                    sg_available, use_semgrep, repo.full_name,
-                )
+                logger.warning("No radar tools available for %s — skipping bloodhound", repo.full_name)
                 return empty_dossier
 
             results = await asyncio.gather(*tasks)

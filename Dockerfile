@@ -19,7 +19,7 @@ RUN pip install --no-cache-dir build && \
     python -m build --wheel
 
 # ── Runtime ────────────────────────────────────────────────────────────────
-# Stage 2: Lean production image with ast-grep and Docker SDK.
+# Stage 2: Lean production image with Semgrep and Docker SDK.
 # ---------------------------------------------------------------------------
 FROM python:3.11-slim
 
@@ -27,12 +27,8 @@ LABEL maintainer="Farm-Agent Team"
 LABEL description="Farm-Agent v3.0.0 — Autonomous Bounty-Hunting Security Researcher"
 LABEL version="3.0.0"
 
-# Build arg for ast-grep version — easy to bump without changing the Dockerfile
-ARG SG_VERSION=0.34.0
-
 # ── System dependencies ────────────────────────────────────────────────────
 # git   — required by GitPython for shallow clones (Bloodhound pipeline)
-# curl  — required to download ast-grep binary
 # ca-certificates — TLS root certs for GitHub API & OpenRouter calls
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
@@ -40,7 +36,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     nodejs \
     npm \
-    unzip \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Rust
@@ -61,29 +56,12 @@ RUN curl -fsSL "https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz" -o /tmp/go
     /usr/local/go/bin/go version
 ENV PATH="/usr/local/go/bin:${PATH}"
 
-# ── Install ast-grep (sg) binary ───────────────────────────────────────────
-# Direct binary download — avoids pulling Node.js (~200MB savings).
-# Detects the architecture and downloads the matching release binary.
-RUN ARCH=$(uname -m) && \
-    case "$ARCH" in \
-        x86_64)  SG_ARCH="x86_64-unknown-linux-gnu" ;; \
-        aarch64) SG_ARCH="aarch64-unknown-linux-gnu" ;; \
-        *)       echo "Unsupported architecture: $ARCH" && exit 1 ;; \
-    esac && \
-    curl -fsSL \
-        "https://github.com/ast-grep/ast-grep/releases/download/${SG_VERSION}/app-${SG_ARCH}.zip" \
-        -o /tmp/sg.zip && \
-    unzip -o /tmp/sg.zip -d /tmp/sg-extract && \
-    mv /tmp/sg-extract/ast-grep /usr/local/bin/ast-grep && \
-    mv /tmp/sg-extract/sg /usr/local/bin/sg && \
-    chmod +x /usr/local/bin/ast-grep /usr/local/bin/sg && \
-    rm -rf /tmp/sg.zip /tmp/sg-extract && \
-    sg --version
-
 # ── Install Semgrep (parallel radar for Bloodhound) ────────────────────────
 # Heavy dep (~200MB) but provides access to community security rulesets.
-# Gracefully skipped at runtime if binary missing (use_semgrep=False in config).
-RUN pip install --no-cache-dir semgrep
+# Isolate in venv to prevent dependency conflicts (e.g. opentelemetry).
+RUN python3 -m venv /opt/semgrep && \
+    /opt/semgrep/bin/pip install --no-cache-dir semgrep && \
+    ln -s /opt/semgrep/bin/semgrep /usr/local/bin/semgrep
 
 # ── Install Python wheel from builder ──────────────────────────────────────
 COPY --from=builder /build/dist/*.whl /tmp/

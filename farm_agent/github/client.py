@@ -608,17 +608,55 @@ class GitHubClient:
         head: str,
         base: str | None = None,
     ) -> dict:
-        """Create a pull request."""
+        """Create a pull request.
+
+        CRITICAL: This method verifies the GitHub API returns HTTP 201 Created.
+        Any other status code (including 422 Unprocessable Entity, 403 Forbidden,
+        etc.) will cause an immediate halt with the full error payload logged.
+        The returned dict is ONLY from the 201 response — never mocked, never
+        fetched from an existing PR.
+        """
         if not base:
             details = await self.get_repo_details(owner, repo)
             base = details.default_branch
 
-        data = await self._post(
-            f"/repos/{owner}/{repo}/pulls",
-            json={"title": title, "body": body, "head": head, "base": base},
+        payload = {"title": title, "body": body, "head": head, "base": base}
+        logger.debug(
+            "PR CREATE REQUEST — owner=%s repo=%s payload=%s",
+            owner, repo, payload,
         )
-        logger.info("Created PR #%d on %s/%s: %s", data["number"], owner, repo, title)
-        return data
+
+        response = await self._client.request(
+            "POST",
+            f"/repos/{owner}/{repo}/pulls",
+            headers={"Authorization": f"Bearer {self._primary_token}"},
+            json=payload,
+        )
+
+        status_code = response.status_code
+        try:
+            response_data = response.json() if response.content else {}
+        except Exception:
+            response_data = {"raw": response.text}
+
+        logger.debug(
+            "PR CREATE RESPONSE — status=%d body=%s",
+            status_code, response_data,
+        )
+
+        if status_code != 201:
+            error_msg = (
+                f"PR CREATION FAILED — HTTP {status_code} (expected 201).\n"
+                f"Payload sent: {payload}\n"
+                f"GitHub response: {response_data}"
+            )
+            logger.error(error_msg)
+            raise GitHubAPIError(error_msg, status_code=status_code)
+
+        pr_number = response_data.get("number", "?")
+        pr_url = response_data.get("html_url", "")
+        logger.info("Created PR #%s on %s/%s: %s", pr_number, owner, repo, title)
+        return response_data
 
     async def update_pull_request(
         self,
