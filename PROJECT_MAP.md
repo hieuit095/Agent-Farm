@@ -329,11 +329,16 @@ tests/
 | `PHASE 3-FIX` | Title similarity now requires 80% bigram sequence overlap, not 50% word intersection | `pipeline.py:136-186` |
 | Coverage omit | 8 modules excluded from coverage (`web/*`, `scheduler/*`, `cli/tui.py`, `llm/agents.py`, etc.) | `pyproject.toml:75-88` |
 
+**Deleted / Removed (Phase 4 Purge — 2026-04-15):**
+- `cli/tui.py` — deleted. Lazy-imported only by the removed `interactive` CLI command.
+- `analysis/language_rules.py` — deleted. No imports found in active pipeline.
+- `analysis/skills.py` — deleted. No imports found in active pipeline.
+- `analysis/strategies.py` — deleted. No imports found in active pipeline.
+- `plugins/base.py` — deleted. No imports found in active pipeline.
+
 **Orphaned / Incomplete Features:**
-- `cli/tui.py` — referenced as entry point from `main.py:1339` but minimal implementation
-- `core/rag.py` — present in structure but functionality unclear from scan
-- `analysis/language_rules.py`, `analysis/mapper.py`, `analysis/skills.py`, `analysis/strategies.py` — present but purpose not fully analyzed
-- `plugins/base.py` — referenced in coverage omit, likely interface definition
+- `analysis/mapper.py` — present but purpose not fully analyzed — **pending audit**
+- `core/rag.py` — **ACTIVE** (ChromaDB RAG engine, used by `pipeline.py` and `analyzer.py`)
 
 **Secret Findings:** Security-gated vulnerabilities are saved to `secret_findings/` directory for manual reporting.
 

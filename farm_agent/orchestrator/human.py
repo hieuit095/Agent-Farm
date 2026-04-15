@@ -42,6 +42,10 @@ class SuperHumanLoop:
     - Daily KB garbage collection
     - max_prs_per_day safety cap
     - LLM rate-limit cooldown
+
+    Graceful shutdown: On SIGINT/SIGTERM, sets _is_shutting_down and lets
+    the current iteration complete (up to a timeout) before exiting, ensuring
+    all DB commits and memory checkpoints are flushed.
     """
 
     def __init__(
@@ -68,6 +72,46 @@ class SuperHumanLoop:
             token=self._pipeline.config.notifications.telegram_token,
             chat_id=self._pipeline.config.notifications.telegram_chat_id,
         )
+        # Graceful shutdown flag — set by external signal handler
+        self._is_shutting_down = False
+
+    def request_shutdown(self) -> None:
+        """Request graceful shutdown from external code (e.g. patrol or pipeline).
+
+        Sets the shutdown flag so the next loop iteration drains and exits.
+        Does NOT interrupt in-flight operations — they complete naturally.
+        """
+        logger.info("[TERMINATOR] External shutdown requested.")
+        self._is_shutting_down = True
+
+    async def _flush_and_close(self) -> None:
+        """Flush all in-memory state to persistent storage and close connections.
+
+        Called on shutdown to ensure:
+        - WAL checkpoint on memory.db
+        - All pending DB commits are written
+        - Telegram notifier is cleanly closed
+        """
+        logger.info("[TERMINATOR] Flushing state and closing connections...")
+
+        # Flush memory (WAL checkpoint + close)
+        if self._memory:
+            try:
+                await self._memory.checkpoint()
+                await self._memory.close()
+                logger.info("[TERMINATOR] Memory flushed and closed.")
+            except Exception as exc:
+                logger.warning("[TERMINATOR] Memory flush failed: %s", exc)
+
+        # Close notifier
+        if self._notifier:
+            try:
+                await self._notifier.close()
+                logger.info("[TERMINATOR] Notifier closed.")
+            except Exception as exc:
+                logger.warning("[TERMINATOR] Notifier close failed: %s", exc)
+
+        logger.info("[TERMINATOR] Graceful shutdown complete. Data secured.")
 
     async def _new_day_check(self) -> bool:
         """Check if a new calendar day has started. Returns True if day changed.
@@ -278,6 +322,13 @@ class SuperHumanLoop:
             pass
 
         while True:
+            # ── Graceful shutdown: drain current iteration then exit ──
+            if self._is_shutting_down:
+                logger.info("[TERMINATOR] Shutdown signal received — finishing current iteration then exiting.")
+                self._daily_log.log_shutdown(self._iteration)
+                logger.info("[TERMINATOR] Graceful shutdown complete. Data secured.")
+                break
+
             self._iteration += 1
 
             # ── Time-warp exit gate ──

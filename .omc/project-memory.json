@@ -146,6 +146,12 @@
   },
   "hotPaths": [
     {
+      "path": "farm_agent\\cli\\main.py",
+      "accessCount": 8,
+      "lastAccessed": 1776265254388,
+      "type": "file"
+    },
+    {
       "path": "farm_agent\\core\\rag.py",
       "accessCount": 7,
       "lastAccessed": 1776262310971,
@@ -158,15 +164,39 @@
       "type": "file"
     },
     {
+      "path": "farm_agent\\orchestrator\\human.py",
+      "accessCount": 6,
+      "lastAccessed": 1776264965695,
+      "type": "file"
+    },
+    {
       "path": "farm_agent\\pr\\manager.py",
       "accessCount": 5,
       "lastAccessed": 1776262968522,
       "type": "file"
     },
     {
+      "path": "PROJECT_MAP.md",
+      "accessCount": 5,
+      "lastAccessed": 1776265294024,
+      "type": "file"
+    },
+    {
+      "path": "farm_agent",
+      "accessCount": 4,
+      "lastAccessed": 1776265019908,
+      "type": "directory"
+    },
+    {
       "path": ".dockerignore",
       "accessCount": 3,
       "lastAccessed": 1776262310926,
+      "type": "file"
+    },
+    {
+      "path": "farm_agent\\analysis\\analyzer.py",
+      "accessCount": 2,
+      "lastAccessed": 1776265023670,
       "type": "file"
     },
     {
@@ -185,12 +215,6 @@
       "path": "pyproject.toml",
       "accessCount": 1,
       "lastAccessed": 1776261119534,
-      "type": "file"
-    },
-    {
-      "path": "farm_agent\\cli\\main.py",
-      "accessCount": 1,
-      "lastAccessed": 1776261119760,
       "type": "file"
     },
     {
@@ -224,9 +248,39 @@
       "type": "file"
     },
     {
-      "path": "PROJECT_MAP.md",
+      "path": "",
       "accessCount": 1,
-      "lastAccessed": 1776261196942,
+      "lastAccessed": 1776265016014,
+      "type": "directory"
+    },
+    {
+      "path": "farm_agent\\analysis\\__init__.py",
+      "accessCount": 1,
+      "lastAccessed": 1776265023612,
+      "type": "file"
+    },
+    {
+      "path": "farm_agent\\analysis\\skills.py",
+      "accessCount": 1,
+      "lastAccessed": 1776265030170,
+      "type": "file"
+    },
+    {
+      "path": "farm_agent\\analysis\\strategies.py",
+      "accessCount": 1,
+      "lastAccessed": 1776265030230,
+      "type": "file"
+    },
+    {
+      "path": "farm_agent\\analysis\\language_rules.py",
+      "accessCount": 1,
+      "lastAccessed": 1776265030296,
+      "type": "file"
+    },
+    {
+      "path": "farm_agent\\cli\\tui.py",
+      "accessCount": 1,
+      "lastAccessed": 1776265030362,
       "type": "file"
     }
   ],

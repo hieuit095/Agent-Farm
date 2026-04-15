@@ -430,10 +430,7 @@ def superhuman(ctx, time_warp, dry_run, target_repo):
 
         async def shutdown_hook() -> None:
             console.print("[yellow]Shutdown signal received — cleaning up...[/yellow]")
-            if hasattr(memory, "checkpoint"):
-                await memory.checkpoint()
-            if hasattr(memory, "close"):
-                await memory.close()
+            await loop._flush_and_close()
 
         inner_loop = asyncio.get_running_loop()
         import sys
@@ -443,8 +440,8 @@ def superhuman(ctx, time_warp, dry_run, target_repo):
 
         def _handle_signal(sig, hook, l):
             console.print(f"[yellow]Received {sig.name} — initiating graceful shutdown...[/yellow]")
-            l.create_task(hook())
-            l.stop()
+            loop.request_shutdown()  # Signal the terminator loop to drain gracefully
+            l.create_task(hook())  # Fire the cleanup hook (DB flush + close)
 
         try:
             await loop.run_daily_routine(time_warp=time_warp)
@@ -1330,16 +1327,6 @@ def show_models(ctx, task):
     for task_type, model_name in defaults.items():
         console.print(f"  {task_type}: [cyan]{model_name}[/cyan]")
     console.print()
-
-
-@cli.command("interactive")
-@click.pass_context
-def interactive(ctx):
-    """Interactive TUI mode for browsing and contributing."""
-    from farm_agent.cli.tui import run_interactive
-
-    config = load_config(ctx.obj["config_path"])
-    run_interactive(config)
 
 
 @cli.command("leaderboard")

@@ -22,7 +22,9 @@
       "Bash(python -c \"import dotenv; print\\(''dotenv available''\\)\")",
       "Bash(python -m py_compile farm_agent/orchestrator/pipeline.py)",
       "Bash(python -m py_compile farm_agent/core/exceptions.py farm_agent/core/config.py farm_agent/generator/engine.py farm_agent/pr/janitor.py)",
-      "Bash(python -m py_compile farm_agent/github/client.py farm_agent/pr/manager.py)"
+      "Bash(python -m py_compile farm_agent/github/client.py farm_agent/pr/manager.py)",
+      "Bash(python -m py_compile farm_agent/orchestrator/human.py farm_agent/cli/main.py)",
+      "Bash(python -m farm_agent.cli.main --help)"
     ]
   }
 }
