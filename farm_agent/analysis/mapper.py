@@ -323,3 +323,259 @@ class RepoMapper:
         if dot_idx == -1:
             return ""
         return path[dot_idx:].lower()
+
+    # ── Synchronous skeleton (in-memory) ─────────────────────────────────
+
+    def generate_repo_skeleton(self, file_contents: dict[str, str]) -> str:
+        """Build a text-based skeleton from an already-fetched {path: content} dict.
+
+        Synchronous counterpart to ``generate_map`` — reuses the same
+        ``_extract_signatures`` and ``_is_code_file`` helpers but works
+        directly against an in-memory mapping rather than async fetch calls.
+
+        Args:
+            file_contents: Mapping of file path → raw source code.
+
+        Returns:
+            Formatted skeleton string (same layout as ``generate_map``).
+        """
+        output_parts: list[str] = []
+        total_chars = 0
+        file_count = 0
+
+        for path, content in file_contents.items():
+            if file_count >= MAX_FILES:
+                output_parts.append("... (output truncated — file limit reached)")
+                break
+            if total_chars >= MAX_OUTPUT_CHARS:
+                output_parts.append("... (output truncated — char limit reached)")
+                break
+            if not self._is_code_file(path):
+                continue
+
+            signatures = self._extract_signatures(path, content)
+            if signatures:
+                block = f"{path}\n" + "\n".join(f"  {s}" for s in signatures)
+            else:
+                block = path
+
+            output_parts.append(block)
+            total_chars += len(block)
+            file_count += 1
+
+        logger.debug(
+            "RepoMapper.generate_repo_skeleton: %d files, %d chars",
+            file_count, total_chars,
+        )
+        return "\n\n".join(output_parts)
+
+    # ── Dependency tracing ────────────────────────────────────────────────
+
+    def resolve_file_dependencies(
+        self,
+        target_path: str,
+        all_file_contents: dict[str, str],
+    ) -> dict[str, list[str]]:
+        """Identify files imported by target and files that import target.
+
+        Args:
+            target_path: Repo-relative path of the file being patched.
+            all_file_contents: Full {path: content} map of fetched files.
+
+        Returns:
+            Dict with two keys:
+            - ``"imports"``: paths of files that target_path imports (its deps).
+            - ``"callers"``: paths of files that import target_path (its dependents).
+            Each list is deduplicated and capped at 5 entries.
+        """
+        imports: list[str] = []
+        callers: list[str] = []
+
+        target_content = all_file_contents.get(target_path, "")
+        target_ext = self._get_ext(target_path)
+
+        # ── Step 1: what does target_path import? ──────────────────────────
+        if target_ext == ".py":
+            imported_modules = self._extract_python_imports(target_content)
+        else:
+            imported_modules = self._extract_js_ts_imports(target_content)
+
+        for mod in imported_modules:
+            resolved = self._resolve_module_to_path(mod, target_path, all_file_contents)
+            if resolved and resolved not in imports:
+                imports.append(resolved)
+            if len(imports) >= 5:
+                break
+
+        # ── Step 2: what imports target_path? ──────────────────────────────
+        target_module_variants = self._path_to_module_variants(target_path)
+        for path, content in all_file_contents.items():
+            if path == target_path:
+                continue
+            if self._file_imports_module(content, target_module_variants, self._get_ext(path)):
+                if path not in callers:
+                    callers.append(path)
+            if len(callers) >= 5:
+                break
+
+        logger.debug(
+            "resolve_file_dependencies(%s): imports=%s callers=%s",
+            target_path, imports, callers,
+        )
+        return {"imports": imports, "callers": callers}
+
+    # ── Import extraction ─────────────────────────────────────────────────
+
+    _PY_IMPORT_REGEX = re.compile(
+        r"^\s*(?:from\s+([\w.]+)\s+import|import\s+([\w.,\s]+))",
+        re.MULTILINE,
+    )
+    _JS_IMPORT_REGEX = re.compile(
+        r"""(?:import\s+.*?from\s+['"]([^'"]+)['"]|require\s*\(\s*['"]([^'"]+)['"]\s*\))""",
+        re.MULTILINE,
+    )
+
+    def _extract_python_imports(self, content: str) -> list[str]:
+        """Extract dotted module names from Python import statements via AST."""
+        modules: list[str] = []
+        try:
+            tree = ast.parse(content)
+        except SyntaxError:
+            # Regex fallback for truncated / partial content
+            for match in self._PY_IMPORT_REGEX.finditer(content):
+                mod = match.group(1) or ""
+                if not mod:
+                    for part in (match.group(2) or "").split(","):
+                        m = part.strip().split()[0] if part.strip() else ""
+                        if m:
+                            modules.append(m)
+                else:
+                    modules.append(mod)
+            return modules
+
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    modules.append(alias.name)
+            elif isinstance(node, ast.ImportFrom):
+                if node.module:
+                    # node.level > 0 means relative import (from . import …)
+                    # We still record the module name; relative resolution
+                    # happens in _resolve_module_to_path.
+                    modules.append(node.module)
+        return modules
+
+    def _extract_js_ts_imports(self, content: str) -> list[str]:
+        """Extract local specifiers from JS/TS import / require statements."""
+        modules: list[str] = []
+        for match in self._JS_IMPORT_REGEX.finditer(content):
+            spec = match.group(1) or match.group(2) or ""
+            # Only consider local (relative or absolute-from-root) imports
+            if spec and (spec.startswith(".") or spec.startswith("/")):
+                modules.append(spec)
+        return modules
+
+    # ── Module → path resolution ──────────────────────────────────────────
+
+    def _resolve_module_to_path(
+        self,
+        module: str,
+        referencing_file: str,
+        all_file_contents: dict[str, str],
+    ) -> str | None:
+        """Map a dotted Python module name or JS path specifier to a repo file.
+
+        Python: ``farm_agent.core.config`` → ``farm_agent/core/config.py``
+                also tries ``farm_agent/core/__init__.py`` for package imports.
+
+        JS/TS: relative specifiers are resolved relative to referencing_file.
+        """
+        candidates: list[str] = []
+
+        if module.startswith(".") or module.startswith("/"):
+            # JS/TS relative import
+            ref_dir = "/".join(referencing_file.split("/")[:-1])
+            raw = (ref_dir + "/" + module) if ref_dir else module
+            parts = raw.split("/")
+            resolved_parts: list[str] = []
+            for part in parts:
+                if part == "..":
+                    if resolved_parts:
+                        resolved_parts.pop()
+                elif part and part != ".":
+                    resolved_parts.append(part)
+            base = "/".join(resolved_parts)
+            candidates = [
+                base,
+                f"{base}.ts",
+                f"{base}.tsx",
+                f"{base}.js",
+                f"{base}.jsx",
+                f"{base}/index.ts",
+                f"{base}/index.js",
+            ]
+        else:
+            # Python dotted module
+            slash_path = module.replace(".", "/")
+            candidates = [
+                f"{slash_path}.py",
+                f"{slash_path}/__init__.py",
+            ]
+
+        for candidate in candidates:
+            if candidate in all_file_contents:
+                return candidate
+        return None
+
+    def _path_to_module_variants(self, path: str) -> list[str]:
+        """Return all plausible module-name forms for a file path.
+
+        e.g. ``farm_agent/core/config.py``
+        → ``["farm_agent.core.config", "farm_agent/core/config", "config",
+              "./config", "/farm_agent/core/config"]``
+        """
+        no_ext = path
+        for ext in (".py", ".ts", ".tsx", ".js", ".jsx"):
+            if no_ext.endswith(ext):
+                no_ext = no_ext[: -len(ext)]
+                break
+        if no_ext.endswith("/__init__"):
+            no_ext = no_ext[: -len("/__init__")]
+
+        dotted = no_ext.replace("/", ".")
+        slash = no_ext
+        basename = no_ext.split("/")[-1]
+        return [dotted, slash, basename, f"./{basename}", f"/{slash}"]
+
+    def _file_imports_module(
+        self,
+        content: str,
+        module_variants: list[str],
+        ext: str,
+    ) -> bool:
+        """Return True if content imports any of the given module variant names."""
+        if ext == ".py":
+            try:
+                tree = ast.parse(content)
+                for node in ast.walk(tree):
+                    if isinstance(node, ast.Import):
+                        for alias in node.names:
+                            if any(
+                                alias.name == mv or alias.name.startswith(mv + ".")
+                                for mv in module_variants
+                            ):
+                                return True
+                    elif isinstance(node, ast.ImportFrom):
+                        if node.module and any(
+                            node.module == mv or node.module.startswith(mv + ".")
+                            for mv in module_variants
+                        ):
+                            return True
+            except SyntaxError:
+                pass
+
+        # Regex fallback — covers JS/TS and failed Python parse
+        for mv in module_variants:
+            if re.search(rf"""["'`]{re.escape(mv)}["'`]""", content):
+                return True
+        return False

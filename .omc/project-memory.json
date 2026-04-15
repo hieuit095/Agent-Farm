@@ -146,21 +146,27 @@
   },
   "hotPaths": [
     {
+      "path": "farm_agent\\generator\\engine.py",
+      "accessCount": 23,
+      "lastAccessed": 1776271383704,
+      "type": "file"
+    },
+    {
       "path": "farm_agent\\cli\\main.py",
-      "accessCount": 8,
-      "lastAccessed": 1776265254388,
+      "accessCount": 9,
+      "lastAccessed": 1776267614248,
       "type": "file"
     },
     {
       "path": "farm_agent\\core\\rag.py",
-      "accessCount": 7,
-      "lastAccessed": 1776262310971,
+      "accessCount": 8,
+      "lastAccessed": 1776269802600,
       "type": "file"
     },
     {
       "path": "farm_agent\\github\\client.py",
-      "accessCount": 6,
-      "lastAccessed": 1776262965474,
+      "accessCount": 7,
+      "lastAccessed": 1776269827409,
       "type": "file"
     },
     {
@@ -170,16 +176,22 @@
       "type": "file"
     },
     {
+      "path": "PROJECT_MAP.md",
+      "accessCount": 6,
+      "lastAccessed": 1776269802505,
+      "type": "file"
+    },
+    {
       "path": "farm_agent\\pr\\manager.py",
       "accessCount": 5,
       "lastAccessed": 1776262968522,
       "type": "file"
     },
     {
-      "path": "PROJECT_MAP.md",
+      "path": "",
       "accessCount": 5,
-      "lastAccessed": 1776265294024,
-      "type": "file"
+      "lastAccessed": 1776269815249,
+      "type": "directory"
     },
     {
       "path": "farm_agent",
@@ -188,9 +200,33 @@
       "type": "directory"
     },
     {
+      "path": "farm_agent\\orchestrator\\pipeline.py",
+      "accessCount": 4,
+      "lastAccessed": 1776269945249,
+      "type": "file"
+    },
+    {
       "path": ".dockerignore",
       "accessCount": 3,
       "lastAccessed": 1776262310926,
+      "type": "file"
+    },
+    {
+      "path": "Dockerfile",
+      "accessCount": 3,
+      "lastAccessed": 1776268754082,
+      "type": "file"
+    },
+    {
+      "path": "docker-compose.yml",
+      "accessCount": 3,
+      "lastAccessed": 1776268755280,
+      "type": "file"
+    },
+    {
+      "path": "farm_agent\\analysis\\mapper.py",
+      "accessCount": 3,
+      "lastAccessed": 1776270514492,
       "type": "file"
     },
     {
@@ -200,27 +236,33 @@
       "type": "file"
     },
     {
-      "path": "requirements.txt",
-      "accessCount": 1,
-      "lastAccessed": 1776261119478,
+      "path": "pyproject.toml",
+      "accessCount": 2,
+      "lastAccessed": 1776267614108,
       "type": "file"
+    },
+    {
+      "path": "requirements.txt",
+      "accessCount": 2,
+      "lastAccessed": 1776267614135,
+      "type": "file"
+    },
+    {
+      "path": "farm_agent\\github\\security_gate.py",
+      "accessCount": 2,
+      "lastAccessed": 1776269826045,
+      "type": "file"
+    },
+    {
+      "path": "farm_agent\\core\\models.py",
+      "accessCount": 2,
+      "lastAccessed": 1776270329779,
+      "type": "directory"
     },
     {
       "path": "farm_agent\\core\\config.py",
       "accessCount": 1,
       "lastAccessed": 1776261119494,
-      "type": "file"
-    },
-    {
-      "path": "pyproject.toml",
-      "accessCount": 1,
-      "lastAccessed": 1776261119534,
-      "type": "file"
-    },
-    {
-      "path": "farm_agent\\github\\security_gate.py",
-      "accessCount": 1,
-      "lastAccessed": 1776261123927,
       "type": "file"
     },
     {
@@ -240,18 +282,6 @@
       "accessCount": 1,
       "lastAccessed": 1776261124322,
       "type": "file"
-    },
-    {
-      "path": "farm_agent\\orchestrator\\pipeline.py",
-      "accessCount": 1,
-      "lastAccessed": 1776261127895,
-      "type": "file"
-    },
-    {
-      "path": "",
-      "accessCount": 1,
-      "lastAccessed": 1776265016014,
-      "type": "directory"
     },
     {
       "path": "farm_agent\\analysis\\__init__.py",
@@ -281,6 +311,36 @@
       "path": "farm_agent\\cli\\tui.py",
       "accessCount": 1,
       "lastAccessed": 1776265030362,
+      "type": "file"
+    },
+    {
+      "path": "entrypoint.sh",
+      "accessCount": 1,
+      "lastAccessed": 1776267613935,
+      "type": "file"
+    },
+    {
+      "path": "Dockerfile.superhuman",
+      "accessCount": 1,
+      "lastAccessed": 1776267613972,
+      "type": "file"
+    },
+    {
+      "path": "farm_agent\\github\\discovery.py",
+      "accessCount": 1,
+      "lastAccessed": 1776269825939,
+      "type": "file"
+    },
+    {
+      "path": "farm_agent\\github\\__init__.py",
+      "accessCount": 1,
+      "lastAccessed": 1776269825988,
+      "type": "file"
+    },
+    {
+      "path": "farm_agent\\github\\guidelines.py",
+      "accessCount": 1,
+      "lastAccessed": 1776269826165,
       "type": "file"
     }
   ],

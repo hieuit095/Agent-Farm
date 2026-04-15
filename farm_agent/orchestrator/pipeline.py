@@ -849,6 +849,7 @@ class ContribPipeline:
 
             # ── Diplomat Protocol Task 2: Load repo style guide for QA penalty ──
             repo_style_guide_text = ""
+            guidelines = None
             if self._memory:
                 try:
                     cached_sg = await self._memory.get_style_guide(repo.full_name)

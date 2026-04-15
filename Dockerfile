@@ -73,14 +73,8 @@ RUN pip install --no-cache-dir /tmp/*.whl && rm /tmp/*.whl
 WORKDIR /app
 RUN mkdir -p /app/data /app/logs
 
-# ── Entrypoint ─────────────────────────────────────────────────────────────
-# Minimal: v3.0 Memory.init() creates all schema at runtime.
-# No pre-seeding or DB migration needed in the entrypoint.
-COPY entrypoint.sh /app/entrypoint.sh
-RUN chmod +x /app/entrypoint.sh
-
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
 
-ENTRYPOINT ["/app/entrypoint.sh"]
-CMD ["farm_agent", "superhuman"]
+# Use python -m to avoid any shell script CRLF issues on Windows-cloned repos
+CMD ["python", "-m", "farm_agent.cli.main", "superhuman"]

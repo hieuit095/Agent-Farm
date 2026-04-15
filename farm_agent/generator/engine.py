@@ -188,6 +188,8 @@ class ContributionGenerator:
         self._max_patch_retries = getattr(pipeline_config, "max_patch_retries", 2) if pipeline_config else 2
         # Adversarial Reviewer — completely independent entity with its own LLM
         self._reviewer = ReviewerAgent(llm, max_review_tokens=800)
+        # Repo mapper — generates structural skeleton + dependency graphs
+        self._repo_mapper = RepoMapper()
 
     async def generate(
         self,
@@ -657,6 +659,32 @@ class ContributionGenerator:
             )
             return None
 
+        # ── Omniscient Eye: build skeleton + dependency context ───────────
+        _repo_skeleton = ""
+        _dependency_files: dict[str, str] = {}
+        if context.relevant_files:
+            try:
+                _repo_skeleton = self._repo_mapper.generate_repo_skeleton(
+                    context.relevant_files,
+                )
+                _deps = self._repo_mapper.resolve_file_dependencies(
+                    vuln.file, context.relevant_files,
+                )
+                _dep_paths = (_deps["imports"] + _deps["callers"])[:3]
+                _dependency_files = {
+                    p: context.relevant_files[p]
+                    for p in _dep_paths
+                    if p in context.relevant_files
+                }
+                if _dep_paths:
+                    logger.info(
+                        "🔭 Omniscient Eye: imports=%s callers=%s",
+                        _deps["imports"], _deps["callers"],
+                    )
+            except Exception as _exc:
+                logger.debug("Omniscient Eye skipped: %s", _exc)
+        # ─────────────────────────────────────────────────────────────────
+
         user_prompt = (
             f"## Task\n"
             f"Fix a SECURITY vulnerability in {context.repo.full_name}.\n\n"
@@ -684,6 +712,30 @@ class ContributionGenerator:
         user_prompt += (
             f"\n## Current File Content ({vuln.file})\n"
             f"```\n{target_file_content[:8000]}\n```\n\n"
+        )
+
+        # ── Related dependency files ──────────────────────────────────────
+        if _dependency_files:
+            user_prompt += (
+                "## Related Files (direct imports / callers)\n"
+                "These files share interfaces with the target. "
+                "Do NOT re-implement helpers that already exist here.\n\n"
+            )
+            for dep_path, dep_content in _dependency_files.items():
+                safe_path = _STRIP_AI_RE.sub("[sanitized]", dep_path)
+                safe_content = _STRIP_AI_RE.sub(
+                    "[AI-disclosure redacted]", dep_content[:4000]
+                )
+                user_prompt += f"### {safe_path}\n```\n{safe_content}\n```\n\n"
+
+        # ── Repo skeleton ─────────────────────────────────────────────────
+        if _repo_skeleton:
+            user_prompt += (
+                "## Repository Skeleton (discover existing helpers before writing new code)\n"
+                f"```\n{_repo_skeleton[:6000]}\n```\n\n"
+            )
+
+        user_prompt += (
             f"## Output Format\n"
             f"You MUST respond strictly in the following JSON format. "
             f"The `coding_plan` MUST appear first.\n"
@@ -701,6 +753,15 @@ class ContributionGenerator:
             f"- The `target_function` field is OPTIONAL. If provided, it specifies the function\n"
             f"  name to replace entirely if the `search` block fails to match. Use this as a\n"
             f"  safety net when modifying functions — set it to the function name being changed.\n"
+            f"\nMULTI-FILE EDITS: If the fix requires changes across multiple files, use the\n"
+            f'`"files"` array format instead of `"changes"`:\n'
+            f'```json\n{{"coding_plan": "...", "files": [\n'
+            f'  {{"file": "path/to/fileA.py", "is_new_file": false,\n'
+            f'   "edits": [{{"search": "...", "replace": "...", "target_function": ""}}]}},\n'
+            f'  {{"file": "path/to/fileB.py", "is_new_file": false,\n'
+            f'   "edits": [{{"search": "...", "replace": "...", "target_function": ""}}]}}\n'
+            f']}}\n```\n'
+            f"Apply the same SEARCH/REPLACE rules to each file entry.\n"
         )
 
         # ── 3-Cycle Anti-Template Retry Loop ──────────────────────────────
@@ -748,7 +809,10 @@ class ContributionGenerator:
                     continue
 
                 # ── Parse and validate ─────────────────────────────────
-                changes = self._parse_changes(response, context)
+                changes = self._parse_changes(
+                    response, context,
+                    extra_file_contents=_dependency_files or None,
+                )
                 if not changes:
                     logger.warning(
                         "No valid changes parsed for vuln at %s:%d (cycle %d)",
@@ -1081,8 +1145,14 @@ class ContributionGenerator:
         )
 
     def _build_generation_prompt(
-        self, finding: Finding, context: RepoContext, *, repo_prefs: dict | None = None,
+        self,
+        finding: Finding,
+        context: RepoContext,
+        *,
+        repo_prefs: dict | None = None,
         adversarial_critique: str | None = None,
+        dependency_contents: dict[str, str] | None = None,
+        repo_skeleton: str | None = None,
     ) -> str:
         """Build the generation prompt based on finding type."""
         # Get the current file content if available
@@ -1154,6 +1224,30 @@ class ContributionGenerator:
             prompt += (
                 f"\n## Current File Content ({finding.file_path})\n"
                 f"```\n{current_content[:6000]}\n```\n"
+            )
+
+        # ── Dependency context (direct imports / callers of the target file) ──
+        if dependency_contents:
+            prompt += "\n## Related Files (direct dependencies / callers)\n"
+            prompt += (
+                "These files directly import or are imported by the target file. "
+                "Consider their interfaces when writing the patch — "
+                "do NOT re-implement helpers that already exist here.\n\n"
+            )
+            for dep_path, dep_content in list(dependency_contents.items())[:3]:
+                safe_path = _STRIP_AI_RE.sub("[sanitized]", dep_path)
+                safe_content = _STRIP_AI_RE.sub(
+                    "[AI-disclosure redacted]", dep_content[:4000]
+                )
+                prompt += f"### {safe_path}\n```\n{safe_content}\n```\n\n"
+
+        # ── Repo skeleton (token-efficient architectural map) ─────────────────
+        if repo_skeleton:
+            prompt += (
+                "\n## Repository Skeleton (architectural map)\n"
+                "Classes and function signatures across the entire repo. "
+                "Use this to discover existing helpers before writing new code.\n\n"
+                f"```\n{repo_skeleton[:8000]}\n```\n\n"
             )
 
         # Cross-file: find other files with the same pattern
@@ -1487,12 +1581,26 @@ class ContributionGenerator:
         )
         return result
 
-    def _parse_changes(self, response: str, context: RepoContext) -> list[FileChange]:
+    def _parse_changes(
+        self,
+        response: str,
+        context: RepoContext,
+        extra_file_contents: dict[str, str] | None = None,
+    ) -> list[FileChange]:
         """Parse LLM response into FileChange objects.
 
-        Supports two formats:
-        1. Search/replace blocks (for existing files) — applies edits to original
-        2. Full content (for new files) — uses content as-is
+        Supports three response formats:
+        1. ``{"files": [...]}`` — multi-file array (preferred for cross-file patches).
+           Each entry: ``{"file": "path", "is_new_file": false, "edits": [...]}``.
+        2. ``{"changes": [...]}`` — single-file list (backward-compatible default).
+        3. Full content — ``{"content": "..."}`` for new files.
+
+        Args:
+            response: Raw LLM response text.
+            context: RepoContext with ``relevant_files`` for original content lookup.
+            extra_file_contents: Additional {path: content} mapping for dependency
+                files fetched during the Omniscient Eye step. Checked before
+                ``context.relevant_files`` when looking up original file content.
         """
         import yaml
 
@@ -1517,7 +1625,7 @@ class ContributionGenerator:
                 payload_text = json_match.group(1)
             else:
                 json_match = re.search(
-                    r"\{[\s\S]*?(?:\"changes\"|'changes')[\s\S]*\}",
+                    r"\{[\s\S]*?(?:\"changes\"|'changes'|\"files\"|'files')[\s\S]*\}",
                     cleaned_response,
                 )
                 if json_match:
@@ -1543,7 +1651,26 @@ class ContributionGenerator:
                 coding_plan = data.get("coding_plan")
                 if coding_plan:
                     logger.info("[CoT] DEV Agent Plan: %s", coding_plan)
-                raw_changes = data.get("changes", [])
+
+                # Multi-file path: {"files": [{"file": "path", "edits": [...]}]}
+                files_list = data.get("files")
+                if files_list and isinstance(files_list, list):
+                    logger.info(
+                        "[MultiFile] Detected 'files' array with %d entries",
+                        len(files_list),
+                    )
+                    raw_changes = []
+                    for entry in files_list:
+                        if not isinstance(entry, dict):
+                            continue
+                        # Normalize "file" key → "path" for uniform processing
+                        normalized = dict(entry)
+                        if "file" in normalized and "path" not in normalized:
+                            normalized["path"] = normalized.pop("file")
+                        raw_changes.append(normalized)
+                else:
+                    raw_changes = data.get("changes", [])
+
             elif isinstance(data, list):
                 raw_changes = data
             else:
@@ -1582,13 +1709,40 @@ class ContributionGenerator:
                 # ─────────────────────────────────────────────────────────────────
 
                 if "edits" in item and not is_new:
-                    # Search/replace mode — apply edits to original content
-                    original = context.relevant_files.get(path, "")
+                    # Search/replace mode — apply edits to original content.
+                    # Check extra_file_contents (dependency files) first, then
+                    # fall back to context.relevant_files (primary fetched files).
+                    original = (
+                        (extra_file_contents or {}).get(path)
+                        or context.relevant_files.get(path, "")
+                    )
                     if not original:
-                        logger.warning(
-                            "No original content for %s (finding file not fetched), skipping edits",
-                            path,
-                        )
+                        # New file via "edits" path: the LLM is writing to a
+                        # file that doesn't exist yet (original is empty).
+                        # Concatenate all replace blocks as the new file content,
+                        # bypassing the strict search-matching constraints.
+                        if any(e.get("replace") for e in item.get("edits", [])):
+                            full_content = "\n".join(
+                                e.get("replace", "")
+                                for e in item["edits"]
+                                if e.get("replace")
+                            )
+                            logger.info(
+                                "[MultiFile] New file via edits path: %s (%d chars)",
+                                path, len(full_content),
+                            )
+                            changes.append(
+                                FileChange(
+                                    path=path,
+                                    new_content=full_content,
+                                    is_new_file=True,
+                                )
+                            )
+                        else:
+                            logger.warning(
+                                "No original content for %s (finding file not fetched), skipping edits",
+                                path,
+                            )
                         continue
 
                     new_content = original
