@@ -1,10 +1,10 @@
 """Local RAG (Retrieval-Augmented Generation) engine using ChromaDB.
 
 Provides semantic cross-file code search for the generator's X-Ray Vision:
-- Ephemeral ChromaDB (RAM-only, no disk persistence)
+- Persistent ChromaDB (disk-backed, survives restarts)
 - Sliding-window text chunking with overlap
 - Filters out auto-generated and test files from indexing
-- Auto-destroys collection after query to free RAM
+- Gracefully loads existing collections — re-indexes only new/changed files
 """
 
 from __future__ import annotations
@@ -173,17 +173,20 @@ def _embed_texts_fallback(texts: list[str]) -> list[list[float]]:
 # ── ChromaDB integration ──────────────────────────────────────────────────────
 
 class RepoIndexer:
-    """In-memory RAG indexer for a single repository.
+    """Persistent RAG indexer for a single repository.
 
-    Uses ChromaDB EphemeralClient (RAM-only, no disk persistence).
-    Collection is destroyed when the object is deleted or GC'd.
+    Uses ChromaDB PersistentClient with disk-backed storage at data/chroma_db/.
+    Collections survive restarts — files already indexed are not re-embedded.
 
     Usage:
         indexer = RepoIndexer()
         indexer.index_repo(repo_name, file_contents_dict)
         results = indexer.query_context("authentication token handling", n_results=5)
-        del indexer  # frees RAM immediately
+        del indexer  # collection remains on disk for next run
     """
+
+    # Disk path for persistent ChromaDB storage
+    PERSISTENT_PATH = "data/chroma_db"
 
     def __init__(self, chunk_size: int = DEFAULT_CHUNK_SIZE, overlap: int = DEFAULT_CHUNK_OVERLAP):
         self._chunk_size = chunk_size
@@ -193,19 +196,25 @@ class RepoIndexer:
         self._indexed_files: set[str] = set()
         self._repo_name: str = ""
 
+    def _ensure_persistent_path(self) -> None:
+        """Ensure the persistent storage directory exists."""
+        import os
+        os.makedirs(self.PERSISTENT_PATH, exist_ok=True)
+
     def _init_chroma(self) -> None:
-        """Lazily initialize ChromaDB ephemeral client and collection."""
+        """Lazily initialize ChromaDB PersistentClient and collection."""
         if self._chroma is not None:
             return
 
         try:
             import chromadb
-            self._chroma = chromadb.EphemeralClient()
+            self._ensure_persistent_path()
+            self._chroma = chromadb.PersistentClient(path=self.PERSISTENT_PATH)
             self._collection = self._chroma.get_or_create_collection(
                 name=self._repo_name.replace("/", "_").replace("-", "_")[:64],
                 metadata={"hnsw:space": "cosine"},
             )
-            logger.info("ChromaDB ephemeral collection '%s' initialized (RAM-only)", self._repo_name)
+            logger.info("ChromaDB persistent collection '%s' initialized at %s", self._repo_name, self.PERSISTENT_PATH)
         except ImportError:
             logger.warning("ChromaDB not installed — using regex fallback for cross-file search")
             self._chroma = None
@@ -321,13 +330,9 @@ class RepoIndexer:
             return []
 
     def destroy(self) -> None:
-        """Force-destroy the ChromaDB collection to free RAM."""
+        """Clear in-memory references (collection persists on disk for next run)."""
         if self._chroma is not None and self._collection is not None:
-            try:
-                self._chroma.delete_collection(name=self._collection.name)
-                logger.info("RAG: collection '%s' destroyed, RAM freed", self._collection.name)
-            except Exception as exc:
-                logger.debug("RAG: error destroying collection: %s", exc)
+            logger.info("RAG: collection '%s' released from memory (data persisted at %s)", self._collection.name, self.PERSISTENT_PATH)
         self._chroma = None
         self._collection = None
         self._indexed_files.clear()

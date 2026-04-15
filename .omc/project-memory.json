@@ -144,6 +144,79 @@
       ]
     }
   },
-  "hotPaths": [],
+  "hotPaths": [
+    {
+      "path": "farm_agent\\core\\rag.py",
+      "accessCount": 7,
+      "lastAccessed": 1776262310971,
+      "type": "file"
+    },
+    {
+      "path": ".dockerignore",
+      "accessCount": 3,
+      "lastAccessed": 1776262310926,
+      "type": "file"
+    },
+    {
+      "path": "requirements.txt",
+      "accessCount": 1,
+      "lastAccessed": 1776261119478,
+      "type": "file"
+    },
+    {
+      "path": "farm_agent\\core\\config.py",
+      "accessCount": 1,
+      "lastAccessed": 1776261119494,
+      "type": "file"
+    },
+    {
+      "path": "pyproject.toml",
+      "accessCount": 1,
+      "lastAccessed": 1776261119534,
+      "type": "file"
+    },
+    {
+      "path": "farm_agent\\cli\\main.py",
+      "accessCount": 1,
+      "lastAccessed": 1776261119760,
+      "type": "file"
+    },
+    {
+      "path": "farm_agent\\github\\security_gate.py",
+      "accessCount": 1,
+      "lastAccessed": 1776261123927,
+      "type": "file"
+    },
+    {
+      "path": "farm_agent\\core\\retry.py",
+      "accessCount": 1,
+      "lastAccessed": 1776261123944,
+      "type": "file"
+    },
+    {
+      "path": "farm_agent\\core\\sandbox.py",
+      "accessCount": 1,
+      "lastAccessed": 1776261124281,
+      "type": "file"
+    },
+    {
+      "path": "farm_agent\\orchestrator\\memory.py",
+      "accessCount": 1,
+      "lastAccessed": 1776261124322,
+      "type": "file"
+    },
+    {
+      "path": "farm_agent\\orchestrator\\pipeline.py",
+      "accessCount": 1,
+      "lastAccessed": 1776261127895,
+      "type": "file"
+    },
+    {
+      "path": "PROJECT_MAP.md",
+      "accessCount": 1,
+      "lastAccessed": 1776261196942,
+      "type": "file"
+    }
+  ],
   "userDirectives": []
 }

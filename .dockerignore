@@ -35,6 +35,9 @@ build/
 data/
 logs/
 
+# ── ChromaDB vector store (persistent, large binary) ──
+data/chroma_db/
+
 # ── Tests (not needed in production image) ─────────────
 tests/
 

@@ -1,423 +1,342 @@
-# PROJECT_MAP.md — Agent-Farm Definitive Architecture Map
+# PROJECT_MAP.md — Farm-Agent Ground Truth
 
-> **Ground-truth-only document**. Every entry traced from source code.
-> Last verified: 2026-04-15
-
----
-
-## 1. System Overview & Tech Stack
-
-| Layer | Technology |
-|-------|-----------|
-| Runtime | Python 3.11+ (asyncio) |
-| LLM Providers | Minimax (ABAB-6.5S, M2.7) — primary; OpenRouter (Red Team mode) |
-| Database | SQLite 3 (`data/memory.db`) via `aiosqlite` |
-| Vector DB | ChromaDB (ephemeral/RAM-only, no disk persistence) |
-| GitHub API | REST + GraphQL via `httpx` (multi-token rotation pool) |
-| Container | Docker (`Dockerfile` / `docker-compose.yml`); DockerSandbox for code validation |
-| CLI | `click` + `rich` (TUI dashboard available) |
-| Deployment | Docker entrypoint (`entrypoint.sh`) → `farm_agent superhuman` (terminator loop) |
-
-**System Purpose**: Autonomous security-focused bug bounty agent. Discovers open-source repositories, analyzes them for vulnerabilities, generates fixes, and submits pull requests through a multi-stage guarded pipeline.
+**Generated:** 2026-04-15
+**Version:** v3.2.0 (from git tag at commit `0b96a08`)
+**Entry Point:** `farm_agent/cli/main.py` → `cli()` (Click-based CLI)
+**Language:** Python 3.11+
 
 ---
 
-## 2. Core Architecture & Data Flow
+## 1. System Overview & Current State
 
-### 2.1 Pipeline Entry Points
+**What the system actually does:**
 
-| Entry Point | Source | Description |
-|-------------|--------|-------------|
-| `farm_agent run` | `cli/main.py` | Auto-discover repos and contribute |
-| `farm_agent target <url>` | `cli/main.py` | Target a specific repo |
-| `farm_agent analyze <url>` | `cli/main.py` | Analyze without contributing |
-| `farm_agent solve <url>` | `cli/main.py` | Solve open issues in a repo |
-| `farm_agent superhuman` | `cli/main.py` → `orchestrator/human.py` | **Terminator Mode**: relentless continuous loop (`SuperHumanLoop`) |
-| `farm_agent hunt` | `cli/main.py` | Aggressive single-repo discovery |
+Farm-Agent is an autonomous AI agent that discovers open-source GitHub repositories matching criteria (language, star range, activity), scans their code for issues (security vulnerabilities, code quality bugs, performance problems, etc.), generates patches via LLM, validates patches in Docker sandboxes, and creates PRs or GitHub Issues to contribute back.
 
-### 2.2 Primary Execution Loop — `ContribPipeline.run_circular()`
+**Active Tech Stack:**
+
+| Component | Technology | Evidence |
+|-----------|------------|----------|
+| Language | Python 3.11+ | `requires-python = ">=3.11"` in `pyproject.toml` |
+| HTTP client | `httpx` (async) | `httpx>=0.27,<1.0` |
+| LLM Providers | MiniMax, OpenRouter (via `google-genai` + `openai` + `anthropic`) | `config.py:55-68` |
+| Database | SQLite via `aiosqlite` | `memory.py` — WAL mode, `data/memory.db` default |
+| Docker | `docker>=7.1,<8.0` | `pyproject.toml`, `sandbox.py` |
+| Scheduling | `apscheduler>=3.10,<4.0` | `pyproject.toml` |
+| Config | Pydantic v2 + YAML | `config.py` — all config in `FarmAgentConfig` |
+| CLI | `click>=8.1,<9.0` + `rich>=13.0,<14.0` | `main.py` |
+| Vector DB | `chromadb>=0.4,<1.0` | `pyproject.toml` |
+| Git Python | `gitpython>=3.1,<4.0` | `pyproject.toml` |
+
+---
+
+## 2. Core Execution Pipeline & Data Flow
+
+### Primary CLI Commands (from `main.py`)
+
+| Command | Description |
+|---------|-------------|
+| `farm_agent run` | Auto-discover repos → analyze → generate → PR |
+| `farm_agent target <url>` | Target a specific repo |
+| `farm_agent hunt` | Aggressive multi-round discovery + contribution |
+| `farm_agent hunt-circular` | Round-robin from `target_repo.json` |
+| `farm_agent patrol` | Check open PRs for review feedback, auto-respond |
+| `farm_agent superhuman` | 24/7 organic loop mimicking human developer |
+| `farm_agent janitor` | Close garbage PRs (exploratory, low-impact) |
+| `farm_agent solve <url>` | Solve open issues in a specific repo |
+| `farm_agent analyze <url>` | Analyze only, no PR creation |
+
+### Pipeline Data Flow (for `run` command)
 
 ```
-target_repo.json ──seed──► SQLite target_repos table
-                                    │
-                                    ▼
-                           ┌─────────────────┐
-                           │  Atomic SELECT   │
-                           │  WHERE status=   │
-                           │  PENDING         │
-                           │  UPDATE...RETURN │
-                           │  ING (crash-safe)│
-                           └────────┬────────┘
-                                    │
-                                    ▼
-              ┌──────────────────────────────────────────┐
-              │         Anti-Farming Filters              │
-              │  Gate 1: Impact ≥ MEDIUM only            │
-              │  Gate 2: README_FIX / DOCS banned         │
-              │  Gate 3: .md/.txt/.rst/docs/ blocked      │
-              │  Gate 4: 60+ farming keywords blocked     │
-              │  Protected meta files (40+) blocked       │
-              └──────────────────┬───────────────────────┘
-                                 │ SURVIVING findings
-                                 ▼
-              ┌──────────────────────────────────────────┐
-               │       Radar (BloodhoundAnalyzer)          │
-               │  Semgrep-powered security radar + LLM White-Hat scan   │
-               │  Maintainer Vibe Check (hostility filter)  │
-              └──────────────────┬───────────────────────┘
-                                 │ validated findings
-                                 ▼
-              ┌──────────────────────────────────────────┐
-              │       Security Gate (Diplomat Protocol)    │
-              │  Task 1: SECURITY.md / README.md scan for  │
-              │          26 private-disclosure phrases      │
-              │          → ABORT + secret_findings/ JSON   │
-              │          → Telegram notification            │
-              │  Task 2: CONTRIBUTING.md → RepoStyleGuide  │
-              │          (cached in repo_style_guides table)│
-              │  Task 3: LLM fills PR template checkboxes  │
-              │  Protected Meta Files list enforced         │
-              └──────────────────┬───────────────────────┘
-                                 │ PASSED
-                                 ▼
-              ┌──────────────────────────────────────────┐
-              │       DEV (ContributionGenerator)         │
-              │  RAG context (ChromaDB ephemeral index)   │
-              │  RepoMapper skeleton for codebase map      │
-              │  Progressive Skills loaded per language    │
-              │  Gag Order applied to ALL output           │
-              │  7-tier Diff Minimizer for patch matching  │
-              └──────────────────┬───────────────────────┘
-                                 │ generated contribution
-                                 ▼
-              ┌──────────────────────────────────────────┐
-              │       QA (QAHardcoreScorer)               │
-              │  MIN_APPROVAL_SCORE = 9.0/10              │
-              │  Weights: Path 20%, Logic 25%, Arch 20%,   │
-              │           Idioms 15%, Security 10%,         │
-              │           Scope 10%                         │
-              │  CI/CD exception: infra fixes → 9.0+       │
-              │  Test/docs paths: MAX 4.0                    │
-              │  FAIL → QA lesson → knowledge_base table    │
-              └──────────────────┬───────────────────────┘
-                                 │ SCORE ≥ 9.0
-                                 ▼
-              ┌──────────────────────────────────────────┐
-              │       Sandbox (DockerSandbox)             │
-              │  Polyglot Guillotine: 11 languages         │
-              │  Hard 60s timeout per validation            │
-              └──────────────────┬───────────────────────┘
-                                 │ PASSED
-                                 ▼
-              ┌──────────────────────────────────────────┐
-              │       Delivery (PRManager / IssueManager)  │
-              │  Route A (SECURITY_FIX, CRITICAL, HIGH):   │
-              │          → Direct PR                       │
-              │  Route B (all other types):                │
-              │          → GitHub Issue (Issue-First)       │
-              │  Git clone + local commit + push            │
-              │  DCO signoff enforced                      │
-              │  Gag Order sanitized title/body             │
-              │  PRPatrol monitors post-submission          │
-              └──────────────────────────────────────────┘
+CLI.run()
+  → load_config()        [Source: config.py:232-263]
+  → ContribPipeline.run() [Source: pipeline.py:333-434]
+      → RepoDiscovery.discover()      → list[Repository]
+      → asyncio.Semaphore(max_conc=3, capped at 5 for Minimax)
+          → _process_repo()           [pipeline.py:1001-1724]
+              1. _check_ai_policy()   → skip if AI-banned repo
+              2. check_interaction_limits() → skip if contributor-only
+              3. fetch_repo_guidelines() → CommitFormat, PR template
+              4. run_security_gate()  → abort if private disclosure requested
+              5. check_maintainer_vibe() → abort if HOSTILE
+              6. CodeAnalyzer.analyze() → list[Finding]
+              7. Pre-filter: skip non-code files, protected meta files
+              8. Anti-Farming gate: drop LOW/TRIVIAL impact, banned types
+              9. Duplicate filter: check local memory + GitHub API
+              10. _validate_findings() → LLM re-checks each finding
+              11. Limit to 2 findings per repo
+              12. For each validated finding:
+                  - Route A (SECURITY_FIX or CRITICAL/HIGH): direct PR
+                  - Route B (everything else): Issue-First protocol
+              13. For Route A:
+                  → ContributionGenerator.generate()
+                  → DockerSandbox.run_in_sandbox() (max 3 retries, self-correction)
+                  → PRManager.create_pr()
+                  → record_pr() to SQLite
+                  → check_compliance_and_fix()
+                  → _check_ci_and_close_if_failed()
 ```
 
-### 2.3 DEV-QA Retry Loop
-
-Within `run_circular()`, if QA rejects a contribution:
-- MAX_DEV_QA_CYCLES = 3 retry cycles
-- Each failure injects QA critique context into next DEV cycle
-- After 3 failures → status `COMPLETED_TOO_COMPLEX`
-
-### 2.4 Terminator Mode — `SuperHumanLoop`
-
-(`orchestrator/human.py`): Infinite loop pulling targets from SQLite. Runs `hunt_circular()` then `patrol()` with minimal sleep intervals. Has quota-aware cooldowns (LLM_QUOTA_COOLDOWN = 300s normal, 3s in time-warp). Time-warp mode (`--time-warp`) runs 10 fast iterations for testing.
-
-### 2.5 PRPatrol — Post-Submission Monitoring
-
-(`pr/patrol.py`): Monitors open PRs for:
-- Review feedback → auto-fix with CI healing (up to `ci_fix_attempts` retries)
-- Hostile maintainer detection → blacklists repo
-- Discussion reply limits (prevents spam)
-- Randomized `mean_delay` (2-10 min, exponential distribution, capped at 2h)
-
-### 2.6 Sub-Agent Architecture
-
-(`agents/registry.py`): DeerFlow-inspired registry with 5 registered agents:
-- `AnalyzerAgent` — wraps `CodeAnalyzer`
-- `GeneratorAgent` — wraps `ContributionGenerator`
-- `PatrolAgent` — wraps `PRPatrol`
-- `ComplianceAgent` — handles CLA/DCO/CI
-- `IssueSolverAgent` — wraps `IssueSolver`
-- Max concurrent: 3 per `AgentRegistry`
-
-### 2.7 Issue Solver
-
-(`issues/solver.py`): Reads open GitHub Issues, classifies (`bug`, `feature`, `docs`, `security`, `performance`, `ui_ux`, `good_first_issue`, `unsolvable`), and generates targeted contributions. Uses `RepoMapper` for multi-file understanding.
-
----
-
-## 3. Critical Guardrails & Protocols
-
-### 3.1 Diplomat Protocol (`github/security_gate.py` + `github/guidelines.py`)
-
-**Task 1 — Private Disclosure Detection**:
-- Scans SECURITY.md and README.md for 26 private-disclosure phrases (e.g., "do not open a public pr", "hackerone", "bugcrowd", "responsible disclosure", "vulnerability disclosure program")
-- If triggered: pipeline **ABORTS**, findings saved to `secret_findings/` as JSON, Telegram notification sent
-- Status set to `COMPLIANCE_SKIP_PRIVATE_DISCLOSURE`
-
-**Task 2 — Style Guide Extraction**:
-- LLM summarizes CONTRIBUTING.md → `RepoStyleGuide` (cached in `repo_style_guides` SQLite table)
-- Injected into Generator and QA prompts
-
-**Task 3 — PR Template Compliance**:
-- LLM fills PR templates with checkbox compliance enforcement
-- `adapt_pr_title()` and `adapt_pr_body()` ensure format adherence
-
-**Protected Meta Files** (`PROTECTED_META_FILES`): 40+ files blocked from modification, including CONTRIBUTING.md, SECURITY.md, LICENSE, tsconfig.json, .eslintrc*, webpack.config.*, Dockerfile, docker-compose.yml, Makefile, .github/workflows/*, etc.
-
-### 3.2 Gag Order (Stealth Mode) — `generator/engine.py`
-
-**Security Vocabulary Suppression** (`_SECURITY_FORBIDDEN_RE`):
-- Regex: `(?i)\b(security|vulnerability|vulnerabilities|attack|exploit|malicious|threat|cve|injection|path traversal|remote code execution|zero.day|zero-day)\b`
-- Applied to: titles, bodies, commit messages, generated code
-
-**Security Vocabulary Rewrites** (`_SECURITY_REWRITE`, 12 rules):
-- "vulnerability" → "robustness gap"
-- "security fix" → "reliability improvement"
-- "security patch" → "robustness patch"
-- "security issue" → "reliability issue"
-- "security concern" → "reliability concern"
-- "security flaw" → "robustness flaw"
-- "security bug" → "reliability bug"
-- "exploit" → "edge case"
-- "attack vector" → "unexpected input path"
-- "injection" → "input sanitization improvement"
-- "path traversal" → "path resolution improvement"
-- "remote code execution" → "code execution safety"
-
-**AI Self-Identification Blocking** (`_GHOST_DISCLOSURE_RE`):
-- Patterns: "as an ai", "ai generated", "language model", "openai", "minimax", "farm_agent", "automated", "bot", etc.
-- Raises `GenerationError` if detected in titles, bodies, commit messages, or generated code
-
-**XSS Sanitization** (`escape_html_xss()`):
-- Strips `<script>` tags, `on*=` event handlers, `javascript:` URIs
-
-**Applied in**: `PRManager.create_pr()` via `_sanitize_text()`, `_parse_changes()`, `PRPatrol` reply posting
-
-### 3.3 QA Hardcore Scorer — `generator/scorer.py`
-
-- **MIN_APPROVAL_SCORE = 9.0** out of 10.0
-- Weighted grading: Path Relevance 20%, Logic 25%, Architecture 20%, Idioms 15%, Security 10%, Scope 10%
-- **Path relevance penalty**: test/example/demo/docs paths → MAX 4.0
-- **CI/CD exception**: security vulns in `.github/workflows`, Dockerfiles, deployment configs → 9.0+ if fix correctly sanitizes inputs
-- **Failure handling**: critiques recorded as QA lessons in `knowledge_base` table, failure context injected into next DEV cycle
-
-### 3.4 Anti-Farming Filters — `orchestrator/pipeline.py`
-
-| Gate | Rule | Exception |
-|------|------|-----------|
-| Gate 1 — Impact Level | Only CRITICAL, HIGH, MEDIUM survive. LOW and TRIVIAL dropped. | None |
-| Gate 2 — Docs Ban | `README_FIX` and `DOCS_IMPROVE` types BANNED always | None |
-| Gate 3 — File Guillotine | `.md`, `.txt`, `.rst`, `/docs/` paths BLOCKED | None |
-| Gate 4 — Keyword Blacklist | 60+ farming keywords (docstring, formatting, typo, lint, etc.) | `FEATURE_ADD` bypasses this gate |
-
-### 3.5 Diff Minimizer — `generator/engine.py`
-
-7-tier search/replace matching cascade:
-
-| Tier | Strategy | Min Lines | Notes |
-|------|----------|-----------|-------|
-| 1 | Exact match | 1 | Literal string |
-| 2 | Relaxed match | 1 | Strip trailing whitespace, normalize tabs→spaces |
-| 3 | Stripped match | 1 (body>20 chars) | `search.strip()` |
-| 4 | Indent-agnostic | 2 | Strip leading whitespace per line, re-indent replacement |
-| 5 | Aggressive indent normalization | 1 | Strip ALL whitespace per line |
-| 6 | Blank-line-agnostic | 2 non-blank | Remove all blank/whitespace-only lines |
-| 7 | AST/Function-level fallback | 1 | Uses `target_function` field; Python `ast` module for `.py`, regex for others |
-
-**Diff Minimizer ratio check**: If `replace_line_count / search_line_count > 2` OR `replace_line_count > 50`, edit is **BLOCKED** (prevents hallucinated full-file rewrites).
-- `MAX_PATCH_RETRIES = 2` (configurable via `PipelineConfig.max_patch_retries`)
-
-### 3.6 API Resilience
-
-**MinimaxProvider** (`llm/provider.py`):
-- 3 retries with exponential backoff for HTTP 429, 529, 402, and 5xx
-- Backoff formula: `min(5 * (2 ** attempt), 60)` seconds
-- Global semaphore: 4 concurrent calls
-- Local quota tracking: `Memory.check_and_record_llm_quota()` (950/5hr, 9500/7day with 5% safety buffer)
-
-**OpenRouterProvider** (`llm/provider.py`):
-- Same 3-retry pattern, backoff `min(5 * (2 ** attempt), 60)` for 429, 529, 402, 403
-
-**GitHubClient** (`github/client.py`):
-- Multi-token rotation pool (primary + secondary)
-- GET requests rotate tokens when `x-ratelimit-remaining < 50`
-- 403 secondary rate limit: uses `retry-after` header or default `[60, 120]` second backoff
-- 5xx: 3 retries with `2.0 * (attempt + 1)` second backoff
-- Uses `httpx` with `trust_env=False`, granular timeouts (15s connect, 30s total)
-- GraphQL falls back to REST on any error
-
----
-
-## 4. Directory & Module Map
+### Hunt Mode Flow (`pipeline.py:436-585`)
 
 ```
-Agent-Farm/
-├── config.yaml                  # Runtime configuration (secrets, limits, profiles)
-├── target_repo.json             # Circular target list (seeds SQLite target_repos table)
-├── Dockerfile                   # Production container
-├── Dockerfile.superhuman        # Terminator mode container
-├── docker-compose.yml           # Container orchestration
-├── entrypoint.sh                # Docker entrypoint → farm_agent superhuman
-├── Makefile                     # Build/run shortcuts
-├── pyproject.toml               # Python project metadata & dependencies
-├── requirements.txt             # Pinned dependencies
-├── fix.py                       # Ad-hoc fix script (utility)
-│
-├── farm_agent/
-│   ├── __init__.py               # Package version
-│   │
-│   ├── cli/
-│   │   ├── main.py               # CLI entry point (click commands: run, target, analyze, solve, status, stats, config, superhuman)
-│   │   └── tui.py                 # Rich TUI dashboard for monitoring
-│   │
-│   ├── orchestrator/
-│   │   ├── pipeline.py           # ★ CORE: ContribPipeline (run_circular, run, hunt, run_single, _process_repo), anti-farming gates, DEV-QA loop
-│   │   ├── human.py              # ★ SuperHumanLoop: Terminator Mode (infinite hunt-circular + patrol loop)
-│   │   └── memory.py             # ★ SQLite persistent memory (all table schemas, CRUD operations)
-│   │
-│   ├── generator/
-│   │   ├── engine.py             # ★ ContributionGenerator: Gag Order, Diff Minimizer (7-tier), False Positive detector, agentic generate loop
-│   │   ├── scorer.py             # ★ QAHardcoreScorer: MIN_APPROVAL_SCORE=9.0, weighted grading, CI/CD exception
-│   │   └── reviewer.py           # ★ ReviewerAgent: independent adversarial review (separate from generator)
-│   │
-│   ├── github/
-│   │   ├── client.py             # ★ GitHubClient: REST+GraphQL, multi-token rotation, rate limiting, httpx
-│   │   ├── discovery.py          # ★ RepoDiscovery (stochastic search), DatabaseTargetDiscovery (SQLite-backed circular)
-│   │   ├── security_gate.py      # ★ Diplomat Protocol Task 1: SECURITY.md scan, 26 private-disclosure phrases, secret_findings/
-│   │   └── guidelines.py          # ★ Diplomat Protocol Tasks 2-3: RepoStyleGuide extraction, PR template filling, adapt_pr_title/body
-│   │
-│   ├── pr/
-│   │   ├── manager.py            # ★ PRManager: PR lifecycle, local git commit+push, Gag Order sanitization, CLA handling, Issue-First Protocol
-│   │   ├── patrol.py             # ★ PRPatrol: review feedback, CI auto-healing, hostile maintainer detection, discussion reply limits
-│   │   └── janitor.py.DISABLED   # DISABLED: Ruthless PR cleanup agent (closes/deletes GARBAGE PRs)
-│   │
-│   ├── issues/
-│   │   └── solver.py             # IssueSolver: GitHub Issue classifier + multi-file contribution generator (IssueCategory enum)
-│   │
-│   ├── analysis/
-│   │   ├── analyzer.py           # ★ CodeAnalyzer, BloodhoundAnalyzer (Semgrep-powered security radar + LLM White-Hat), Maintainer Vibe Check
-│   │   ├── mapper.py             # RepoMapper: token-efficient structural map (Python ast + regex for JS/TS/Go/Rust)
-│   │   ├── language_rules.py     # Language-specific security/quality rules for JS/TS, Go, Rust
-│   │   ├── skills.py             # Progressive skill loading (on-demand prompts per language/framework)
-│   │   └── strategies.py         # Framework-specific analysis strategies (detect framework → apply targeted rules)
-│   │
-│   ├── llm/
-│   │   ├── provider.py           # ★ MinimaxProvider + OpenRouterProvider: exponential backoff, quota enforcement, semaphores
-│   │   ├── router.py             # TaskRouter: routes tasks to optimal model (CostStrategy: PERFORMANCE/BALANCED/ECONOMY)
-│   │   ├── models.py             # ModelSpec registry: capabilities, costs, context windows (MINIMAX_ABAB65S_CHAT, MINIMAX_M27)
-│   │   ├── agents.py             # Multi-agent coordinator: specialized agents per task type
-│   │   └── context.py            # ContextBudget: token estimation, chunking, prompt building from RepoContext
-│   │
-│   ├── agents/
-│   │   └── registry.py           # Sub-agent registry (DeerFlow-inspired): AgentRole, AgentContext, 5 built-in agent stubs
-│   │
-│   ├── core/
-│   │   ├── config.py             # ★ Full config system: GitHubConfig, LLMConfig, AnalysisConfig, PipelineConfig
-│   │   ├── models.py             # ★ Pydantic models: Finding, Contribution, VulnerabilityDossier, QAResult, RepoContext, etc.
-│   │   ├── exceptions.py          # Exception hierarchy: FarmAgentError, GitHubAPIError, LLMRateLimitError, GenerationError, ContextMissingError, etc.
-│   │   ├── middleware.py          # Middleware chain: RateLimit, Validation, Retry, DCO, QualityGate
-│   │   ├── retry.py              # Async retry decorators, LRUCache
-│   │   ├── sandbox.py            # ★ DockerSandbox: Polyglot Guillotine (11 languages), hard 60s timeout
-│   │   ├── rag.py                # RAGEngine: ephemeral ChromaDB, sliding-window chunking, auto-destroy after query
-│   │   ├── quotas.py             # UsageTracker: in-memory daily limits (GitHub 5000/day, LLM 1000/day, 1M tokens/day)
-│   │   ├── leaderboard.py        # LeaderboardEntry: PR merge/close rate tracking by repo
-│   │   ├── daily_log.py          # DailyMarkdownLogger: append-only daily_log/daily_log_YYYY-MM-DD.md
-│   │   ├── logger.py              # Daily rotating file logger setup
-│   │   ├── notifier.py            # TelegramNotifier (used by Security Gate for private disclosure alerts)
-│   │   └── profiles.py            # ContribProfile: named config presets (YAML-based)
-│   │
-│   ├── notifications/
-│   │   └── notifier.py            # Notifier: multi-channel dispatcher (Slack, Discord, Telegram webhooks)
-│   │
-│   ├── plugins/
-│   │   └── base.py                # AnalyzerPlugin + ContributionPlugin ABCs, PluginRegistry (entry-point discovery)
-│   │
-│   ├── templates/
-│   │   ├── registry.py            # TemplateRegistry: prompt template management
-│   │   └── builtin/               # Built-in prompt templates
-│   │
-│   └── tools/
-│       └── protocol.py            # Tool Protocol + ToolRegistry: extensible tool support (DeerFlow-inspired)
-│
-├── secret_findings/              # Private vulnerability findings saved by Security Gate (JSON files)
-├── data/                         # SQLite database (memory.db)
-├── daily_log/                    # Daily markdown logs from SuperHumanLoop
-├── logs/                         # Application logs
-├── scripts/                      # Utility scripts
-├── tests/                        # Test suite
-└── docs/                         # Documentation
+Hunt mode (rounds × delay):
+  → shuffled star tiers each round
+  → RepoDiscovery.discover()
+  → prepend "friendly repos" (VIP alumni repos off cooldown)
+  → _hunt_process_repo() — Issues FIRST, then analysis
+  → Issues mode skips analysis if ≥1 issue PR created
 ```
 
-★ = Critical path module (pipeline will fail without it)
+### Circular Target Loop (`pipeline.py:691-985`)
+
+```
+run_circular():
+  → DatabaseTargetDiscovery.get_next_target() — picks oldest scanned_at
+  → BloodhoundAnalyzer.run_bloodhound() — Semgrep pre-scan
+  → if no bugs: mark COMPLETED_NO_VULN, return
+  → filter production_vulns (skip LOW_PRIORITY_CONTEXT)
+  → run_security_gate() → abort if private disclosure
+  → DEV-QA Cycle Loop (max 3):
+      → ContributionGenerator.generate_from_dossier()
+      → QAHardcoreScorer.evaluate() — if approved, break
+      → else record QA lessons, inject into failure_context
+  → if QA passed: PRManager.create_pr()
+  → mark status: PR_SUBMITTED / COMPLETED_TOO_COMPLEX
+```
 
 ---
 
-## 5. Database Schema
+## 3. Database Schema & State
 
-All tables live in `data/memory.db` (SQLite). Schema defined in `farm_agent/orchestrator/memory.py`.
+**SQLite DB at:** `data/memory.db` (default, configurable via `storage.db_path`)
 
-| Table | Primary Key | Unique Constraints | Purpose |
-|-------|-------------|-------------------|---------|
-| `analyzed_repos` | `full_name` | — | Tracks repos that have been analyzed (language, stars, findings, metadata) |
-| `submitted_prs` | `id` (auto) | `repo + pr_number` | All submitted PRs with status tracking (branch, fork, CI fix attempts, discussion replies) |
-| `findings_cache` | `id` | — | Cached vulnerability findings (type, severity, file_path, status) |
-| `run_log` | `id` (auto) | — | Pipeline run history (timestamps, repos analyzed, PRs created, errors) |
-| `pr_outcomes` | `id` (auto) | `repo + pr_number` | PR outcome tracking (merged/closed, feedback, time to close) |
-| `repo_preferences` | `repo` | — | Per-repo preferences (accepted/rejected types, merge rate, review hours) |
-| `blacklisted_repos` | `repo` | — | Blacklisted repos with reason and timestamp |
-| `api_usage_log` | `id` (auto) | — | API call tracking per provider |
-| `task_schedule` | `task_key` | — | Scheduled task timestamps (next run time) |
-| `knowledge_base` | — | `repo_name + entry_type + content` | QA lessons, style guides, learned patterns |
-| `target_repos` | `repo_url` | — | Circular target queue (status, language, bounty_amount, diamond_target) |
-| `repo_style_guides` | `repo` | — | Diplomat Protocol style guides (CONTRIBUTING.md → RepoStyleGuide cache) |
+**WAL Journal Mode** — falls back to DELETE on Docker volume filesystems.
 
-### Key Status Values in `target_repos`
+**Schema (from `memory.py:19-135`):**
 
-| Status | Meaning |
-|--------|---------|
-| `PENDING` | Awaiting processing in circular loop |
-| `PR_SUBMITTED` | Successfully passed QA+Sandbox, PR created |
-| `COMPLETED_NO_VULN` | Bloodhound clean sweep or all non-production findings |
-| `COMPLIANCE_SKIP_PRIVATE_DISCLOSURE` | Security Gate detected private disclosure policy |
-| `COMPLETED_TOO_COMPLEX` | 3 DEV-QA cycles all failed QA (score < 9.0) |
+| Table | Primary Columns | Purpose |
+|-------|-----------------|---------|
+| `analyzed_repos` | `full_name` (PK), `language`, `stars`, `analyzed_at`, `findings`, `metadata` | Track which repos have been scanned |
+| `submitted_prs` | `id`, `repo`, `pr_number` (UNIQUE), `pr_url`, `title`, `type`, `status`, `branch`, `fork`, `created_at`, `updated_at`, `ci_fix_attempts`, `discussion_replies` | All PRs submitted by the agent |
+| `findings_cache` | `id`, `repo`, `type`, `severity`, `title`, `file_path`, `status`, `created_at` | Cached analysis findings |
+| `run_log` | `id`, `started_at`, `finished_at`, `repos_analyzed`, `prs_created`, `findings`, `errors`, `metadata` | Historical pipeline runs |
+| `pr_outcomes` | `id`, `repo`, `pr_number` (UNIQUE), `pr_url`, `pr_type`, `outcome`, `feedback`, `time_to_close_hours`, `recorded_at` | Outcome tracking for learning |
+| `repo_preferences` | `repo` (PK), `preferred_types`, `rejected_types`, `merge_rate`, `avg_review_hours`, `notes`, `updated_at` | Per-repo learned preferences |
+| `blacklisted_repos` | `repo` (PK), `reason`, `pr_number`, `blacklisted_at` | Permanently blocked repos |
+| `api_usage_log` | `id`, `timestamp` (Unix epoch), `provider` | LLM API usage for quota tracking |
+| `task_schedule` | `task_key` (PK), `next_run`, `updated_at` | Persistent task scheduling |
+| `knowledge_base` | `repo_name`, `entry_type`, `content`, `created_at` (UNIQUE) | QA lessons, audit history |
+| `target_repos` | `repo_url` (PK), `status`, `scanned_at` (Unix ts), `language`, `bounty_amount`, `diamond_target` | Circular loop targets |
+| `repo_style_guides` | `repo` (PK), `style_summary`, `contributing_md`, `pr_template`, `created_at`, `updated_at` | Cached CONTRIBUTING.md parses |
+
+**Migrations:** On init, `ci_fix_attempts` and `discussion_replies` columns are added to `submitted_prs` if missing.
 
 ---
 
-## 6. Known Issues / Technical Debt
+## 4. Critical Guardrails, Limits & Business Rules
 
-### 6.1 Disabled Features
+### 4.1 Thresholds & Limits
 
-| Feature | File | Status | Notes |
-|---------|------|--------|-------|
-| Janitor (PR cleanup) | `pr/janitor.py.DISABLED` | **DISABLED** | Ruthless PR garbage collector. Uses LLM to classify PRs as GARBAGE and closes/deletes them. Disabled by renaming to `.DISABLED`. Not dead code — could be re-enabled. |
+| Limit | Value | Source |
+|-------|-------|--------|
+| `max_repos_per_run` | 5 | `config.py:20` |
+| `max_prs_per_day` | 10 | `config.py:21` |
+| `min_daily_prs` | 4 | `config.py:22` |
+| `max_daily_prs` | 10 | `config.py:23` |
+| `rate_limit_buffer` | 3 (stop when GitHub API remaining < 3) | `config.py:24` |
+| `max_concurrent_repos` | 3 (capped to 5 for Minimax) | `config.py:180`, `pipeline.py:229-233` |
+| `timeout_per_repo_sec` | 300 | `config.py:181` |
+| `max_ci_retries` | 3 | `config.py:183` |
+| `max_discussion_replies` | 3 | `config.py:184` |
+| `max_patch_retries` | 2 | `config.py:185` |
+| `max_review_retries` | 2 | `config.py:186` |
+| `max_files_per_pr` | 10 | `config.py:136` |
+| `run_tests_before_pr` | True | `config.py:137` |
+| `max_file_size_kb` | 500 | `config.py:92` |
+| `max_snippet_chars` | 15000 (OpenRouter) | `config.py:68` |
+| `red_team_daily_limit` | 1000 (OpenRouter calls/day) | `config.py:114` |
+| `sandbox_validation_enabled` | **hardcoded True** — can never be bypassed | `config.py:188` |
+| `max_prs_per_day` (hard cap in `pipeline.py:351-360`) | Checked before pipeline run | `pipeline.py:354` |
+| LLM Quota: 5-hour window | 950 requests (95% of 1000 limit) | `memory.py:943` |
+| LLM Quota: 7-day window | 9500 requests (95% of 10000 limit) | `memory.py:953` |
 
-### 6.2 Technical Debt
+### 4.2 Validation Rules (Active Guards)
 
-| Area | Description | Location |
-|------|-------------|----------|
-| Single-LLM routing | `TaskRouter` always returns MiniMax M2.7 regardless of task type; `CostStrategy` enum exists but is unused | `llm/router.py:30-60` |
-| Gemini model references | `llm/models.py` docstring mentions "Gemini models" but only MiniMax models are registered | `llm/models.py:1-6` |
-| No active code TODOs | Searched for TODO/FIXME/HACK/DIRTY — only found in prompt text strings, not in active code | Global |
-| Janitor agent stub | `ComplianceAgent` in `agents/registry.py` is a minimal stub (checks CLA/DCO flags but doesn't implement real signing) | `agents/registry.py:188-215` |
-| ContextMissingError defined | `ContextMissingError` exists for ChromaDB empty results but is not caught in pipeline.py — may cause unhandled exceptions if RAG returns nothing | `core/exceptions.py:52-58` |
-| Hardcoded quota limits | LLM quotas (950/5hr, 9500/7day) are hardcoded in `Memory` class, not in `config.yaml` | `orchestrator/memory.py` |
-| Semaphore concurrency | Minimax global semaphore = 4 concurrent calls; not configurable via config | `llm/provider.py` |
+**AI Policy Block:**
+- Scans `AI_POLICY.md`, `.github/AI_POLICY.md` for ban keywords ("do not accept ai", "no ai-generated", etc.) — [Source: `pipeline.py:2314-2375`]
+- If banned, repo is skipped.
 
-### 6.2 Architectural Observations
+**Interaction Limits Block:**
+- `github.check_interaction_limits()` — skips repos restricting to prior contributors only. [Source: `pipeline.py:1024-1031`]
 
-- **Terminator Mode** (`SuperHumanLoop`) has no graceful shutdown beyond SIGINT handling — could lose in-flight data on kill
-- **PR creation** uses local git clone + commit + push (not GitHub Contents API), which requires SSH key or token-authenticated git in the environment
-- **ChromaDB** is ephemeral (RAM-only) — all embeddings re-indexed per repo analysis, no cross-session persistence
-- **UsageTracker** (`quotas.py`) is in-memory only with daily reset — no SQLite persistence, losing data on crash
+**Security Disclosure Gate:**
+- Scans `SECURITY.md`, `SECURITY.md`, `.github/SECURITY.md`, `docs/SECURITY.md` for private disclosure phrases (60+ phrases including "email us at", "private disclosure", "hackerone", etc.)
+- If found: saves findings to `secret_findings/{repo}.json`, sends Telegram notification, aborts pipeline for that repo. [Source: `security_gate.py:78-307`]
+
+**Maintainer Vibe Check:**
+- Fetches recent maintainer comments via GitHub API
+- If vibe contains "HOSTILE": repo is blacklisted and skipped. [Source: `pipeline.py:1064-1098`]
+
+**Protected Meta Files — NEVER modify:**
+- `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, `LICENSE*`, `SECURITY.md`, `.github/CODEOWNERS`, `.all-contributorsrc`
+- All `tsconfig*.json`, `.eslintrc*`, `.prettierrc*`, `webpack.config.*`, `vite.config.*`, `babel.config.*`
+- `package.json`, `package-lock.json`, `yarn.lock`, `pnpm-lock.yaml`
+- `.github/workflows/*.yml`, `.env*` files
+- [Source: `pipeline.py:51-119`]
+
+**File Extension Guards:**
+- Skip extensions: `.md`, `.txt`, `.rst`, `.yml`, `.yaml`, `.toml`, `.cfg`, `.ini`, `.json` — [Source: `pipeline.py:123-133`]
+
+**Anti-Farming Filter Gates:**
+1. **Impact level gate:** `LOW` and `TRIVIAL` findings are ALWAYS dropped — [Source: `pipeline.py:1251-1264`]
+2. **Docs ban gate:** `README_FIX` and `DOCS_IMPROVE` types are BANNED — [Source: `pipeline.py:1266-1279`]
+3. **File extension guillotine:** `.md`, `.txt`, `.rst` files are BLOCKED regardless of type — [Source: `pipeline.py:1281-1307`]
+4. **Keyword blacklist gate:** 50+ farming keywords (docstring, docs, format, spelling, test, typo, etc.) block findings — [Source: `pipeline.py:1309-1340`]
+
+**Duplicate Detection:**
+- Title similarity via bigram overlap (80% threshold) — [Source: `pipeline.py:136-186`]
+- Checks both local SQLite memory AND GitHub API for existing PRs
+- Also tracks targeted file paths from PR bodies
+
+**Sandbox Guillotine (P0-FIX):**
+- `sandbox_validation_enabled` is hardcoded `True` in config — can NEVER be disabled
+- Docker container security: `network_mode="none"`, `mem_limit="512m"`, `nano_cpus=500_000_000`, `cap_drop=["ALL"]`, `pids_limit=128`
+- Hard 60-second `asyncio.wait_for` timeout at THREE levels: OS-level `timeout --signal=KILL`, asyncio-level `wait_for`, poll-level kill loop
+- If sandbox unavailable (Docker not running): PR creation is BLOCKED
+- Max 3 sandbox validation attempts with self-correction between retries
+- [Source: `sandbox.py:198-707`]
+
+**TOCTOU Quota Defense:**
+- Inside `human_typing_lock`, re-check `get_today_pr_count()` before PR creation to prevent concurrent overruns — [Source: `pipeline.py:1648-1658`]
+
+### 4.3 Fallback/Error Handling
+
+| Scenario | Behavior |
+|----------|----------|
+| No config file found | Use all defaults (token from env or `gh auth token`) |
+| GitHub token missing | CLI exits with error |
+| LLM API key missing | CLI exits with error |
+| Daily PR quota exhausted | Pipeline returns early, no PRs created |
+| Docker unavailable | Sandbox returns error dict, PR creation BLOCKED |
+| LLM quota breach (5h/7d) | `LLMRateLimitError` raised, caught by caller for cooldown |
+| GitHub API error | `async_retry` decorator: 3 retries, base 2s, max 60s, ±25% jitter |
+| LLM error | `llm_retry`: 3 retries, base 3s, max 60s |
+| Rate limit error (429) | `rate_limit_retry`: 5 retries, base 10s, max 120s |
+| Sandbox timeout | Exit code 137, stderr = "Sandbox execution timed out after 60s" |
+
+---
+
+## 5. Directory & Module Architecture
+
+```
+farm_agent/
+├── cli/
+│   ├── main.py          # Click CLI, all commands (run, hunt, patrol, etc.)
+│   └── tui.py           # Interactive TUI mode (referenced but minimal implementation)
+├── core/
+│   ├── config.py        # Pydantic config system, load_config(), FarmAgentConfig
+│   ├── exceptions.py    # GitHubAPIError, LLMRateLimitError, ConfigError, RateLimitError
+│   ├── middleware.py    # Middleware chain (DeerFlow pattern) for quota/quality enforcement
+│   ├── models.py        # Pydantic models: Repository, Finding, Contribution, AnalysisResult, Severity, etc.
+│   ├── memory.py        # SQLite-backed Memory class (all tables defined here)
+│   ├── logger.py        # Daily rolling file logger setup
+│   ├── notifier.py      # TelegramNotifier
+│   ├── profiles.py      # Contribution profiles (quick/standard/thorough)
+│   ├── quotas.py         # Quota tracking (referenced in coverage omit)
+│   ├── leaderboard.py   # PR stats and repo rankings (referenced in coverage omit)
+│   ├── rag.py           # RAG pipeline for knowledge retrieval
+│   ├── retry.py          # @async_retry, @github_retry, @llm_retry decorators + LRUCache
+│   └── sandbox.py       # DockerSandbox — Polyglot Guillotine (12 languages supported)
+├── generator/
+│   ├── engine.py        # ContributionGenerator.generate() + generate_from_dossier()
+│   ├── reviewer.py      # ContributionReviewer
+│   └── scorer.py        # QAHardcoreScorer — QA evaluation with repo_style_guide penalty
+├── github/
+│   ├── client.py        # GitHubClient — all GitHub API interactions (REST + GraphQL)
+│   ├── discovery.py     # RepoDiscovery + DatabaseTargetDiscovery
+│   ├── guidelines.py    # fetch_repo_guidelines() — parses CONTRIBUTING.md + PR template
+│   └── security_gate.py # Security Disclosure Gate (private disclosure detection)
+├── analysis/
+│   ├── analyzer.py      # CodeAnalyzer.analyze() — static code analysis
+│   ├── bloodhound.py    # BloodhoundAnalyzer — Semgrep pre-scan for vulnerability discovery
+│   ├── language_rules.py
+│   ├── mapper.py
+│   ├── skills.py
+│   └── strategies.py
+├── llm/
+│   ├── provider.py      # create_llm_provider() — MiniMax, OpenRouter, or multi-model routing
+│   ├── models.py        # ALL_MODELS catalog, TaskType enum, model capabilities/tiers/costs
+│   ├── router.py        # TaskRouter — default model assignments per task type
+│   └── agents.py        # LLM agent definitions (referenced in coverage omit)
+├── issues/
+│   └── solver.py        # IssueSolver — fetch + classify + solve GitHub issues
+├── orchestrator/
+│   ├── pipeline.py      # ContribPipeline — main orchestrator (THIS IS THE CORE ENGINE)
+│   ├── memory.py        # Alias/sibling to core/memory.py — both point to same class
+│   ├── human.py         # SuperHumanLoop — 24/7 organic operation loop
+│   └── pipeline.py      # (duplicate reference, also exports ContribPipeline)
+├── pr/
+│   ├── manager.py       # PRManager.create_pr() — fork, branch, commit, push, create PR
+│   ├── patrol.py        # PRPatrol — check open PRs for review feedback, auto-respond
+│   └── janitor.py       # PRJanitor — close garbage PRs
+├── agents/
+│   └── registry.py      # create_default_registry() — DeerFlow agent system
+├── plugins/
+│   └── base.py          # Plugin base class (referenced in coverage omit)
+├── notifications/
+│   └── notifier.py      # Notifier — Slack/Discord/Telegram webhooks
+├── templates/
+│   └── registry.py      # TemplateRegistry — contribution templates
+├── tools/
+│   └── protocol.py      # create_default_tools() — DeerFlow tool system
+└── __init__.py          # Version = "3.0.0"
+
+scripts/
+├── cleanup_forks.py      # Standalone fork cleanup utility
+├── inject_ci_trap.py     # Test injection script
+├── inject_maintainer_feedback.py
+├── perf_benchmark_io.py  # I/O performance benchmarking
+└── vip_repos_radar.py    # VIP repo tracking
+
+tests/
+├── unit/
+│   ├── test_circular_target.py
+│   ├── test_concurrency_cap.py
+│   └── test_pr_creation_integrity.py
+└── test_async_io_pipeline.py
+```
+
+---
+
+## 6. Version Assessment & Technical Debt
+
+**Maturity:** `Development Status :: 4 - Beta` (per `pyproject.toml`)
+
+**Known Technical Debt / Incomplete Features:**
+
+| Item | Description | Source |
+|------|-------------|--------|
+| `DEBT-04` | Missing index for sliding-window quota queries — flagged in `memory.py:162-165` | `memory.py:163` comment |
+| `P0-FIX (v2)` | Replaced volatile in-RAM quota cleanup with `task_schedule` table for multi-process coordination | `memory.py:970-993` |
+| `P0-FIX (v2)` | Sandbox wrapped with OS-level `timeout --signal=KILL` instead of relying on Docker `stop_timeout` | `sandbox.py:499-503` |
+| `Crucible BUG` | `_wait_for_exit_code` replaced `client.api.wait()` (60s HTTP hard limit) with polling loop | `sandbox.py:585-637` |
+| `CRIT-03 FIX` | Minimax capped to max 5 concurrent repos to prevent secondary rate limit thundering herd | `pipeline.py:229-233` |
+| `CRIT-04 FIX` | Long coding delay moved OUTSIDE the `human_typing_lock` to prevent lock contention | `pipeline.py:2082-2088` |
+| `P2-FIX` | TOCTOU quota defense moved inside lock for correct concurrent quota enforcement | `pipeline.py:2091-2102` |
+| `PHASE 2-FIX` | Manifest-driven language detection (package.json → tsconfig.json → Cargo.toml) before extension counting | `sandbox.py:109-165` |
+| `PHASE 3-FIX` | Title similarity now requires 80% bigram sequence overlap, not 50% word intersection | `pipeline.py:136-186` |
+| Coverage omit | 8 modules excluded from coverage (`web/*`, `scheduler/*`, `cli/tui.py`, `llm/agents.py`, etc.) | `pyproject.toml:75-88` |
+
+**Orphaned / Incomplete Features:**
+- `cli/tui.py` — referenced as entry point from `main.py:1339` but minimal implementation
+- `core/rag.py` — present in structure but functionality unclear from scan
+- `analysis/language_rules.py`, `analysis/mapper.py`, `analysis/skills.py`, `analysis/strategies.py` — present but purpose not fully analyzed
+- `plugins/base.py` — referenced in coverage omit, likely interface definition
+
+**Secret Findings:** Security-gated vulnerabilities are saved to `secret_findings/` directory for manual reporting.
+
+---
+
+*Evidence anchored to source files. No speculation. No assumptions.*

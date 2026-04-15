@@ -31,6 +31,9 @@ data/
 *.db-wal
 *.db-shm
 
+# ChromaDB vector store (persistent, large binary — not git-tracked)
+data/chroma_db/
+
 # OS
 .DS_Store
 Thumbs.db
