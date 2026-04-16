@@ -9,7 +9,6 @@ from farm_agent.core.models import TargetRepoEntry
 from farm_agent.github.discovery import JsonTargetDiscovery, DatabaseTargetDiscovery
 from farm_agent.orchestrator.memory import Memory
 
-
 @pytest.fixture
 def sample_entries():
     return [
