@@ -2266,11 +2266,15 @@ class ContribPipeline:
                 f"real benefit?\n"
                 f"5. Does the existing code already handle this edge case through "
                 f"a different mechanism?\n\n"
-                f"### Response\n"
-                f"Respond with EXACTLY one line:\n"
-                f"VALID: [brief reason why this is a real issue]\n"
-                f"or\n"
-                f"INVALID: [brief reason why this is a false positive]\n"
+                f"### Additional Rejection Triggers\n"
+                f"- Snippet is a raw string literal with no code structure → REJECT\n"
+                f"- Snippet is fewer than 2 lines of actual code → REJECT\n"
+                f"- No clear path from user input to vulnerable sink → REJECT\n"
+                f"- Code relies on implicit behavior not present in snippet → REJECT\n\n"
+                f"### Response Format\n"
+                f"You MUST respond ONLY with valid JSON. No markdown, no explanation outside JSON.\n"
+                f'{{"is_real_vulnerability": true/false, "confidence_score": 0-100, '
+                f'"rejection_reason": "reason if false", "data_flow_proof": "exact var names if true"}}'
             )
 
             try:
@@ -2278,37 +2282,70 @@ class ContribPipeline:
                     prompt,
                     system=(
                         "You are a senior code reviewer validating automated findings. "
-                        "Be skeptical — reject findings that are false positives. "
-                        "A finding is INVALID if the code is already protected or "
-                        "the issue doesn't exist in practice."
+                        "Be skeptical — reject findings that are false positives.\n\n"
+                        "CRITICAL RULES:\n"
+                        "1. NO ASSUMPTIONS: You MUST base your assessment ONLY on the provided code snippet. "
+                        "Do NOT assume, guess, or imagine functionality not visible. "
+                        "Do NOT use 'If [condition]' logic. If you have to say 'If', it is a False Positive.\n"
+                        "2. DATA FLOW REQUIREMENT: You must trace user-controlled input to the vulnerable sink. "
+                        "If no clear exploitable data flow exists, mark as False Positive.\n"
+                        "3. GARBAGE SNIPPET REJECTION: If snippet is too short, is just a string literal, "
+                        "or lacks structural programming context, reject immediately.\n\n"
+                        "Respond ONLY with valid JSON matching this schema: "
+                        '{"is_real_vulnerability": boolean, "confidence_score": integer (0-100), '
+                        '"rejection_reason": "string (required if false)", '
+                        '"data_flow_proof": "string (required if true — cite exact variable names)"}'
                     ),
                     temperature=0.1,
                 )
-
-                response_text = response.strip().upper()
-                if response_text.startswith("INVALID"):
-                    logger.info(
-                        "❌ Finding rejected: %s — %s",
-                        finding.title,
-                        response.strip(),
-                    )
-                    continue
-
-                logger.info(
-                    "✅ Finding validated: %s — %s",
-                    finding.title,
-                    response.strip()[:80],
-                )
-                validated.append(finding)
-
-            except (ValueError, TypeError) as e:
-                # Finding is genuinely invalid — skip it, don't retry
-                logger.warning("Finding %s failed validation (invalid): %s", finding.title, e)
-                continue
             except Exception as e:
                 # Infrastructure error — re-raise so caller can handle
                 logger.error("Finding %s validation failed (infrastructure): %s", finding.title, e)
                 raise
+
+            # Parse JSON response
+            try:
+                response_text = response.strip()
+                fence_match = re.search(r"```(?:json)?\s*(.*?)```", response_text, re.DOTALL | re.IGNORECASE)
+                if fence_match:
+                    response_text = fence_match.group(1).strip()
+                brace_start = response_text.find("{")
+                brace_end = response_text.rfind("}")
+                if brace_start != -1 and brace_end != -1 and brace_end > brace_start:
+                    response_text = response_text[brace_start:brace_end + 1]
+
+                parsed = json.loads(response_text)
+
+                is_real = parsed.get("is_real_vulnerability", False)
+                try:
+                    confidence = int(parsed.get("confidence_score", 0))
+                except ValueError:
+                    confidence = 0
+                rejection_reason = parsed.get("rejection_reason", "no reason provided")
+                data_flow_proof = parsed.get("data_flow_proof", "")
+
+                # Gate: drop if not real OR confidence < 90
+                if not is_real or confidence < 90:
+                    logger.info(
+                        "❌ Finding rejected: %s — score=%d reason=%s",
+                        finding.title,
+                        confidence,
+                        rejection_reason,
+                    )
+                    continue
+
+                logger.info(
+                    "✅ Finding validated: %s — score=%d flow=%s",
+                    finding.title,
+                    confidence,
+                    (data_flow_proof[:60] + "...") if len(data_flow_proof) > 60 else data_flow_proof,
+                )
+                validated.append(finding)
+
+            except (json.JSONDecodeError, ValueError, TypeError, AttributeError) as e:
+                # Finding is genuinely invalid — skip it, don't retry
+                logger.warning("Finding %s failed validation (parse error): %s", finding.title, e)
+                continue
 
         return validated
 

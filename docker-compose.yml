@@ -9,6 +9,7 @@ services:
       - .env
     volumes:
       - ./data:/app/data
+      - ./secret_findings:/app/secret_findings
       - /var/run/docker.sock:/var/run/docker.sock
     deploy:
       resources:

@@ -1199,6 +1199,16 @@ class BloodhoundAnalyzer:
                 continue
                 
             snippet = m.get('match', '')
+
+            # TASK 3: Programmatic pre-filter — skip garbage snippets before LLM call
+            if not self._snippet_sanity_check(snippet):
+                logger.debug(
+                    "Snippet sanity check failed for %s:%s — dropping before LLM",
+                    m.get("file", "unknown"),
+                    m.get("line", 0),
+                )
+                continue
+
             if len(snippet) > max_chars:
                 logger.warning("[FINOPS] Snippet truncated to fit 32k context window.")
                 snippet = snippet[:max_chars]
@@ -1326,6 +1336,28 @@ You MUST respond strictly in the following JSON array format. No markdown, no co
 
         return "PRODUCTION"
 
+    def _snippet_sanity_check(self, snippet: str) -> bool:
+        """Programmatic pre-filter to reject garbage snippets before LLM call.
+
+        Returns True if snippet passes, False if it should be dropped.
+        A snippet is dropped if it:
+        - Has fewer than 10 characters, OR
+        - Does not contain ANY structural programming characters:
+          braces {}, parentheses (), brackets [], operators =, ==, !=, >, <, >=, <=, ->, +=, -=, *=, /=, semicolon ;
+        """
+        if not snippet or not isinstance(snippet, str):
+            return False
+
+        stripped = snippet.strip()
+        if len(stripped) < 10:
+            return False
+
+        structural_chars = {"{", "}", "(", ")", "[", "]", "=", ">", "<", "+", "-", "*", "/", "!", ";", ":"}
+        if not any(ch in stripped for ch in structural_chars):
+            return False
+
+        return True
+
     def _parse_audit_response(self, response: str, repo_url: str, forbidden_paths: list[str] | None = None) -> VulnerabilityDossier:
         import re as _re
 
@@ -1356,14 +1388,40 @@ You MUST respond strictly in the following JSON array format. No markdown, no co
                 continue
             try:
                 file_path = str(item.get("file", ""))
+
+                # Reject sentinel {"file": "NONE"} used by LLM to signal "no vuln"
+                if file_path.upper() == "NONE":
+                    continue
+
+                # TASK 3: Quality gate — enforce snippet sanity on LLM output
+                snippet = str(item.get("snippet", ""))
+                if not self._snippet_sanity_check(snippet):
+                    logger.debug("LLM returned garbage snippet for %s — filtering out", file_path)
+                    continue
+
                 context_type = self._classify_context(file_path, forbidden_paths)
+
+                # Require poc, fix, impact to be non-empty when impact mentions CRITICAL/HIGH
+                impact = str(item.get("impact", ""))
+                poc = str(item.get("poc", ""))
+                fix = str(item.get("fix", ""))
+
+                if impact.upper().startswith("CRITICAL") or impact.upper().startswith("HIGH"):
+                    if not poc or not fix:
+                        logger.warning(
+                            "LLM returned CRITICAL/HIGH finding with empty poc/fix for %s:%s — filtering out",
+                            file_path,
+                            item.get("line", 0),
+                        )
+                        continue
+
                 vulns.append(Vulnerability(
                     file=file_path,
                     line=int(item.get("line", 0)),
-                    snippet=str(item.get("snippet", "")),
-                    poc=str(item.get("poc", "")),
-                    fix=str(item.get("fix", "")),
-                    impact=str(item.get("impact", "")),
+                    snippet=snippet,
+                    poc=poc,
+                    fix=fix,
+                    impact=impact,
                     context_type=context_type,
                 ))
             except (ValueError, TypeError):

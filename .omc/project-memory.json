@@ -147,8 +147,26 @@
   "hotPaths": [
     {
       "path": "farm_agent\\generator\\engine.py",
-      "accessCount": 55,
-      "lastAccessed": 1776305364201,
+      "accessCount": 56,
+      "lastAccessed": 1776307348030,
+      "type": "file"
+    },
+    {
+      "path": "farm_agent\\orchestrator\\pipeline.py",
+      "accessCount": 20,
+      "lastAccessed": 1776308590531,
+      "type": "file"
+    },
+    {
+      "path": "farm_agent",
+      "accessCount": 19,
+      "lastAccessed": 1776307543980,
+      "type": "directory"
+    },
+    {
+      "path": "farm_agent\\analysis\\analyzer.py",
+      "accessCount": 19,
+      "lastAccessed": 1776308371123,
       "type": "file"
     },
     {
@@ -162,6 +180,12 @@
       "accessCount": 8,
       "lastAccessed": 1776269802600,
       "type": "file"
+    },
+    {
+      "path": "farm_agent\\core\\models.py",
+      "accessCount": 8,
+      "lastAccessed": 1776307425448,
+      "type": "directory"
     },
     {
       "path": "farm_agent\\github\\client.py",
@@ -191,18 +215,6 @@
       "path": "farm_agent\\pr\\manager.py",
       "accessCount": 5,
       "lastAccessed": 1776262968522,
-      "type": "file"
-    },
-    {
-      "path": "farm_agent",
-      "accessCount": 4,
-      "lastAccessed": 1776265019908,
-      "type": "directory"
-    },
-    {
-      "path": "farm_agent\\orchestrator\\pipeline.py",
-      "accessCount": 4,
-      "lastAccessed": 1776269945249,
       "type": "file"
     },
     {
@@ -242,12 +254,6 @@
       "type": "file"
     },
     {
-      "path": "farm_agent\\analysis\\analyzer.py",
-      "accessCount": 2,
-      "lastAccessed": 1776265023670,
-      "type": "file"
-    },
-    {
       "path": "pyproject.toml",
       "accessCount": 2,
       "lastAccessed": 1776267614108,
@@ -264,12 +270,6 @@
       "accessCount": 2,
       "lastAccessed": 1776269826045,
       "type": "file"
-    },
-    {
-      "path": "farm_agent\\core\\models.py",
-      "accessCount": 2,
-      "lastAccessed": 1776270329779,
-      "type": "directory"
     },
     {
       "path": "farm_agent\\core\\config.py",
@@ -372,6 +372,12 @@
       "accessCount": 1,
       "lastAccessed": 1776305399379,
       "type": "directory"
+    },
+    {
+      "path": "farm_agent\\llm\\provider.py",
+      "accessCount": 1,
+      "lastAccessed": 1776307552801,
+      "type": "file"
     }
   ],
   "userDirectives": []

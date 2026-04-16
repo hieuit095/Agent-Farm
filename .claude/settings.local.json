@@ -33,7 +33,16 @@
       "Bash(python -m py_compile farm_agent/generator/engine.py)",
       "Bash(python -m pytest --tb=short -q)",
       "Bash(grep -v \"^[[:space:]]*$\")",
-      "Bash(omc cancel *)"
+      "Bash(omc cancel *)",
+      "mcp__plugin_oh-my-claudecode_t__ast_grep_search",
+      "Bash(python -m py_compile farm_agent/orchestrator/pipeline.py farm_agent/analysis/analyzer.py)",
+      "Bash(python -m pytest farm_agent/ -x -q)",
+      "Bash(python -m pytest tests/ -x -q)",
+      "Bash(python -m pytest tests/ -x -q --ignore=tests/test_async_io_pipeline.py)",
+      "Bash(python -m pytest tests/unit/test_circular_target.py tests/unit/test_concurrency_cap.py -v)"
+    ],
+    "additionalDirectories": [
+      "C:\\Users\\USER\\.claude\\plans"
     ]
   }
 }
