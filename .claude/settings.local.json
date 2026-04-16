@@ -27,7 +27,13 @@
       "Bash(python -m farm_agent.cli.main --help)",
       "Bash(docker-compose build *)",
       "Bash(docker-compose up *)",
-      "Bash(python -c ' *)"
+      "Bash(python -c ' *)",
+      "Bash(ruff check *)",
+      "Bash(python -m ruff check farm_agent/generator/engine.py)",
+      "Bash(python -m py_compile farm_agent/generator/engine.py)",
+      "Bash(python -m pytest --tb=short -q)",
+      "Bash(grep -v \"^[[:space:]]*$\")",
+      "Bash(omc cancel *)"
     ]
   }
 }

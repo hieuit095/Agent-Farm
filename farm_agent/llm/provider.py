@@ -322,7 +322,13 @@ class MinimaxProvider(LLMProvider):
                 # trigger retries with exponential backoff instead of crashing the run.
                 if status == 401:
                     raise LLMError("Minimax auth failed (401): check api_key") from e
-                if status in (429, 529, 402):
+                if status == 529:
+                    backoff = min(10 * (2 ** attempt), 40)
+                    logger.warning(
+                        "Minimax HTTP 529 (attempt %d/3) — backing off %.1fs before retry: %s",
+                        attempt + 1, backoff, e,
+                    )
+                elif status in (429, 402):
                     backoff = min(5 * (2 ** attempt), 60)
                     logger.warning(
                         "Minimax HTTP %d (attempt %d/3) — backing off %.1fs before retry: %s",

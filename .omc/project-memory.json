@@ -147,8 +147,8 @@
   "hotPaths": [
     {
       "path": "farm_agent\\generator\\engine.py",
-      "accessCount": 23,
-      "lastAccessed": 1776271383704,
+      "accessCount": 55,
+      "lastAccessed": 1776305364201,
       "type": "file"
     },
     {
@@ -170,6 +170,12 @@
       "type": "file"
     },
     {
+      "path": "",
+      "accessCount": 7,
+      "lastAccessed": 1776305330116,
+      "type": "directory"
+    },
+    {
       "path": "farm_agent\\orchestrator\\human.py",
       "accessCount": 6,
       "lastAccessed": 1776264965695,
@@ -188,12 +194,6 @@
       "type": "file"
     },
     {
-      "path": "",
-      "accessCount": 5,
-      "lastAccessed": 1776269815249,
-      "type": "directory"
-    },
-    {
       "path": "farm_agent",
       "accessCount": 4,
       "lastAccessed": 1776265019908,
@@ -206,27 +206,39 @@
       "type": "file"
     },
     {
+      "path": "docker-compose.yml",
+      "accessCount": 4,
+      "lastAccessed": 1776298578144,
+      "type": "file"
+    },
+    {
+      "path": "Dockerfile",
+      "accessCount": 4,
+      "lastAccessed": 1776298578212,
+      "type": "file"
+    },
+    {
       "path": ".dockerignore",
       "accessCount": 3,
       "lastAccessed": 1776262310926,
       "type": "file"
     },
     {
-      "path": "Dockerfile",
-      "accessCount": 3,
-      "lastAccessed": 1776268754082,
-      "type": "file"
-    },
-    {
-      "path": "docker-compose.yml",
-      "accessCount": 3,
-      "lastAccessed": 1776268755280,
-      "type": "file"
-    },
-    {
       "path": "farm_agent\\analysis\\mapper.py",
       "accessCount": 3,
       "lastAccessed": 1776270514492,
+      "type": "file"
+    },
+    {
+      "path": "farm_agent\\generator",
+      "accessCount": 3,
+      "lastAccessed": 1776271627025,
+      "type": "directory"
+    },
+    {
+      "path": "farm_agent\\llm\\context.py",
+      "accessCount": 3,
+      "lastAccessed": 1776305330074,
       "type": "file"
     },
     {
@@ -342,6 +354,24 @@
       "accessCount": 1,
       "lastAccessed": 1776269826165,
       "type": "file"
+    },
+    {
+      "path": ".env",
+      "accessCount": 1,
+      "lastAccessed": 1776298578228,
+      "type": "file"
+    },
+    {
+      "path": "farm_agent/core/config.py",
+      "accessCount": 1,
+      "lastAccessed": 1776305399356,
+      "type": "directory"
+    },
+    {
+      "path": "farm_agent/llm/provider.py",
+      "accessCount": 1,
+      "lastAccessed": 1776305399379,
+      "type": "directory"
     }
   ],
   "userDirectives": []

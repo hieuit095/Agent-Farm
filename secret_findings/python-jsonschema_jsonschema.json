@@ -1,0 +1,27 @@
+{
+  "repo": "python-jsonschema/jsonschema",
+  "saved_at": "2026-04-16T02:04:02.160990+00:00",
+  "findings": [
+    {
+      "file": "jsonschema/validators.py",
+      "line": 112,
+      "snippet": "requires login",
+      "poc": "This snippet is a false positive. The 'requires login' comment does not indicate dynamic urllib use. No exploit path exists here.",
+      "fix": "N/A",
+      "impact": "NONE",
+      "context_type": "PRODUCTION"
+    },
+    {
+      "file": "jsonschema/validators.py",
+      "line": 1228,
+      "snippet": "requires login",
+      "poc": "This snippet is a false positive. The 'requires login' comment does not indicate dynamic urllib use. No exploit path exists here.",
+      "fix": "N/A",
+      "impact": "NONE",
+      "context_type": "PRODUCTION"
+    }
+  ],
+  "dossier": {
+    "repo_url": "https://github.com/python-jsonschema/jsonschema"
+  }
+}

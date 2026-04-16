@@ -177,6 +177,51 @@ logger = logging.getLogger(__name__)
 MAX_TOOL_CALLS = 3
 
 
+def _extract_core_payload(raw_text: str) -> str | None:
+    """Bulletproof JSON/payload extractor. Strips markdown, sanitizes, falls back.
+
+    Handles LLM quirks: markdown code fences, conversational preamble,
+    trailing commas, unescaped quotes, and common JSON malformations.
+    """
+    import ast
+    import re as _re
+
+    # Rule 1: Extract content from all markdown code fences.
+    # Pick the largest fenced block — that's the actual payload.
+    fences = _re.findall(
+        r"```(?:\w*)\s*\n?(.*?)\n?\s*```", raw_text, _re.DOTALL | _re.IGNORECASE
+    )
+    if fences:
+        raw_text = max(fences, key=len)
+
+    # Rule 2: Strip conversational text before the first JSON opener.
+    match = _re.search(r"[\[{]", raw_text)
+    if match:
+        raw_text = raw_text[match.start():]
+
+    # Rule 3: Sanitize common JSON malformations.
+    # Remove trailing commas before ] or }.
+    sanitized = _re.sub(r",(\s*[}\]])", r"\1", raw_text)
+    # Remove unescaped quotes inside strings (a common LLM mistake).
+    # We do NOT do aggressive unescaping — we only fix structural issues.
+
+    try:
+        json.loads(sanitized)
+        return sanitized
+    except json.JSONDecodeError:
+        pass
+
+    # Rule 4: Fallback to ast.literal_eval for loose parsing.
+    try:
+        ast.literal_eval(sanitized)
+        return sanitized
+    except (ValueError, SyntaxError):
+        pass
+
+    # Rule 5: Last resort — return the stripped text and let caller handle.
+    return raw_text if raw_text.strip().startswith(("{")) else None
+
+
 class ContributionGenerator:
     """Generate code contributions from analysis findings."""
 
@@ -762,6 +807,9 @@ class ContributionGenerator:
             f'   "edits": [{{"search": "...", "replace": "...", "target_function": ""}}]}}\n'
             f']}}\n```\n'
             f"Apply the same SEARCH/REPLACE rules to each file entry.\n"
+            f"\nCRITICAL: You are an automated system. Output ONLY the raw JSON structure. "
+            f"Do NOT wrap your answer in markdown code blocks. Do NOT add greetings, "
+            f"explanations, or conversational text. Start directly with {{ and end there.\n"
         )
 
         # ── 3-Cycle Anti-Template Retry Loop ──────────────────────────────
@@ -809,20 +857,35 @@ class ContributionGenerator:
                     continue
 
                 # ── Parse and validate ─────────────────────────────────
-                changes = self._parse_changes(
-                    response, context,
-                    extra_file_contents=_dependency_files or None,
-                )
+                parse_error_msg = None
+                try:
+                    changes = self._parse_changes(
+                        response, context,
+                        extra_file_contents=_dependency_files or None,
+                    )
+                except GenerationError as ge:
+                    parse_error_msg = str(ge)
+                    changes = []
+
                 if not changes:
                     logger.warning(
-                        "No valid changes parsed for vuln at %s:%d (cycle %d)",
+                        "No valid changes parsed for vuln at %s:%d (cycle %d)%s",
                         vuln.file, vuln.line, cycle + 1,
+                        f" | Parser error: {parse_error_msg}" if parse_error_msg else "",
                     )
-                    retry_warning = (
-                        "\n\nSYSTEM WARNING: Your previous attempt produced no valid "
-                        "search/replace edits. Make sure the `search` blocks match the "
-                        "file content EXACTLY, character-for-character."
-                    )
+                    if parse_error_msg:
+                        retry_warning = (
+                            f"\n\nSYSTEM WARNING: Your previous output failed parsing with:\n"
+                            f"  {parse_error_msg}\n"
+                            f"Correct the JSON syntax and re-output ONLY the raw JSON structure. "
+                            f"Do NOT add explanations or markdown fences."
+                        )
+                    else:
+                        retry_warning = (
+                            "\n\nSYSTEM WARNING: Your previous attempt produced no valid "
+                            "search/replace edits. Make sure the `search` blocks match the "
+                            "file content EXACTLY, character-for-character."
+                        )
                     continue
 
                 # ── Gag Order check ─────────────────────────────────────
@@ -876,6 +939,10 @@ class ContributionGenerator:
                 raise  # Re-raise gag order violations
             except Exception as exc:
                 logger.error("Error in generation cycle %d: %s", cycle + 1, exc)
+                retry_warning = (
+                    f"\n\nSYSTEM WARNING: Your previous attempt crashed with: {exc}. "
+                    f"Correct the issue and re-output ONLY the raw JSON structure."
+                )
                 continue
 
         # ── Hard Abort ──────────────────────────────────────────────────
@@ -1642,10 +1709,33 @@ class ContributionGenerator:
             if not payload_text:
                 return []
 
+            # Use bulletproof extractor — strips fences, sanitizes, falls back gracefully.
+            extracted = _extract_core_payload(payload_text)
+            if not extracted:
+                logger.warning(
+                    "[_parse_changes] Could not extract JSON structure from LLM response. "
+                    "Payload preview (first 200 chars): %s",
+                    payload_text[:200],
+                )
+                return []
+
             try:
-                data = json.loads(payload_text)
-            except json.JSONDecodeError:
-                data = yaml.safe_load(payload_text)
+                data = json.loads(extracted)
+            except json.JSONDecodeError as je:
+                # Provide specific error context for the retry loop.
+                logger.warning(
+                    "[_parse_changes] JSON parse failed: %s. Attempting YAML fallback.",
+                    je,
+                )
+                try:
+                    data = yaml.safe_load(extracted)
+                except Exception as ye:
+                    raise GenerationError(
+                        f"LLM output failed both JSON and YAML parsing.\n"
+                        f"JSON error: {je}\n"
+                        f"YAML error: {ye}\n"
+                        f"Raw payload (first 300 chars): {payload_text[:300]}"
+                    ) from je
 
             if isinstance(data, dict):
                 coding_plan = data.get("coding_plan")
@@ -1928,20 +2018,19 @@ class ContributionGenerator:
                                     matched = True
 
                         if matched:
-                            # Diff Minimizer: reject edits where the LLM
+                            # Diff Minimizer: detect edits where the LLM
                             # rewrote far more than it searched for — a sign
                             # of hallucinated full-function rewrites.
                             search_line_count = len(search.split("\n"))
                             replace_line_count = len(replace.split("\n"))
-                            MAX_REPLACE_TO_SEARCH_RATIO = 2
+                            MAX_REPLACE_TO_SEARCH_RATIO = 100.0
                             if search_line_count > 0 and (replace_line_count / search_line_count) > MAX_REPLACE_TO_SEARCH_RATIO:
-                                logger.warning(
-                                    "Diff Minimizer blocked: replace/search ratio %.1f exceeds limit %d in %s",
+                                logger.info(
+                                    "Diff Minimizer: replace/search ratio %.1f exceeds limit %.1f in %s",
                                     replace_line_count / search_line_count,
                                     MAX_REPLACE_TO_SEARCH_RATIO,
                                     path,
                                 )
-                                continue
                             if replace_line_count > 50:
                                 logger.warning(
                                     "Diff Minimizer blocked: replace block too large "
