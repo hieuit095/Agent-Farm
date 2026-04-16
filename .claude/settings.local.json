@@ -39,7 +39,8 @@
       "Bash(python -m pytest farm_agent/ -x -q)",
       "Bash(python -m pytest tests/ -x -q)",
       "Bash(python -m pytest tests/ -x -q --ignore=tests/test_async_io_pipeline.py)",
-      "Bash(python -m pytest tests/unit/test_circular_target.py tests/unit/test_concurrency_cap.py -v)"
+      "Bash(python -m pytest tests/unit/test_circular_target.py tests/unit/test_concurrency_cap.py -v)",
+      "Bash(python -m pytest tests/unit/test_circular_target.py tests/unit/test_concurrency_cap.py -q)"
     ],
     "additionalDirectories": [
       "C:\\Users\\USER\\.claude\\plans"

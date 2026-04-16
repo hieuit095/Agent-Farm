@@ -2273,9 +2273,22 @@ class ContribPipeline:
                 f"- Code relies on implicit behavior not present in snippet → REJECT\n\n"
                 f"### Response Format\n"
                 f"You MUST respond ONLY with valid JSON. No markdown, no explanation outside JSON.\n"
-                f'{{"is_real_vulnerability": true/false, "confidence_score": 0-100, '
+                f'{{"devil_advocate_critique": "MANDATORY: Write 2 sentences explaining why this snippet is perfectly safe, '
+                f'normal, or uses modern language defaults. Prove the scanner wrong.", '
+                f'"is_real_vulnerability": true/false, "confidence_score": 0-100, '
                 f'"rejection_reason": "reason if false", "data_flow_proof": "exact var names if true"}}'
             )
+
+            # TASK 3: Python pre-filter — skip non-code findings before LLM call
+            finding_text = f"{finding.title} {finding.description} {finding.suggestion or ''}"
+            code_chars = {"{", "}", "(", ")", "=", ":=", "func", "def", "class",
+                          "[", "]", "<", ">", "+", "-", "*", "/", ";", "!"}
+            if not any(ch in finding_text for ch in code_chars):
+                logger.info(
+                    "Snippet dropped: Does not look like code — %s",
+                    finding.title,
+                )
+                continue
 
             try:
                 response = await self._llm.complete(
@@ -2291,8 +2304,17 @@ class ContribPipeline:
                         "If no clear exploitable data flow exists, mark as False Positive.\n"
                         "3. GARBAGE SNIPPET REJECTION: If snippet is too short, is just a string literal, "
                         "or lacks structural programming context, reject immediately.\n\n"
-                        "Respond ONLY with valid JSON matching this schema: "
-                        '{"is_real_vulnerability": boolean, "confidence_score": integer (0-100), '
+                        "KNOWN FALSE POSITIVES IMMUNITY LIST:\n"
+                        "- GO LANG: defer guarantees execution. defer mutex.Unlock() is safe and the OPPOSITE of a deadlock. NEVER flag it.\n"
+                        "- GO LANG: crypto/tls defaults to TLS 1.2+ in modern Go. Missing MinVersion is safe. NEVER flag it.\n"
+                        "- PYTHON: Standard urllib or requests usages WITHOUT explicit unsanitized user inputs in the URL are safe.\n"
+                        "- ALL: If the snippet is NOT valid programming code (e.g., just English text like 'TLS configuration missing'), DROP IT.\n\n"
+                        "DEVIL'S ADVOCATE: You MUST write 2 sentences in devil_advocate_critique explaining why this snippet is "
+                        "perfectly safe, normal, or uses modern language defaults. Prove the scanner wrong.\n\n"
+                        "Respond ONLY with valid JSON matching this schema:\n"
+                        '{"devil_advocate_critique": "string (MANDATORY)", '
+                        '"is_real_vulnerability": boolean, '
+                        '"confidence_score": integer (0-100), '
                         '"rejection_reason": "string (required if false)", '
                         '"data_flow_proof": "string (required if true — cite exact variable names)"}'
                     ),
@@ -2316,6 +2338,7 @@ class ContribPipeline:
 
                 parsed = json.loads(response_text)
 
+                devil_advocate = parsed.get("devil_advocate_critique", "")
                 is_real = parsed.get("is_real_vulnerability", False)
                 try:
                     confidence = int(parsed.get("confidence_score", 0))
@@ -2327,10 +2350,11 @@ class ContribPipeline:
                 # Gate: drop if not real OR confidence < 90
                 if not is_real or confidence < 90:
                     logger.info(
-                        "❌ Finding rejected: %s — score=%d reason=%s",
+                        "❌ Finding rejected: %s — score=%d reason=%s | devil_advocate=%s",
                         finding.title,
                         confidence,
                         rejection_reason,
+                        (devil_advocate[:60] + "...") if len(devil_advocate) > 60 else devil_advocate,
                     )
                     continue
 
