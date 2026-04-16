@@ -147,27 +147,39 @@
   "hotPaths": [
     {
       "path": "farm_agent\\generator\\engine.py",
-      "accessCount": 56,
-      "lastAccessed": 1776307348030,
+      "accessCount": 57,
+      "lastAccessed": 1776309499302,
       "type": "file"
     },
     {
       "path": "farm_agent\\orchestrator\\pipeline.py",
-      "accessCount": 29,
-      "lastAccessed": 1776309229879,
+      "accessCount": 35,
+      "lastAccessed": 1776310004191,
+      "type": "file"
+    },
+    {
+      "path": "farm_agent\\analysis\\analyzer.py",
+      "accessCount": 30,
+      "lastAccessed": 1776309949212,
       "type": "file"
     },
     {
       "path": "farm_agent",
-      "accessCount": 19,
-      "lastAccessed": 1776307543980,
+      "accessCount": 21,
+      "lastAccessed": 1776309514583,
       "type": "directory"
     },
     {
-      "path": "farm_agent\\analysis\\analyzer.py",
-      "accessCount": 19,
-      "lastAccessed": 1776308371123,
-      "type": "file"
+      "path": "farm_agent\\core\\models.py",
+      "accessCount": 11,
+      "lastAccessed": 1776309891503,
+      "type": "directory"
+    },
+    {
+      "path": "",
+      "accessCount": 10,
+      "lastAccessed": 1776309489398,
+      "type": "directory"
     },
     {
       "path": "farm_agent\\cli\\main.py",
@@ -182,22 +194,10 @@
       "type": "file"
     },
     {
-      "path": "farm_agent\\core\\models.py",
-      "accessCount": 8,
-      "lastAccessed": 1776307425448,
-      "type": "directory"
-    },
-    {
       "path": "farm_agent\\github\\client.py",
       "accessCount": 7,
       "lastAccessed": 1776269827409,
       "type": "file"
-    },
-    {
-      "path": "",
-      "accessCount": 7,
-      "lastAccessed": 1776305330116,
-      "type": "directory"
     },
     {
       "path": "farm_agent\\orchestrator\\human.py",
@@ -212,10 +212,28 @@
       "type": "file"
     },
     {
+      "path": "farm_agent\\llm\\context.py",
+      "accessCount": 6,
+      "lastAccessed": 1776309661942,
+      "type": "file"
+    },
+    {
       "path": "farm_agent\\pr\\manager.py",
       "accessCount": 5,
       "lastAccessed": 1776262968522,
       "type": "file"
+    },
+    {
+      "path": "farm_agent\\llm\\agents.py",
+      "accessCount": 5,
+      "lastAccessed": 1776309628149,
+      "type": "file"
+    },
+    {
+      "path": "farm_agent\\generator\\scorer.py",
+      "accessCount": 5,
+      "lastAccessed": 1776309728274,
+      "type": "directory"
     },
     {
       "path": "docker-compose.yml",
@@ -227,6 +245,12 @@
       "path": "Dockerfile",
       "accessCount": 4,
       "lastAccessed": 1776298578212,
+      "type": "file"
+    },
+    {
+      "path": "farm_agent\\generator\\reviewer.py",
+      "accessCount": 4,
+      "lastAccessed": 1776309694921,
       "type": "file"
     },
     {
@@ -246,12 +270,6 @@
       "accessCount": 3,
       "lastAccessed": 1776271627025,
       "type": "directory"
-    },
-    {
-      "path": "farm_agent\\llm\\context.py",
-      "accessCount": 3,
-      "lastAccessed": 1776305330074,
-      "type": "file"
     },
     {
       "path": "pyproject.toml",
@@ -378,6 +396,18 @@
       "accessCount": 1,
       "lastAccessed": 1776307552801,
       "type": "file"
+    },
+    {
+      "path": "farm_agent/generator/engine.py",
+      "accessCount": 1,
+      "lastAccessed": 1776309514566,
+      "type": "directory"
+    },
+    {
+      "path": "farm_agent/core/models.py",
+      "accessCount": 1,
+      "lastAccessed": 1776309838430,
+      "type": "directory"
     }
   ],
   "userDirectives": []

@@ -269,6 +269,7 @@ class Vulnerability(BaseModel):
     file: str
     line: int
     snippet: str
+    evidence_chain: str = ""
     poc: str
     fix: str
     impact: str

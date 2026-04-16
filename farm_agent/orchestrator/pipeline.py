@@ -2347,6 +2347,17 @@ class ContribPipeline:
                 rejection_reason = parsed.get("rejection_reason", "no reason provided")
                 data_flow_proof = parsed.get("data_flow_proof", "")
 
+                # TASK 3: Auto-drop if data_flow_proof is lazy (hallucination indicator)
+                _hallucination_words = {" If ", " Assume ", " Might ", " Maybe ", " Possibly ", " Probably "}
+                if is_real and (len(data_flow_proof) < 20 or data_flow_proof.lower().count("if") > 2
+                        or any(w in data_flow_proof for w in _hallucination_words)):
+                    logger.info(
+                        "❌ data_flow_proof too lazy (len=%d, contains If/Assume/Might) for %s — auto-rejected",
+                        len(data_flow_proof),
+                        finding.title,
+                    )
+                    continue
+
                 # Gate: drop if not real OR confidence < 90
                 if not is_real or confidence < 90:
                     logger.info(

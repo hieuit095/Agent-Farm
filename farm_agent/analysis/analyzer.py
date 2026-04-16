@@ -1223,8 +1223,10 @@ class BloodhoundAnalyzer:
 
         context_str = "\n---\n".join(context_parts)
 
-        system_prompt = """You are an elite, ruthless Red Team exploit developer and vulnerability researcher. 
-Your singular goal is to discover and weaponize ZERO-DAY vulnerabilities in the provided code snippets. 
+        system_prompt = """CRITICAL RULE - NO GUESSWORK: You are strictly forbidden from hallucinating, guessing, or making 'If-Driven' assumptions. EVERY vulnerability you claim MUST be backed by explicit evidence: exact variable names, line numbers, and a complete data flow trace from user input to the vulnerable sink. FAIL-CLOSED POLICY: If you cannot trace the data flow end-to-end, mark it as a FALSE POSITIVE. Lack of evidence equals FALSE.
+
+You are an elite, ruthless Red Team exploit developer and vulnerability researcher.
+Your singular goal is to discover and weaponize ZERO-DAY vulnerabilities in the provided code snippets.
 DO NOT act as a polite auditor. Think strictly like an attacker.
 
 Your core directives:
@@ -1242,6 +1244,7 @@ You MUST respond strictly in the following JSON array format. No markdown, no co
         "file": "path/to/file",
         "line": 123,
         "snippet": "the vulnerable code",
+        "evidence_chain": "MANDATORY: Trace exact data flow from user-controlled input to vulnerable sink. Cite variable names and line numbers. Must be >= 20 chars.",
         "poc": "Step-by-step ATTACK PAYLOAD to exploit this flaw (be technical and precise).",
         "fix": "The architectural patch to kill this attack vector.",
         "impact": "CRITICAL: Remote Code Execution via..."
@@ -1399,6 +1402,23 @@ You MUST respond strictly in the following JSON array format. No markdown, no co
                     logger.debug("LLM returned garbage snippet for %s — filtering out", file_path)
                     continue
 
+                # TASK 3: Parse evidence_chain and enforce lazy-evidence auto-drop gate
+                evidence_chain = str(item.get("evidence_chain", ""))
+                _hallucination_words = {" If ", " Assume ", " Might ", " Maybe ", " Possibly ", " Probably "}
+                is_lazy = (
+                    len(evidence_chain) < 20
+                    or evidence_chain.lower().count("if") > 2
+                    or any(w in evidence_chain for w in _hallucination_words)
+                )
+                if is_lazy:
+                    logger.info(
+                        "Evidence chain too lazy (< 20 chars or contains hallucination words) for %s:%s — filtering out. evidence=%s",
+                        file_path,
+                        item.get("line", 0),
+                        (evidence_chain[:50] + "...") if evidence_chain else "<empty>",
+                    )
+                    continue
+
                 context_type = self._classify_context(file_path, forbidden_paths)
 
                 # Require poc, fix, impact to be non-empty when impact mentions CRITICAL/HIGH
@@ -1419,6 +1439,7 @@ You MUST respond strictly in the following JSON array format. No markdown, no co
                     file=file_path,
                     line=int(item.get("line", 0)),
                     snippet=snippet,
+                    evidence_chain=evidence_chain,
                     poc=poc,
                     fix=fix,
                     impact=impact,
