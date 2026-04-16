@@ -1,7 +1,7 @@
 {
   "tool_name": "Bash",
-  "tool_input_preview": "{\"command\":\"python -c \\\"\\nimport ast\\nwith open('farm_agent/orchestrator/pipeline.py', 'r', encoding='utf-8') as f:\\n    src = f.read()\\nast.parse(src)\\nprint('OK')\\n\\\" 2>&1\",\"description\":\"Check synt...",
-  "error": "Exit code 1\nTraceback (most recent call last):\r\n  File \"<string>\", line 5, in <module>\r\n    ast.parse(src)\r\n    ~~~~~~~~~^^^^^\r\n  File \"C:\\Python314\\Lib\\ast.py\", line 46, in parse\r\n    return compile(source, filename, mode, flags,\r\n                   _feature_version=feature_version, optimize=optimize)\r\n  File \"<unknown>\", line 2350\r\n    return validated\r\nSyntaxError: expected 'except' or 'finally' block",
-  "timestamp": "2026-04-16T03:01:33.352Z",
-  "retry_count": 3
+  "tool_input_preview": "{\"command\":\"echo \\\"=== FULL LOG SUMMARY ===\\\" && echo \\\"Repo scans completed:\\\" && cat \\\"C:\\\\Users\\\\USER\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\c--Users-USER-Documents-GitHub-Agent-Farm\\\\6ec9dd75-b2ed-43d7-81...",
+  "error": "Exit code 1\n=== FULL LOG SUMMARY ===\nRepo scans completed:\n                    INFO     [TARGET ACQUIRED] Repo:                            \n[04/16/26 03:45:02] INFO     Semgrep found 7 matches for                        \n                    INFO     Clean sweep, no vulns for                          \n                    INFO     [TARGET ACQUIRED] Repo:                            \n[04/16/26 03:45:27] INFO     Semgrep found 6 matches for                        \n                    INFO     Clean s...",
+  "timestamp": "2026-04-16T03:53:48.185Z",
+  "retry_count": 1
 }
