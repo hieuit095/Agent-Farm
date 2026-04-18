@@ -108,7 +108,41 @@ run_circular():
 
 ---
 
-## 3. Database Schema & State
+## 3. Core Module Dependency Graph
+
+```mermaid
+graph TD
+    CLI[farm_agent/cli/main.py] -->|Commands| Pipeline[ContribPipeline <br> orchestrator/pipeline.py]
+    CLI -->|Superhuman| Terminator[SuperHumanLoop <br> orchestrator/human.py]
+
+    Terminator -->|Hunt Circular| Pipeline
+    Terminator -->|Patrol| Patrol[PRPatrol <br> pr/patrol.py]
+
+    Pipeline --> Discovery[RepoDiscovery / DatabaseTargetDiscovery <br> github/discovery.py]
+    Pipeline --> Analyzer[CodeAnalyzer / BloodhoundAnalyzer <br> analysis/]
+    Pipeline --> Generator[ContributionGenerator <br> generator/engine.py]
+    Pipeline --> Scorer[QAHardcoreScorer <br> generator/scorer.py]
+    Pipeline --> Sandbox[DockerSandbox <br> core/sandbox.py]
+    Pipeline --> PRManager[PRManager <br> pr/manager.py]
+
+    Generator --> LLM[LLM Provider <br> llm/provider.py]
+    Generator --> RAG[ChromaDB RAG <br> core/rag.py]
+    Scorer --> LLM
+    Analyzer --> RAG
+    Patrol --> LLM
+
+    Pipeline -.->|State & Config| DB[(SQLite memory.db <br> orchestrator/memory.py)]
+    Terminator -.->|State & Config| DB
+    Patrol -.->|State & Config| DB
+
+    Pipeline -->|API| GitHub[GitHubClient <br> github/client.py]
+    PRManager -->|API| GitHub
+    Patrol -->|API| GitHub
+```
+
+---
+
+## 4. Database Schema & State
 
 **SQLite DB at:** `data/memory.db` (default, configurable via `storage.db_path`)
 
@@ -135,7 +169,7 @@ run_circular():
 
 ---
 
-## 4. Critical Guardrails, Limits & Business Rules
+## 5. Critical Guardrails, Limits & Business Rules
 
 ### 4.1 Thresholds & Limits
 
@@ -228,7 +262,7 @@ run_circular():
 
 ---
 
-## 5. Directory & Module Architecture
+## 6. Directory & Module Architecture
 
 ```
 farm_agent/
@@ -310,7 +344,7 @@ tests/
 
 ---
 
-## 6. Version Assessment & Technical Debt
+## 7. Version Assessment & Technical Debt
 
 **Maturity:** `Development Status :: 4 - Beta` (per `pyproject.toml`)
 
