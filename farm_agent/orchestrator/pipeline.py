@@ -30,7 +30,6 @@ from farm_agent.core.models import (
     RepoContext,
     Repository,
     Severity,
-    VulnerabilityDossier,
 )
 from farm_agent.generator.engine import ContributionGenerator, GenerationResult
 from farm_agent.generator.scorer import QAHardcoreScorer
@@ -2360,20 +2359,22 @@ class ContribPipeline:
 
                 # Gate: drop if not real OR confidence < 90
                 if not is_real or confidence < 90:
+                    devil_adv = (devil_advocate[:60] + "...") if len(devil_advocate) > 60 else devil_advocate
                     logger.info(
                         "❌ Finding rejected: %s — score=%d reason=%s | devil_advocate=%s",
                         finding.title,
                         confidence,
                         rejection_reason,
-                        (devil_advocate[:60] + "...") if len(devil_advocate) > 60 else devil_advocate,
+                        devil_adv,
                     )
                     continue
 
+                df_proof = (data_flow_proof[:60] + "...") if len(data_flow_proof) > 60 else data_flow_proof
                 logger.info(
                     "✅ Finding validated: %s — score=%d flow=%s",
                     finding.title,
                     confidence,
-                    (data_flow_proof[:60] + "...") if len(data_flow_proof) > 60 else data_flow_proof,
+                    df_proof,
                 )
                 validated.append(finding)
 
