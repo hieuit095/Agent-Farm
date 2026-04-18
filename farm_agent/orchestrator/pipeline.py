@@ -2378,9 +2378,15 @@ class ContribPipeline:
                 )
                 validated.append(finding)
 
-            except (json.JSONDecodeError, ValueError, TypeError, AttributeError) as e:
+            except (ValueError, TypeError, AttributeError) as e:
                 # Finding is genuinely invalid — skip it, don't retry
                 logger.warning("Finding %s failed validation (parse error): %s", finding.title, e)
+            except Exception as e:
+                # Need to catch any JSONDecodeError regardless of where it came from
+                if type(e).__name__ == "JSONDecodeError":
+                    logger.warning("Finding %s failed validation (parse error): %s", finding.title, e)
+                else:
+                    raise e
                 continue
 
         return validated
