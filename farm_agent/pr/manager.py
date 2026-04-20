@@ -259,7 +259,6 @@ class PRManager:
                 issue_number = await self._create_issue_for_finding(contribution, target_repo)
 
             # 4. Create PR body — Diplomat Protocol Task 3: LLM-powered template filling
-            from farm_agent.core.models import ContributionType as ct_2
 
             _type_info = {
                 _CT2.SECURITY_FIX: ("🔒", "Reliability Improvement"),
