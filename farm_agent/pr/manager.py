@@ -52,7 +52,9 @@ def auto_check_pr_template(body: str, contrib_type: ContributionType | None = No
         if (
             stripped.startswith(("- [ ]", "* [ ]"))
             and any(term in stripped for term in allowed_terms)
-            and not any(danger in stripped for danger in ["breaking", "release", "deploy", "migration"])
+            and not any(
+                danger in stripped for danger in ["breaking", "release", "deploy", "migration"]
+            )
         ):
             # Replace the first unmet checkbox
             lines[i] = line.replace("[ ]", "[x]", 1)
@@ -259,15 +261,16 @@ class PRManager:
                 issue_number = await self._create_issue_for_finding(contribution, target_repo)
 
             # 4. Create PR body — Diplomat Protocol Task 3: LLM-powered template filling
+            from farm_agent.core.models import ContributionType as ct_2
 
             _type_info = {
-                _CT2.SECURITY_FIX: ("🔒", "Reliability Improvement"),
-                _CT2.CODE_QUALITY: ("✨", "Code Quality"),
-                _CT2.README_FIX: ("📝", "Documentation"),
-                _CT2.UI_UX_FIX: ("🎨", "UI/UX Improvement"),
-                _CT2.PERFORMANCE_OPT: ("⚡", "Performance"),
-                _CT2.FEATURE_ADD: ("🚀", "New Feature"),
-                _CT2.REFACTOR: ("♻️", "Refactoring"),
+                ct_2.SECURITY_FIX: ("🔒", "Reliability Improvement"),
+                ct_2.CODE_QUALITY: ("✨", "Code Quality"),
+                ct_2.README_FIX: ("📝", "Documentation"),
+                ct_2.UI_UX_FIX: ("🎨", "UI/UX Improvement"),
+                ct_2.PERFORMANCE_OPT: ("⚡", "Performance"),
+                ct_2.FEATURE_ADD: ("🚀", "New Feature"),
+                ct_2.REFACTOR: ("♻️", "Refactoring"),
             }
             pr_emoji, pr_label = _type_info.get(contribution.finding.type, ("🔧", "Fix"))
             pr_files_list = "\n".join(
