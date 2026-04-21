@@ -79,10 +79,12 @@ class CodeAnalyzer:
         llm: LLMProvider,
         github: GitHubClient,
         config: AnalysisConfig,
+        memory=None,
     ):
         self._llm = llm
         self._github = github
         self._config = config
+        self._memory = memory
 
     async def analyze(self, repo: Repository) -> AnalysisResult:
         """Run full analysis on a repository.
@@ -576,6 +578,11 @@ class CodeAnalyzer:
             "Quality over quantity — 1 genuine finding beats 5 false positives.\n"
             "Maximum 3 findings per analyzer."
         )
+
+        if self._memory:
+            lessons = await self._memory.get_knowledge(context.repo.full_name, "FILTER_REJECTION_LESSON")
+            if lessons:
+                system += f"\n\n### PREVIOUS MISTAKES TO AVOID ON THIS REPO:\n{lessons}\n"
 
         try:
             response = await self._llm.complete(prompt, system=system, temperature=0.2)

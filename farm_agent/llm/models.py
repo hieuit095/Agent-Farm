@@ -74,49 +74,48 @@ class ModelSpec:
         return self.overall_score / total_cost
 
 
-# ── Minimax Models ────────────────────────────────────
+# ── DeepSeek Models ────────────────────────────────────
 
-
-MINIMAX_M27 = ModelSpec(
-    name="MiniMax-M2.7",
-    display_name="MiniMax M2.7",
-    tier=ModelTier.FLASH,
-    context_window=245_760,
-    max_output=16_384,
-    input_cost=0.28,
-    output_cost=1.12,
-    coding=80,
-    analysis=78,
-    reasoning=77,
-    speed=82,
+DEEPSEEK_V32 = ModelSpec(
+    name="deepseek/deepseek-v3.2",
+    display_name="DeepSeek V3.2",
+    tier=ModelTier.PRO,
+    context_window=1000000,
+    max_output=16384,
+    input_cost=0.14,
+    output_cost=0.28,
+    coding=95,
+    analysis=90,
+    reasoning=92,
+    speed=85,
     multimodal=0,
     best_for=[
         TaskType.CODE_GEN,
         TaskType.ANALYSIS,
         TaskType.REVIEW,
+        TaskType.PLANNING,
     ],
-    description="Minimax flagship chat model — strong coding and reasoning.",
+    description="Primary Generator Model via OpenRouter",
 )
 
-MINIMAX_ABAB65S_CHAT = ModelSpec(
-    name="abab6.5s-chat",
-    display_name="Minimax ABAB 6.5s",
-    tier=ModelTier.LITE,
-    context_window=245_760,
-    max_output=8_192,
-    input_cost=0.07,
-    output_cost=0.28,
-    coding=68,
-    analysis=65,
-    reasoning=62,
-    speed=92,
-    multimodal=0,
-    best_for=[
-        TaskType.BULK,
-        TaskType.DOCS,
-        TaskType.QUICK_FIX,
-    ],
-    description="Fast, cost-efficient Minimax model for high-volume tasks.",
+# ── Filter Models (Defense-in-Depth) ──────────────────
+
+KIMI_K2_APPRAISER = ModelSpec(
+    name="moonshotai/kimi-k2.5",
+    display_name="Kimi K2.5 Appraiser",
+    tier=ModelTier.PRO,
+    context_window=200_000,
+    max_output=16_384,
+    description="Layer 1 Expert Appraiser"
+)
+
+GEMINI_31_AUDITOR = ModelSpec(
+    name="google/gemini-3.1-pro-preview",
+    display_name="Gemini 3.1 Pro Supreme Auditor",
+    tier=ModelTier.PRO,
+    context_window=1_000_000,
+    max_output=16_384,
+    description="Layer 2 Supreme Auditor"
 )
 
 
@@ -124,8 +123,9 @@ MINIMAX_ABAB65S_CHAT = ModelSpec(
 
 
 ALL_MODELS: list[ModelSpec] = [
-    MINIMAX_M27,
-    MINIMAX_ABAB65S_CHAT,
+    DEEPSEEK_V32,
+    KIMI_K2_APPRAISER,
+    GEMINI_31_AUDITOR,
 ]
 
 MODELS_BY_NAME: dict[str, ModelSpec] = {m.name: m for m in ALL_MODELS}

@@ -22,26 +22,20 @@ sys.modules["git"] = MagicMock()
 from farm_agent.orchestrator.pipeline import ContribPipeline
 
 
-def test_get_max_concurrency_minimax_capped():
+def test_get_max_concurrency_provider_capped():
     config = MagicMock()
     config.pipeline.max_concurrent_repos = 10
-    config.llm.provider = "minimax"
+    config.pipeline.llm_concurrency_cap = 5
+    config.llm.provider = "openrouter"
 
     pipeline = ContribPipeline(config)
     assert pipeline._get_max_concurrency() == 5
 
-def test_get_max_concurrency_minimax_under_cap():
+def test_get_max_concurrency_under_cap():
     config = MagicMock()
     config.pipeline.max_concurrent_repos = 3
-    config.llm.provider = "minimax"
+    config.pipeline.llm_concurrency_cap = 5
+    config.llm.provider = "openrouter"
 
     pipeline = ContribPipeline(config)
     assert pipeline._get_max_concurrency() == 3
-
-def test_get_max_concurrency_other_provider():
-    config = MagicMock()
-    config.pipeline.max_concurrent_repos = 10
-    config.llm.provider = "openai"
-
-    pipeline = ContribPipeline(config)
-    assert pipeline._get_max_concurrency() == 10

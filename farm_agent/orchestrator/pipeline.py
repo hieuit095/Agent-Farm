@@ -11,6 +11,8 @@ import logging
 import os
 import subprocess
 import tempfile
+import json
+import re
 from dataclasses import dataclass, field
 
 from farm_agent.agents.registry import create_default_registry
@@ -184,6 +186,82 @@ def _titles_similar(title_a: str, title_b: str) -> bool:
     # (e.g., "fix race condition in auth" vs "fix race condition in db")
     return overlap / smaller > 0.8
 
+class AdaptiveConcurrencyManager:
+    """CRIT-03 FIX: Dynamic concurrency controller with backoff on LLMRateLimitError.
+
+    Instead of a hardcoded `min(max_conc, 5)` for LLM providers, this class:
+    1. Reads the configured safe cap from `config.pipeline.llm_concurrency_cap`.
+    2. When an LLMRateLimitError (HTTP 429) is caught, immediately drops concurrency
+       to 1 for `rate_limit_cooldown_sec` seconds (default 5 minutes).
+    3. After cooldown, gradually ramps concurrency back up to the configured cap
+       (one extra slot every 60 seconds) until the original max is restored.
+
+    Thread-safe: uses asyncio.Lock internally.
+    """
+
+    def __init__(self, configured_max: int, provider_cap: int, cooldown_sec: int):
+        self._configured_max = configured_max
+        self._provider_cap = provider_cap
+        self._cooldown_sec = cooldown_sec
+        self._current_max = min(configured_max, provider_cap)
+        self._lock = asyncio.Lock()
+        self._cooldown_until: float = 0.0
+        self._ramp_task: asyncio.Task | None = None
+
+    @property
+    def current_value(self) -> int:
+        return self._current_max
+
+    def make_semaphore(self) -> asyncio.Semaphore:
+        """Create a fresh semaphore at the current concurrency level."""
+        return asyncio.Semaphore(self._current_max)
+
+    async def notify_rate_limit(self) -> None:
+        """Call when an LLMRateLimitError or HTTP 429 is caught.
+
+        Immediately collapses concurrency to 1 and schedules a ramp-back
+        task that runs in the background after the cooldown expires.
+        """
+        import time
+
+        async with self._lock:
+            if self._ramp_task and not self._ramp_task.done():
+                # Already in cooldown — reset the timer
+                self._ramp_task.cancel()
+
+            self._current_max = 1
+            self._cooldown_until = time.time() + self._cooldown_sec
+            logger.warning(
+                "[CRIT-03] LLMRateLimitError detected — dropping concurrency to 1 "
+                "for %ds cooldown (ramp target: %d)",
+                self._cooldown_sec,
+                min(self._configured_max, self._provider_cap),
+            )
+
+        self._ramp_task = asyncio.create_task(self._ramp_back())
+
+    async def _ramp_back(self) -> None:
+        """Gradually restore concurrency after cooldown expires."""
+        import time
+
+        remaining = self._cooldown_until - time.time()
+        if remaining > 0:
+            await asyncio.sleep(remaining)
+
+        target = min(self._configured_max, self._provider_cap)
+        ramp_interval = 60  # add one slot every 60 seconds
+
+        while self._current_max < target:
+            async with self._lock:
+                self._current_max = min(self._current_max + 1, target)
+                logger.info(
+                    "[CRIT-03] Ramping concurrency back up: %d/%d",
+                    self._current_max, target,
+                )
+            await asyncio.sleep(ramp_interval)
+
+        logger.info("[CRIT-03] Concurrency fully restored to %d.", target)
+
 
 @dataclass
 class PipelineResult:
@@ -223,15 +301,35 @@ class ContribPipeline:
         )
         self._human_typing_lock = asyncio.Lock()
 
+        # CRIT-03 FIX: Adaptive concurrency — provider-aware cap with
+        # dynamic backoff on LLMRateLimitError / HTTP 429.
+        _provider = self.config.llm.provider
+        _safe_cap = self.config.pipeline.llm_concurrency_cap
+        self._concurrency_mgr = AdaptiveConcurrencyManager(
+            configured_max=self.config.pipeline.max_concurrent_repos,
+            provider_cap=_safe_cap,
+            cooldown_sec=self.config.pipeline.rate_limit_cooldown_sec,
+        )
+        if self.config.pipeline.max_concurrent_repos > _safe_cap:
+            logger.info(
+                "[CRIT-03] Provider '%s': user concurrency=%d capped to safe limit=%d "
+                "(override via pipeline.llm_concurrency_cap in config.yaml)",
+                _provider,
+                self.config.pipeline.max_concurrent_repos,
+                _safe_cap,
+            )
+
     def _get_max_concurrency(self) -> int:
-        """Get max concurrent repos, capped for specific providers."""
-        max_conc = self.config.pipeline.max_concurrent_repos
-        if self.config.llm.provider == "minimax":
-            # CRIT-03 FIX: Cap parallel repos to 5 to prevent GitHub
-            # secondary rate limit thundering herd.
-            max_conc = min(max_conc, 5)
-            logger.info("Minimax mode: capped concurrency to %d", max_conc)
-        return max_conc
+        """Return current safe concurrency level from the adaptive manager."""
+        return self._concurrency_mgr.current_value
+
+    async def _notify_rate_limit(self) -> None:
+        """Signal the adaptive concurrency manager that a 429 was received.
+
+        Call this inside any except LLMRateLimitError block that fires
+        during parallel repo processing to trigger automatic backoff.
+        """
+        await self._concurrency_mgr.notify_rate_limit()
 
     async def _init_components(self):
         """Initialize all pipeline components."""
@@ -254,7 +352,7 @@ class ContribPipeline:
         self._memory = Memory(self.config.storage.resolved_db_path)
         await self._memory.init()
 
-        # Inject memory into LLM provider for quota tracking (Minimax Overdrive)
+        # Inject memory into LLM provider for quota tracking
         self._llm.memory = self._memory
 
         # Analyzer
@@ -262,6 +360,7 @@ class ContribPipeline:
             llm=self._llm,
             github=self._github,
             config=self.config.analysis,
+            memory=self._memory,
         )
 
         # Generator — now with memory for repo_preferences
@@ -371,13 +470,14 @@ class ContribPipeline:
             # Limit to max repos per run
             repos = repos[: self.config.github.max_repos_per_run]
 
-            # 2. Process repos in parallel with semaphore
+            # 2. Process repos in parallel with adaptive semaphore (CRIT-03)
             max_conc = self._get_max_concurrency()
-            sem = asyncio.Semaphore(max_conc)
+            sem = self._concurrency_mgr.make_semaphore()
             logger.info(
-                "Processing %d repos (max %d concurrent)",
+                "Processing %d repos (max %d concurrent, provider=%s)",
                 len(repos),
                 max_conc,
+                self.config.llm.provider,
             )
 
             async def _guarded(
@@ -393,6 +493,9 @@ class ContribPipeline:
                     try:
                         return await self._process_repo(repo, dry_run, remaining_prs)
                     except Exception as e:
+                        from farm_agent.core.exceptions import LLMRateLimitError
+                        if isinstance(e, LLMRateLimitError):
+                            await self._notify_rate_limit()
                         msg = f"Error processing {repo.full_name}: {e}"
                         logger.error(msg)
                         err = PipelineResult()
@@ -547,13 +650,14 @@ class ContribPipeline:
 
                 max_targets = self.config.github.max_repos_per_run
                 max_conc = self._get_max_concurrency()
-                sem = asyncio.Semaphore(max_conc)
+                sem = self._concurrency_mgr.make_semaphore()
                 selected = targets[:max_targets]
 
                 logger.info(
-                    "Processing %d repos (max %d concurrent)",
+                    "Processing %d repos (max %d concurrent, provider=%s)",
                     len(selected),
                     max_conc,
+                    self.config.llm.provider,
                 )
 
                 repo_results = await asyncio.gather(
@@ -754,7 +858,18 @@ class ContribPipeline:
                 config=self.config.analysis,
                 memory=self._memory,
             )
+            import os
+            try:
+                load1, load5, load15 = os.getloadavg()
+                logger.info("[CPU PROFILING] Starting Bloodhound Semgrep scan. Load: %.2f, %.2f, %.2f", load1, load5, load15)
+            except Exception:
+                logger.info("[CPU PROFILING] Starting Bloodhound Semgrep scan.")
             dossier = await bloodhound.run_bloodhound(repo)
+            try:
+                load1, load5, load15 = os.getloadavg()
+                logger.info("[CPU PROFILING] Finished Bloodhound Semgrep scan. Load: %.2f, %.2f, %.2f", load1, load5, load15)
+            except Exception:
+                logger.info("[CPU PROFILING] Finished Bloodhound Semgrep scan.")
 
             if not dossier.has_bugs():
                 logger.info(
@@ -792,26 +907,7 @@ class ContribPipeline:
 
             dossier.vulnerabilities = production_vulns
 
-            # ── Diplomat Protocol: Security Disclosure Gate ────────────────
-            # Check if the maintainer requests private/responsible disclosure.
-            # If so, abort the pipeline for this repo and save findings locally.
-            security_gate_result = await run_security_gate(
-                github=self._github,
-                owner=repo.owner,
-                repo=repo.name,
-                dossier=dossier,
-                notifier=self._notifier,
-            )
-            if security_gate_result is not None:
-                logger.warning(
-                    "[COMPLIANCE SKIP] Private security disclosure requested by maintainers. "
-                    "Aborting pipeline for %s.",
-                    target.repo_url,
-                )
-                await discovery.mark_status(target.repo_url, "COMPLIANCE_SKIP_PRIVATE_DISCLOSURE")
-                return result
-
-            # ── Build RepoContext with vulnerable file contents ───────────
+        # ── Build RepoContext with vulnerable file contents ───────────
             # Use GraphQL for repo tree (falls back to REST on any error)
             try:
                 file_tree = await self._github.fetch_repo_structure_graphql(
@@ -845,7 +941,12 @@ class ContribPipeline:
             winning_contribution: Contribution | None = None
             failure_context = ""  # Accumulates sandbox/QA failure traces across cycles
 
-            scorer = QAHardcoreScorer(llm=self._llm)
+            import copy
+            qa_cfg = copy.deepcopy(self.config.llm)
+            qa_cfg.model = "moonshotai/kimi-k2.6"
+            from farm_agent.llm.provider import create_llm_provider
+            qa_provider = create_llm_provider(qa_cfg)
+            scorer = QAHardcoreScorer(llm=qa_provider)
 
             # ── Diplomat Protocol Task 2: Load repo style guide for QA penalty ──
             repo_style_guide_text = ""
@@ -936,6 +1037,35 @@ class ContribPipeline:
 
             if qa_passed and winning_contribution is not None:
                 # ── Proceed to PR submission ─────────────────────────────
+                
+                # Layer 2: Supreme Auditor
+                layer2_approved, reject_reason = await self._layer2_supreme_audit(winning_contribution, failure_context)
+                if not layer2_approved:
+                    logger.warning("🚫 Vetoed by Layer 2 Supreme Auditor (Gemini). Skipping PR.")
+                    if self._memory:
+                        patch_str = "\n".join(f"File: {c.path}\n```\n{c.new_content}\n```" for c in winning_contribution.changes)
+                        await self._memory.add_filter_lesson(repo.full_name, 2, patch_str, reject_reason)
+                    logger.info("Recorded Layer 2 lesson for %s: %s...", repo.full_name, reject_reason[:50])
+                    await discovery.mark_status(target.repo_url, "COMPLETED_TOO_COMPLEX")
+                    return result
+
+                # ── Diplomat Protocol: Security Disclosure Gate ──────────────────
+                security_gate_result = await run_security_gate(
+                    github=self._github,
+                    owner=repo.owner,
+                    repo=repo.name,
+                    dossier=dossier,
+                    notifier=self._notifier,
+                )
+                if security_gate_result is not None:
+                    logger.warning(
+                        "[COMPLIANCE SKIP] Private security disclosure requested by maintainers. "
+                        "Approved finding saved to secret_findings/. Aborting PR for %s.",
+                        target.repo_url,
+                    )
+                    await discovery.mark_status(target.repo_url, "COMPLIANCE_SKIP_PRIVATE_DISCLOSURE")
+                    return result
+
                 result.repos_analyzed += 1
                 result.findings_total += len(dossier.vulnerabilities)
                 result.contributions_generated += 1
@@ -1042,24 +1172,6 @@ class ContribPipeline:
                 guidelines.commit_format,
                 len(guidelines.required_sections),
             )
-
-        # ── Diplomat Protocol: Security Disclosure Gate ──────────────────
-        # Check if the maintainer requests private/responsible disclosure.
-        # If so, abort the pipeline for this repo and save findings locally.
-        security_gate_result = await run_security_gate(
-            github=self._github,
-            owner=repo.owner,
-            repo=repo.name,
-            notifier=self._notifier,
-        )
-        if security_gate_result is not None:
-            logger.warning(
-                "[COMPLIANCE SKIP] Private security disclosure requested by maintainers. "
-                "Aborting pipeline for %s.",
-                repo.full_name,
-            )
-            result.repos_analyzed = 1
-            return result
 
         # ── Maintainer Vibe Check ──────────────────────────────────────────
         logger.info(
@@ -1512,8 +1624,22 @@ class ContribPipeline:
             min(len(candidate_findings), max_prs) - len(validated_findings),
         )
 
+        # Filter findings via Layer 1 Appraiser before generating contributions
+        surviving_findings = []
+        for finding in validated_findings:
+            file_content = relevant_files.get(finding.file_path, "")
+            is_genuine, critique = await self._layer1_expert_appraisal(finding, file_content)
+            if is_genuine:
+                surviving_findings.append(finding)
+            else:
+                if self._memory:
+                    await self._memory.add_filter_lesson(repo.full_name, 1, file_content, critique)
+                logger.info("Recorded Layer 1 lesson for %s: %s...", repo.full_name, critique[:50])
+        validated_findings = surviving_findings
+
         # Generate contributions for validated findings
         for finding in validated_findings:
+
             # ── Hybrid Contribution Router ─────────────────────────────────
             # Route A — Direct PR (Firefighter): SECURITY_FIX or CRITICAL/HIGH severity
             # Route B — Issue-First (Polite Senior): everything else
@@ -1640,6 +1766,37 @@ class ContribPipeline:
                     )
                     continue
             # ----------------------------------------------------------
+
+            # Layer 2: Supreme Auditor
+            layer2_approved, reject_reason = await self._layer2_supreme_audit(contribution, error_log)
+            if not layer2_approved:
+                logger.warning("🚫 Vetoed by Layer 2 Supreme Auditor (Gemini). Skipping PR for '%s'.", contribution.title)
+                if self._memory:
+                    patch_str = "\n".join(f"File: {c.path}\n```\n{c.new_content}\n```" for c in contribution.changes)
+                    await self._memory.add_filter_lesson(repo.full_name, 2, patch_str, reject_reason)
+                logger.info("Recorded Layer 2 lesson for %s: %s...", repo.full_name, reject_reason[:50])
+                continue
+
+            # ── Diplomat Protocol: Security Disclosure Gate ──────────────────
+            from types import SimpleNamespace
+            dummy_dossier = SimpleNamespace(
+                vulnerabilities=[contribution.finding],
+                repo_url=repo.clone_url
+            )
+            security_gate_result = await run_security_gate(
+                github=self._github,
+                owner=repo.owner,
+                repo=repo.name,
+                dossier=dummy_dossier,
+                notifier=self._notifier,
+            )
+            if security_gate_result is not None:
+                logger.warning(
+                    "[COMPLIANCE SKIP] Private security disclosure requested by maintainers. "
+                    "Approved finding saved to secret_findings/. Aborting PR for %s.",
+                    repo.full_name,
+                )
+                continue
 
             # Create PR
             try:
@@ -2053,7 +2210,38 @@ class ContribPipeline:
                     continue
             # ----------------------------------------------------------
 
-# Create PR immediately (no artificial delay)
+            # Layer 2: Supreme Auditor
+            layer2_approved, reject_reason = await self._layer2_supreme_audit(contribution, error_log)
+            if not layer2_approved:
+                logger.warning("🚫 Vetoed by Layer 2 Supreme Auditor (Gemini). Skipping PR for issue #%d.", issue.number)
+                if self._memory:
+                    patch_str = "\n".join(f"File: {c.path}\n```\n{c.new_content}\n```" for c in contribution.changes)
+                    await self._memory.add_filter_lesson(repo.full_name, 2, patch_str, reject_reason)
+                logger.info("Recorded Layer 2 lesson for %s: %s...", repo.full_name, reject_reason[:50])
+                continue
+
+            # ── Diplomat Protocol: Security Disclosure Gate ──────────────────
+            from types import SimpleNamespace
+            dummy_dossier = SimpleNamespace(
+                vulnerabilities=[contribution.finding],
+                repo_url=repo.clone_url
+            )
+            security_gate_result = await run_security_gate(
+                github=self._github,
+                owner=repo.owner,
+                repo=repo.name,
+                dossier=dummy_dossier,
+                notifier=self._notifier,
+            )
+            if security_gate_result is not None:
+                logger.warning(
+                    "[COMPLIANCE SKIP] Private security disclosure requested by maintainers. "
+                    "Approved finding saved to secret_findings/. Aborting PR for %s.",
+                    repo.full_name,
+                )
+                continue
+
+            # Create PR immediately (no artificial delay)
             try:
                 patch_length = sum(
                     len(c.new_content) for c in contribution.changes if c.new_content
@@ -2383,6 +2571,137 @@ class ContribPipeline:
                 continue
 
         return validated
+
+    async def _layer1_expert_appraisal(
+        self,
+        finding: Finding,
+        file_content: str,
+    ) -> tuple[bool, str]:
+        """Layer 1: The Appraiser. Verifies if finding is genuinely HIGH/CRITICAL."""
+        if not file_content:
+            return True, ""  # Bypass if no code (or handle differently)
+        
+        from farm_agent.llm.provider import create_llm_provider
+        import copy
+        import json
+        import re
+        
+        try:
+            kimi_cfg = copy.copy(self.config.llm)
+            kimi_cfg.provider = "openrouter"
+            kimi_cfg.model = "moonshotai/kimi-k2.5"
+            kimi_provider = create_llm_provider(kimi_cfg)
+        except Exception as e:
+            logger.warning("Layer 1 instantiation failed: %s. Failing closed.", e)
+            return False, f"Instantiation failed: {e}"
+
+        prompt = (
+            f"Please verify this vulnerability claim:\n\n"
+            f"Title: {finding.title}\n"
+            f"Description: {finding.description}\n"
+            f"Code snippet context:\n```\n{file_content[:10000]}\n```\n"
+        )
+        system_prompt = (
+            "You are the Expert Security Appraiser. The Red Team claims the provided code snippet "
+            "contains a vulnerability. They often hallucinate. Your job is to rigorously debunk their claim. "
+            "You must verify if this is a GENUINE, EXPLOITABLE vulnerability of HIGH, CRITICAL, or Zero-Day severity. "
+            "If it is a False Positive, a theoretical edge case, or lacks clear data-flow evidence, you MUST reject it.\n\n"
+            "Respond ONLY in valid JSON matching this schema:\n"
+            '{{"is_genuine_severe_vuln": boolean, "expert_critique": "string"}}'
+        )
+
+        try:
+            response = await kimi_provider.complete(prompt, system=system_prompt, temperature=0.1)
+            await kimi_provider.close()
+            
+            response_text = response.strip()
+            fence_match = re.search(r"```(?:json)?\s*(.*?)```", response_text, re.DOTALL | re.IGNORECASE)
+            if fence_match:
+                response_text = fence_match.group(1).strip()
+            brace_start = response_text.find("{")
+            brace_end = response_text.rfind("}")
+            if brace_start != -1 and brace_end != -1 and brace_end > brace_start:
+                response_text = response_text[brace_start:brace_end + 1]
+
+            parsed = json.loads(response_text)
+            is_genuine = parsed.get("is_genuine_severe_vuln", False)
+            critique = parsed.get("expert_critique", "No critique provided")
+            
+            if not is_genuine:
+                logger.warning("Dropped by Layer 1 Appraiser (Kimi): %s", critique)
+                return False, critique
+            return True, ""
+            
+        except Exception as e:
+            logger.error("Layer 1 evaluation failed for %s: %s", finding.title, e)
+            return False, str(e)
+
+    async def _layer2_supreme_audit(
+        self,
+        contribution: Contribution,
+        sandbox_logs: str,
+    ) -> tuple[bool, str]:
+        """Layer 2: The Supreme Auditor. Final gate before PR or writing to secret_findings."""
+        from farm_agent.llm.provider import create_llm_provider
+        import copy
+        import json
+        import re
+        
+        try:
+            gem_cfg = copy.copy(self.config.llm)
+            gem_cfg.provider = "openrouter"
+            gem_cfg.model = "google/gemini-3.1-pro-preview"
+            gem_provider = create_llm_provider(gem_cfg)
+        except Exception as e:
+            logger.warning("Layer 2 instantiation failed: %s. Failing closed.", e)
+            return False, f"Instantiation failed: {e}"
+
+        patch_str = "\n".join(
+            f"File: {c.path}\n```\n{c.new_content}\n```" for c in contribution.changes
+        )
+
+        prompt = (
+            f"Vulnerability Dossier Audit:\n\n"
+            f"Title: {contribution.finding.title}\n"
+            f"Description/Root Cause: {contribution.finding.description}\n\n"
+            f"Proposed Patch:\n{patch_str}\n\n"
+            f"Sandbox Logs:\n```\n{sandbox_logs[-10000:]}\n```\n"
+        )
+        system_prompt = (
+            "You are the Supreme Auditor, the final gatekeeper before a vulnerability report or code patch is deployed to production. "
+            "You are provided with the entire incident dossier: original context, root cause analysis, the proposed patch, and Sandbox execution logs. "
+            "Your task is to audit the ENTIRE pipeline. Does the root cause make actual sense? Does the fix perfectly resolve it without introducing regressions? "
+            "Are the sandbox logs completely clean?\n"
+            "If there is ANY hallucination in the root cause, or if the fix is incomplete, you MUST reject the entire operation.\n\n"
+            "Respond ONLY in valid JSON matching this schema:\n"
+            '{{"final_approval": boolean, "rejection_reason": "string (mandatory if false)"}}'
+        )
+
+        try:
+            response = await gem_provider.complete(prompt, system=system_prompt, temperature=0.1)
+            await gem_provider.close()
+            
+            response_text = response.strip()
+            fence_match = re.search(r"```(?:json)?\s*(.*?)```", response_text, re.DOTALL | re.IGNORECASE)
+            if fence_match:
+                response_text = fence_match.group(1).strip()
+            brace_start = response_text.find("{")
+            brace_end = response_text.rfind("}")
+            if brace_start != -1 and brace_end != -1 and brace_end > brace_start:
+                response_text = response_text[brace_start:brace_end + 1]
+
+            parsed = json.loads(response_text)
+            approved = parsed.get("final_approval", False)
+            reason = parsed.get("rejection_reason", "No reason provided")
+            
+            if not approved:
+                logger.warning("Vetoed by Layer 2 Supreme Auditor (Gemini): %s", reason)
+                return False, reason
+            return True, ""
+            
+        except Exception as e:
+            logger.error("Layer 2 audit failed for %s: %s", contribution.title, e)
+            return False, str(e)
 
     async def _check_ai_policy(self, repo: Repository) -> bool:
         """Check if a repo has an AI policy that bans AI-generated PRs.

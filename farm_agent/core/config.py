@@ -52,15 +52,12 @@ class GitHubConfig(BaseModel):
 class LLMConfig(BaseModel):
     """LLM provider configuration."""
 
-    provider: Literal["minimax", "openrouter"] = "minimax"
-    model: str = "MiniMax-M2.7"
+    provider: Literal["openrouter"] = "openrouter"
+    model: str = "deepseek/deepseek-v3.2"
     api_key: str = ""
     temperature: float = 0.3
     max_tokens: int = 8192
     base_url: str | None = None
-
-    # Minimax
-    minimax_group_id: str = ""
 
     # OpenRouter (Red Team engine for Bloodhound audits)
     openrouter_api_key: str = ""
@@ -70,15 +67,11 @@ class LLMConfig(BaseModel):
     @model_validator(mode="after")
     def resolve_api_key_and_defaults(self):
         """Fallback: env vars for API keys."""
-        if not self.api_key:
-            self.api_key = os.environ.get("MINIMAX_API_KEY", "")
-        if not self.minimax_group_id:
-            self.minimax_group_id = os.environ.get("MINIMAX_GROUP_ID", "")
         if not self.openrouter_api_key:
             self.openrouter_api_key = os.environ.get("OPENROUTER_API_KEY", "")
 
         if self.model == "gemini-2.5-flash":
-             self.model = "MiniMax-M2.7"
+             self.model = "deepseek/deepseek-v3.2"
         return self
 
 
@@ -186,6 +179,15 @@ class PipelineConfig(BaseModel):
     max_review_retries: int = 2
     # P0 FIX: Sandbox Guillotine — hardcoded ON, never bypassed
     sandbox_validation_enabled: bool = True
+    # CRIT-03 FIX: Provider-aware concurrency safety cap.
+    # Prevents LLM providers from being hammered with too many parallel requests,
+    # which triggers secondary rate limits (HTTP 429 thundering herd).
+    # Dynamic backoff logic in pipeline._get_max_concurrency() will further
+    # reduce this cap temporarily on LLMRateLimitError.
+    llm_concurrency_cap: int = 5
+    # Cooldown period (seconds) when a 429 rate-limit is hit during parallel execution.
+    # Concurrency is reduced to 1 for this duration, then ramped back up.
+    rate_limit_cooldown_sec: int = 300  # 5 minutes
 
 
 class NotificationConfig(BaseModel):

@@ -398,6 +398,14 @@ class ContributionGenerator:
                 context, style_guide=style_guide, project_map=project_map,
             )
 
+            if self._memory:
+                try:
+                    filter_lessons = await self._memory.get_knowledge(context.repo.full_name, "FILTER_REJECTION_LESSON")
+                    if filter_lessons:
+                        system += f"\n\n### PREVIOUS MISTAKES TO AVOID ON THIS REPO:\n{filter_lessons}\n"
+                except Exception as exc:
+                    logger.debug("Could not fetch filter lessons for generator: %s", exc)
+
             response = await self._agentic_generate(
                 prompt,
                 system=system,
@@ -660,6 +668,13 @@ class ContributionGenerator:
                     )
             except Exception as exc:
                 logger.debug("Could not fetch QA lessons: %s", exc)
+
+            try:
+                filter_lessons = await self._memory.get_knowledge(context.repo.full_name, "FILTER_REJECTION_LESSON")
+                if filter_lessons:
+                    qa_lessons_section += f"\n\n### PREVIOUS MISTAKES TO AVOID ON THIS REPO:\n{filter_lessons}\n"
+            except Exception as exc:
+                logger.debug("Could not fetch filter lessons: %s", exc)
 
         # ── Build hardened system prompt ─────────────────────────────────
         system = (

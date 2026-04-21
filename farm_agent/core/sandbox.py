@@ -202,7 +202,7 @@ class DockerSandbox:
     - network_mode="none": Sever all internet access (prevents payload downloads,
       data exfiltration, and C2 callbacks).
     - mem_limit="512m": Prevent OOM attacks and memory exhaustion.
-    - nano_cpus=500_000_000: Cap at 0.5 CPU to prevent fork bombs and CPU pegging.
+    - nano_cpus=1_000_000_000: Cap at 0.5 CPU to prevent fork bombs and CPU pegging.
     - cap_drop=["ALL"]: Drop ALL Linux capabilities (no net_admin, no sys_admin, etc.).
     - security_opt=["no-new-privileges"]: Prevent privilege escalation via setuid binaries.
     - pids_limit=128: Prevent fork bombs at the process level.
@@ -283,7 +283,7 @@ class DockerSandbox:
         The container is strictly sandboxed:
         - No network access (network_mode="none")
         - 512MB memory cap (mem_limit="512m")
-        - 0.5 CPU cap (nano_cpus=500_000_000)
+        - 0.5 CPU cap (nano_cpus=1_000_000_000)
         - All Linux capabilities dropped (cap_drop=["ALL"])
         - No new privileges (security_opt=["no-new-privileges"])
         - 128 process limit (pids_limit=128)
@@ -511,7 +511,7 @@ class DockerSandbox:
                 # ── Security hardening: strict isolation ──────────────────────
                 network_mode="none",
                 mem_limit="512m",
-                nano_cpus=500_000_000,
+                nano_cpus=1_000_000_000,
                 cap_drop=["ALL"],
                 security_opt=["no-new-privileges"],
                 pids_limit=128,

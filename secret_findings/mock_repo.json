@@ -1,0 +1,10 @@
+{
+  "repo": "mock/repo",
+  "saved_at": "2026-04-20T02:29:31.936792+00:00",
+  "findings": [
+    {
+      "type": "test",
+      "message": "This is a mock finding to test volume mount."
+    }
+  ]
+}

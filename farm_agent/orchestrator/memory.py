@@ -159,9 +159,17 @@ class Memory:
         # P1-OPSEC-9: Enable foreign key enforcement
         await self._db.execute("PRAGMA foreign_keys = ON;")
         await self._db.executescript(SCHEMA)
-        # DEBT-04: Add index for sliding-window quota queries on (provider, timestamp)
+        # DEBT-04 RESOLVED: Composite index for sliding-window quota queries.
+        # Covers: provider + timestamp range comparisons in check_and_record_llm_quota()
+        # and get_openrouter_usage_today(). Without this, every quota check
+        # was a full table scan on api_usage_log.
         await self._db.execute(
             "CREATE INDEX IF NOT EXISTS idx_api_usage ON api_usage_log(provider, timestamp)"
+        )
+        # Secondary index optimized for the periodic DELETE cleanup (timestamp ASC
+        # for range deletes of old rows — different access pattern from the COUNT queries).
+        await self._db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_api_usage_cleanup ON api_usage_log(timestamp)"
         )
         await self._db.commit()
 
@@ -639,6 +647,44 @@ class Memory:
         except Exception as exc:
             logger.debug("Could not record QA lesson for %s: %s", repo_name, exc)
 
+    async def add_filter_lesson(self, repo: str, layer: int, snippet_or_fix: str, critique: str) -> None:
+        """Record a rejection lesson from Layer 1 or Layer 2 filters."""
+        if self._db is None:
+            return
+
+        # Replace tricky quotes to avoid JSON issues, truncation.
+        content = f"[Layer {layer}] Rejected due to: {critique}\nSnippet/Fix context:\n{snippet_or_fix[:500]}..."
+        try:
+            await self._db.execute(
+                """INSERT OR REPLACE INTO knowledge_base (repo_name, entry_type, content, created_at)
+                   VALUES (?, 'FILTER_REJECTION_LESSON', ?, ?)""",
+                (repo, content, datetime.now(UTC).isoformat()),
+            )
+            await self._db.commit()
+        except Exception as exc:
+            logger.debug("Could not record filter lesson for %s: %s", repo, exc)
+
+    async def get_knowledge(self, repo_name: str, entry_type: str) -> str:
+        """Retrieve all knowledge base entries for a repo and type, joined as a string."""
+        if self._db is None:
+            return ""
+
+        if "://" in repo_name:
+            repo_name = repo_name.split("/")[-2] + "/" + repo_name.split("/")[-1]
+        
+        try:
+            cursor = await self._db.execute(
+                """SELECT content FROM knowledge_base
+                   WHERE repo_name = ? AND entry_type = ?
+                   ORDER BY created_at ASC""",
+                (repo_name, entry_type),
+            )
+            rows = await cursor.fetchall()
+            return "\n\n".join([r[0] for r in rows])
+        except Exception as exc:
+            logger.debug("Could not fetch knowledge for %s: %s", repo_name, exc)
+            return ""
+
     async def run_kb_garbage_collection(self, days: int = 90) -> int:
         """Purge stale knowledge base entries older than N days.
 
@@ -669,13 +715,27 @@ class Memory:
         """Count OpenRouter API calls made today (UTC).
 
         Used by BloodhoundAnalyzer to enforce the red_team_daily_limit.
+
+        DEBT-04 FIX: Rewrote from date(timestamp, 'unixepoch') string comparison
+        to a numeric Unix timestamp range. SQLite cannot use the (provider, timestamp)
+        index when a function is applied to the indexed column, causing a full
+        table scan on every Bloodhound call. The range comparison is index-seekable.
         """
         if self._db is None:
             return 0
 
+        import time as _time
         try:
+            # Compute UTC midnight as Unix timestamp for today
+            import datetime as _dt
+            now_utc = _dt.datetime.now(_dt.timezone.utc)
+            midnight_utc = now_utc.replace(hour=0, minute=0, second=0, microsecond=0)
+            day_start_ts = midnight_utc.timestamp()
+
             cursor = await self._db.execute(
-                "SELECT COUNT(*) FROM api_usage_log WHERE provider = 'openrouter' AND date(timestamp, 'unixepoch') = date('now')",
+                "SELECT COUNT(*) FROM api_usage_log"
+                " WHERE provider = 'openrouter' AND timestamp >= ?",
+                (day_start_ts,),
             )
             row = await cursor.fetchone()
             return row[0] if row else 0
@@ -901,12 +961,12 @@ class Memory:
                 for r in rows
             ]
 
-    # ── Safe Quota Tracking (Minimax Overdrive) ──────────────────────────
+    # ── Safe Quota Tracking ──────────────────────────
 
-    async def check_and_record_llm_quota(self, provider: str = "minimax") -> None:
+    async def check_and_record_llm_quota(self, provider: str = "openrouter") -> None:
         """Sliding-window quota checker and recorder for LLM providers.
-
-        Minimax plan limits: 1000 requests per 5 hours, 10000 per 7 days.
+        
+        Hardcoded safety limits: 1000 requests per 5 hours, 10000 per 7 days.
         Uses a 5% safety buffer (950 / 9500) to prevent overshoot.
 
         On success, atomically records the request in the usage log.

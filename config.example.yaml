@@ -15,12 +15,11 @@ github:
   secondary_tokens: []
 
 llm:
-  provider: "minimax"  # minimax | gemini | openai | anthropic | ollama
-  model: "MiniMax-M2.7"
-  api_key: "YOUR_API_KEY_HERE"  # Or set MINIMAX_API_KEY in .env
+  provider: "openrouter"
+  model: "deepseek/deepseek-v3.2"
+  api_key: "YOUR_OPENROUTER_API_KEY_HERE"  # Or set OPENROUTER_API_KEY in .env
   temperature: 0.2
   max_tokens: 8192
-  minimax_group_id: ""  # Or set MINIMAX_GROUP_ID in .env
   # For ollama (local models):
   # provider: "ollama"
   # model: "codellama:13b"

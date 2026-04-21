@@ -17,7 +17,7 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-_SECRET_FINDINGS_DIR = Path("secret_findings")
+_SECRET_FINDINGS_DIR = Path("/app/secret_findings")
 
 _SECURITY_MD_PATHS = [
     "SECURITY.md",
