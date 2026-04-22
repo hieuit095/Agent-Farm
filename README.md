@@ -1,106 +1,107 @@
-# 🛠️ Farm-Agent
+# Farm-Agent
 
-**Senior Open Source Contributor — Human-like precision, zero friction.**
-
-[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-3776AB?logo=python&logoColor=white)](https://python.org)
-[![Docker](https://img.shields.io/badge/docker-ready-2496ED?logo=docker&logoColor=white)](docker-compose.yml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Code Style: Ruff](https://img.shields.io/badge/code%20style-ruff-000000?logo=ruff)](https://github.com/astral-sh/ruff)
+[![Python Version](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13-blue.svg)](https://www.python.org/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Docker Requirement](https://img.shields.io/badge/docker-%3E%3D7.1-blue.svg)](https://www.docker.com/)
 
 ## Overview
-
-Farm-Agent is a highly advanced system designed to discover open-source GitHub repositories, identify real bugs or quality issues, generate precise fixes, and submit pull requests. It operates behind a sophisticated human behavior simulation layer to ensure all contributions provide genuine value to maintainers.
+Farm-Agent is an advanced, fully autonomous system that continuously searches for, analyzes, and contributes to open-source projects on GitHub. By leveraging state-of-the-art Large Language Models and strict validation mechanisms, it identifies bugs, solves issues, and submits high-quality Pull Requests without human intervention.
 
 ## Key Features
-
-- **Issue-First Pipeline:** Prioritizes solving existing, open GitHub issues before falling back to static code analysis, ensuring contributions align with maintainers' immediate needs.
-- **Polyglot Sandbox Validation:** Uses isolated Docker containers to execute and validate generated patches (across Python, Node.js, Rust, Go, etc.) before any Pull Request is created.
-- **Multi-Strategy Analysis:** Concurrently runs security, code quality, documentation, and UI/UX analyzers against repository file trees.
-- **X-Ray Context Vision:** Builds a local ChromaDB Retrieval-Augmented Generation (RAG) index to ensure code patches are contextually accurate across multiple files.
-- **PR Patrol & Janitor:** Autonomously monitors open PRs for maintainer feedback to push auto-fixes, answer questions, and sign CLAs. The "Janitor" sweeps and deletes any PRs classified as low-quality or garbage.
-- **Anti-Farming Filter:** A zero-tolerance gatekeeper that drops trivial findings (e.g., typos, formatting) and blocks documentation-only PRs to prevent spamming maintainers.
-- **Super Human Mode:** A 24/7 autonomous daemon that operates on a stochastic daily schedule, complete with simulated coding delays, lunch breaks, and randomized PR quotas to mimic a real developer's circadian rhythm.
-- **Familiar Grounds:** Learns from past merged PRs to prioritize repositories where the agent is already a trusted contributor.
+- **Super Human Mode (Terminator Execution Loop):** A 24/7 daemon operating via `docker-compose` that relentlessly maximizes PR throughput up to daily API caps. No simulated human delays or lunch breaks.
+- **Polyglot Sandbox:** Before proposing changes, generated code is rigorously tested within isolated Docker containers (networks: `internet_access`, `sandbox_isolated`) ensuring only valid, functional code is submitted.
+- **Bloodhound Red Team Auditing:** Uses `ast-grep` and `Semgrep` combined with OpenRouter White-Hat audit LLMs to unearth and patch complex security and quality flaws.
+- **Anti-Farming Filter:** A strict, zero-tolerance gateway that outright blocks trivial, formatting, or pure documentation PRs.
+- **PR Patrol & Janitor:** Autonomously monitors open PRs, processes maintainer feedback, generates push-ready code fixes, signs CLAs, and prunes stale or garbage pull requests.
+- **Circular Target Loop:** Safely rotates through target repositories guaranteeing crash-safe continuous operation.
+- **Token Pool Rotation:** Intelligently balances GitHub GET request limits across `secondary_tokens` while executing write operations under the primary token.
 
 ## System Architecture (High-Level)
-
-Farm-Agent orchestrates its pipeline via a Click-based CLI (`farm_agent`). The core orchestrator (`ContribPipeline` / `SuperHumanLoop`) interacts with an LLM Provider (primarily utilizing Minimax ABAB models) and the GitHub REST API. State is persistently managed in an SQLite database using WAL mode (`aiosqlite`).
-
-When analyzing code or solving issues, the Code Generation Engine uses an ephemeral ChromaDB vector store for context retrieval. Crucially, before submission, the generated code patch is validated inside an ephemeral Docker Sandbox. If the patch fails tests or linters, the agent enters a self-correction loop before attempting to submit the PR.
+Farm-Agent follows a strict sequential pipeline:
+1. **Discovery:** Scrapes GitHub for active repositories matching defined criteria (language, stars) or targets explicit repositories.
+2. **Gate:** The Anti-Farming Filter screens repositories and blocks low-effort PR generation.
+3. **Analysis:** The Bloodhound Red Team scans source code for vulnerabilities and structural issues.
+4. **Engine:** The Generator utilizes LLMs (Minimax, OpenRouter) to write targeted fixes and feature implementations.
+5. **Sandbox:** The Polyglot Sandbox securely builds, runs, and validates the generated code in isolated Docker networks.
+6. **PR / Issue Solving:** Finally, the PR Manager forks the repo, commits the verified patches, and opens a comprehensive Pull Request.
 
 ## Getting Started
 
 ### Prerequisites
-
-- **Python:** 3.11 or higher
-- **Docker:** 7.1 or higher (Required for Polyglot Sandbox Validation)
-- **GitHub PAT:** A Personal Access Token with `repo` scope
-- **LLM API Key:** Minimax API key (default) or supported alternatives
+- **Python:** `>= 3.11`
+- **Docker:** `>= 7.1` (Required for the Polyglot Sandbox)
+- **Git:** `>= 2.0`
 
 ### Installation
-
-1. Clone the repository:
-   ```bash
-   git clone https://github.com/hieuit095/Farm-Agent.git
-   cd Farm-Agent
-   ```
-
-2. Install the package and development dependencies:
-   ```bash
-   pip install -e .[dev]
-   ```
+Clone the repository and install it in development mode:
+```bash
+git clone https://github.com/hieuit095/Farm-Agent.git
+cd Farm-Agent
+pip install -e .[dev]
+```
 
 ### Environment Variables
+Copy `config.example.yaml` to `config.yaml` and `.env.example` to `.env` and fill in your keys. NEVER commit your `.env` file to version control.
+```ini
+# GitHub Authentication (Required)
+GITHUB_TOKEN=your_github_personal_access_token
 
-Configure the agent using `config.yaml` or set the following key environment variables:
+# Secondary GitHub tokens for GET request rotation (Optional, comma-separated)
+GITHUB_SECONDARY_TOKENS=token1,token2
 
-- `GITHUB_TOKEN`: Your GitHub Personal Access Token.
-- `MINIMAX_API_KEY`: Your Minimax API Key for LLM access.
-- `MINIMAX_GROUP_ID`: Your Minimax Group ID.
+# Pipeline & Targeting Options (Optional)
+EXCLUDED_LANGUAGES=javascript,typescript
 
-Alternatively, copy `config.example.yaml` to `config.yaml` and fill in your details.
+# LLM Provider Keys
+MINIMAX_API_KEY=your_minimax_api_key
+MINIMAX_GROUP_ID=your_minimax_group_id
+
+# OpenRouter (Optional - for Red Team Bloodhound audits)
+OPENROUTER_API_KEY=your_openrouter_api_key
+
+# Notifications (Optional)
+TELEGRAM_BOT_TOKEN=
+TELEGRAM_CHAT_ID=
+SLACK_WEBHOOK_URL=
+DISCORD_WEBHOOK_URL=
+```
 
 ## Usage
 
-Farm-Agent offers a rich set of CLI commands for different operational modes:
+Farm-Agent provides a rich command-line interface.
 
-**Run a single hunt round (discover, analyze, create PRs):**
+**Run the pipeline for auto-discovery:**
 ```bash
-farm_agent hunt --rounds 1
+farm_agent run
 ```
 
-**Target a specific repository directly:**
+**Target a specific repository:**
 ```bash
 farm_agent target https://github.com/owner/repo
 ```
 
-**Solve open issues in a specific repository:**
+**Solve specific issues in a repository:**
 ```bash
 farm_agent solve https://github.com/owner/repo
 ```
 
-**Run the 24/7 autonomous daemon (Super Human Mode):**
+**Start the 24/7 Super Human loop:**
 ```bash
 farm_agent superhuman
 ```
 
-**Monitor open PRs and auto-respond to feedback (PR Patrol):**
+**Run PR Patrol to respond to maintainer comments:**
 ```bash
 farm_agent patrol
 ```
 
-**Sweep and auto-close garbage PRs via LLM evaluation (Janitor):**
+*For more commands including `hunt`, `analyze`, `janitor`, `status`, and `system-status`, run:*
 ```bash
-farm_agent janitor
+farm_agent --help
 ```
 
-**View overall performance statistics:**
-```bash
-farm_agent stats
-```
+## Contributing
+Contributions are welcome. When submitting a pull request, please ensure that you pass all pre-commit checks and tests. Note the `CONTRIBUTING.md` (if available) for further guidelines.
 
-## Contributing & License
-
-We welcome contributions! Please refer to the `CONTRIBUTING.md` file (if available) or standard open-source pull request workflows.
-
-This project is licensed under the **MIT License**. See the `LICENSE` file for details.
+## License
+This project is licensed under the MIT License - see the [pyproject.toml](pyproject.toml) file for details.
