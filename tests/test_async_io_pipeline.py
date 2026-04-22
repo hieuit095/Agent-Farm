@@ -26,7 +26,7 @@ class TestAsyncIOPipeline(unittest.IsolatedAsyncioTestCase):
         async def mock_to_thread_func(func, *args, **kwargs):
             if func == os.makedirs:
                 return None
-            return await asyncio.to_thread(func, *args, **kwargs)
+            return None
 
         mock_to_thread.side_effect = mock_to_thread_func
 
@@ -39,9 +39,15 @@ class TestAsyncIOPipeline(unittest.IsolatedAsyncioTestCase):
         # Also need to mock _do_clone inside the function or just mock the whole to_thread
         # Let's simplify and just check calls to mock_to_thread
 
+        async def _mock_gather(*args, **kwargs):
+            for a in args:
+                await a
+            return []
+
         with patch(
             "farm_agent.orchestrator.pipeline.asyncio.gather",
-            new_callable=unittest.mock.AsyncMock
+            new_callable=unittest.mock.AsyncMock,
+            side_effect=_mock_gather
         ):
             # Reset mock to avoid noise from previous setups
             mock_to_thread.reset_mock()

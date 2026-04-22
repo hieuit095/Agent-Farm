@@ -82,24 +82,35 @@ graph TD
 
 ## 4. Core Execution Loops / Entry Points
 
-The pipeline orchestrates contributions through a rigorous, sequential state machine:
+The orchestration pipelines govern execution through rigorous state machines. There are multiple execution paradigms:
 
-1. **Discovery:** Scrapes GitHub to discover target repositories or processes explicit targets (e.g., via the `target` command or the Circular Target Loop).
-2. **Gate:** The Anti-Farming Filter immediately halts execution on the repository if it appears to be a trivial documentation or non-production target.
-3. **Analysis:** The Bloodhound Red Team utilizes structural searching (`ast-grep`, `Semgrep`) and White-Hat LLM logic to identify concrete vulnerabilities or flaws.
-4. **Engine:** The Generator constructs prompts and communicates with the LLMs to produce patching code or feature enhancements based on analysis.
-5. **Sandbox:** The generated code is compiled and executed within a Polyglot Sandbox (Docker). Changes that break the build or tests are rejected.
-6. **PR:** The PR Manager forks the repository, pushes the validated patch to a new branch, and creates the Pull Request on GitHub.
+### The ContribPipeline (Main Sequence)
+1. **Discovery:** Uses `GitHubClient` to find repos or `JsonTargetDiscovery` / `DatabaseTargetDiscovery` for the crash-safe **Circular Target Loop** (updates `scanned_at` timestamp). Fetches `AI_POLICY.md` and `CONTRIBUTING.md` concurrently.
+2. **Gate:** The **Anti-Farming Filter** (`security_gate.py`) intercepts targets, dropping non-production code (tests, docs) and preventing low-effort PRs.
+3. **Analysis:** The **Bloodhound Red Team** uses `ast-grep` and `Semgrep` combined with OpenRouter White-Hat audit LLMs (falling back to Minimax).
+4. **Engine:** `ContributionGenerator` formulates solutions using the **DEV-QA Bounty Loop** (`MAX_DEV_QA_CYCLES = 3`) to refine patches. Raises `GenerationError` on forbidden AI keywords ("as an ai").
+5. **Sandbox:** `DockerSandbox` runs patches via the **Polyglot Sandbox**. Enforces a hard killswitch (`sandbox_validation_enabled = True`). Operates across two networks: `internet_access` and `sandbox_isolated`.
+6. **PR:** `PRManager` handles forking, patching the branch, committing via GitHub API, and creating the Pull Request.
+
+### The SuperHumanLoop (Terminator Daemon)
+Runs a relentless 24/7 autonomous loop maximizing PR throughput up to hard limits (e.g. `max_prs_per_day`), strictly removing simulated delays or breaks. Coordinates interleaved `hunt-circular` and `patrol` commands.
+
+### PR Patrol & Janitor
+- **PR Patrol:** Scans open PRs, categorizes maintainer feedback via LLM, generates code/style fixes, and auto-replies. Triggers deterministic ghosting/closure if `MAX_DISCUSSION_REPLIES` is hit.
+- **PR Janitor:** Identifies and destroys (closes/deletes branches) for low-value garbage PRs on live GitHub.
 
 ## 5. Database/State Schema
 
-Farm-Agent uses `aiosqlite` to manage persistence in `memory.db`. The primary tables include:
+Farm-Agent uses `aiosqlite` for state management in `memory.db` with rigorous hardcoded DDL strings (no parameterization for schemas).
 
-- `analyzed_repos`: Tracks repositories that have been processed to prevent duplicate work.
-- `submitted_prs`: Logs all Pull Requests created by the agent, enabling tracking and management.
-- `pr_outcomes`: Records the final state (merged, closed, etc.) of PRs.
-- `findings_cache`: Caches identified vulnerabilities and issues to optimize subsequent runs.
-- `run_log`: Historical log of execution runs.
-- `blacklisted_repos`: Repositories explicitly ignored by the agent.
-- `api_usage_log`: Logs API requests to manage and throttle quotas.
-- `knowledge_base`: Stores episodic QA lessons and historical context for the agent.
+| Table | Purpose | Key Guardrails |
+|---|---|---|
+| `analyzed_repos` | Tracks previously processed repositories. | Prevents redundant operations. |
+| `submitted_prs` | Ledger of all created PRs. | Primary source for Alumni Sync and PR Patrol. |
+| `pr_outcomes` | Final recorded state (`merged`, `closed`, etc.). | Used to calculate leaderboard and merge rates. |
+| `findings_cache` | Caches identified flaws from Bloodhound. | Accelerates repeated targets. |
+| `run_log` | High-level tracking of pipeline executions. | Cleared by the `reset-db` CLI command. |
+| `blacklisted_repos` | Repositories immune to scanning. | Set defensively by Security Gate or Patrol. |
+| `api_usage_log` | Token rate limit expenditure tracking. | Drives rotation logic for `GITHUB_SECONDARY_TOKENS`. |
+| `task_schedule` | Persistent tracking of background jobs. | Ensures recovery of delayed operations. |
+| `knowledge_base` | Episodic memory and QA lessons. | Pruned via the `gc` CLI (default 90 days). |
