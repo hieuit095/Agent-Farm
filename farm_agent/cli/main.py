@@ -68,16 +68,16 @@ def setup_logging(verbose: bool = False, config=None):
 
 
 def print_banner():
-    banner = f"""[bold cyan]
+    banner = r"""[bold cyan]
      _                    _     _____
     / \   __ _  ___ _ __ | |_  |  ___|_ _ _ __ _ __ ___
-   / _ \ / _` |/ _ \ '_ \| __| | |_ / _` | '__| '_ ` _ \\
+   / _ \ / _` |/ _ \ '_ \| __| | |_ / _` | '__| '_ ` _ \
   / ___ \ (_| |  __/ | | | |_  |  _| (_| | |  | | | | | |
  /_/   \_\__, |\___|_| |_|\__| |_|  \__,_|_|  |_| |_| |_|
          |___/
 
   [dim]Autonomous Agent Orchestration v{__version__}[/dim]
-[/bold cyan]"""
+[/bold cyan]""".replace("{__version__}", __version__)
     console.print(banner)
 
 
