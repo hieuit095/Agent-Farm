@@ -27,7 +27,15 @@ class TestAsyncIOPipeline(unittest.IsolatedAsyncioTestCase):
                 return None
             return func(*args, **kwargs)
 
-        mock_to_thread.side_effect = mock_to_thread_func
+        # Important to NOT set side effect if it's awaited and it returns a coroutine. But to_thread returns a coroutine.
+        # Wait, if to_thread returns a coroutine, and gather awaits it, then mock_to_thread should return a coroutine.
+        async def async_mock_to_thread_func(func, *args, **kwargs):
+            if func == os.makedirs:
+                return None
+            return func(*args, **kwargs)
+
+        # Let's just use AsyncMock for mock_to_thread directly and not give a side effect that executes it
+        mock_to_thread.side_effect = async_mock_to_thread_func
 
         changes = [FileChange(path="test.py", new_content="print(1)", is_new_file=True)]
         tests_added = []
@@ -35,7 +43,6 @@ class TestAsyncIOPipeline(unittest.IsolatedAsyncioTestCase):
         # We need to mock _apply_patch_sync because it's called via to_thread
         self.pipeline._apply_patch_sync = MagicMock()
 
-        # Also need to mock _do_clone inside the function or just mock the whole to_thread
         # Let's simplify and just check calls to mock_to_thread
 
         async def mock_gather(*args):
