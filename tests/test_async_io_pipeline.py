@@ -1,4 +1,3 @@
-import asyncio
 import os
 import unittest
 from unittest.mock import MagicMock, patch
@@ -17,7 +16,9 @@ class TestAsyncIOPipeline(unittest.IsolatedAsyncioTestCase):
     @patch("farm_agent.orchestrator.pipeline.asyncio.to_thread")
     @patch("farm_agent.orchestrator.pipeline.os.path.join")
     @patch("farm_agent.orchestrator.pipeline.tempfile.gettempdir")
-    async def test_clone_and_patch_repo_uses_to_thread(self, mock_gettempdir, mock_join, mock_to_thread):
+    async def test_clone_and_patch_repo_uses_to_thread(
+        self, mock_gettempdir, mock_join, mock_to_thread
+    ):
         mock_gettempdir.return_value = "/tmp"
         mock_join.return_value = "/tmp/clone"
 

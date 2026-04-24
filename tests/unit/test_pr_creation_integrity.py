@@ -215,7 +215,7 @@ class TestHeadFormatValidation:
     async def test_manager_rejects_bare_branch(self):
         from farm_agent.core.models import ContributionType, Severity
 
-        contribution = Contribution(
+        Contribution(
             title="fix: vuln",
             commit_message="fix: vuln",
             contribution_type=ContributionType.SECURITY_FIX,
