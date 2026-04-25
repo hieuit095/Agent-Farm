@@ -149,7 +149,7 @@ class TestCreatePullRequest201Enforcement:
     @pytest.mark.asyncio
     async def test_payload_logged_before_send(self, github_client, mock_httpx_response, caplog):
         import logging
-        with caplog.at_level(logging.DEBUG, logger="farm_agent.github.client"):
+        with caplog.at_level(logging.INFO):
             github_client.get_repo_details = AsyncMock(
                 return_value=Repository(
                     owner="owner", name="repo", full_name="owner/repo",
@@ -176,7 +176,7 @@ class TestCreatePullRequest201Enforcement:
     @pytest.mark.asyncio
     async def test_response_logged_after_send(self, github_client, mock_httpx_response, caplog):
         import logging
-        with caplog.at_level(logging.DEBUG, logger="farm_agent.github.client"):
+        with caplog.at_level(logging.INFO):
             github_client.get_repo_details = AsyncMock(
                 return_value=Repository(
                     owner="owner", name="repo", full_name="owner/repo",
@@ -216,7 +216,7 @@ class TestHeadFormatValidation:
     async def test_manager_rejects_bare_branch(self):
         from farm_agent.core.models import ContributionType, Severity
 
-        Contribution(
+        contribution = Contribution(
             title="fix: vuln",
             commit_message="fix: vuln",
             contribution_type=ContributionType.SECURITY_FIX,
