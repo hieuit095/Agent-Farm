@@ -428,7 +428,6 @@ class GitHubClient:
         )
 
         from pathlib import Path
-
         from farm_agent.core.models import TOKEN_BLACKLIST
 
         tree = []
