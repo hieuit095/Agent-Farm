@@ -707,7 +707,7 @@ class Memory:
 
         Returns the number of new rows inserted.
         """
-        import json as _json
+        import json
 
         if self._db is None:
             return 0
@@ -719,7 +719,7 @@ class Memory:
 
         try:
             raw = json_path.read_text(encoding="utf-8")
-            entries = _json.loads(raw)
+            entries = json.loads(raw)
         except (json.JSONDecodeError, OSError) as exc:
             logger.error("Failed to read target_repo.json for seeding: %s", exc)
             return 0
