@@ -785,15 +785,15 @@ class Memory:
 
         if excluded_languages:
             placeholders = ",".join(["?"] * len(excluded_languages))
-            query = f"""UPDATE target_repos 
-               SET scanned_at = ? 
-               WHERE repo_url = (SELECT repo_url FROM target_repos WHERE LOWER(language) NOT IN ({placeholders}) ORDER BY COALESCE(scanned_at, 0) ASC, rowid ASC LIMIT 1) 
+            query = f"""UPDATE target_repos
+               SET scanned_at = ?
+               WHERE repo_url = (SELECT repo_url FROM target_repos WHERE LOWER(language) NOT IN ({placeholders}) ORDER BY COALESCE(scanned_at, 0) ASC, rowid ASC LIMIT 1)
                RETURNING *"""
             params = (now_ts, *[lang.lower() for lang in excluded_languages])
         else:
-            query = """UPDATE target_repos 
-               SET scanned_at = ? 
-               WHERE repo_url = (SELECT repo_url FROM target_repos ORDER BY COALESCE(scanned_at, 0) ASC, rowid ASC LIMIT 1) 
+            query = """UPDATE target_repos
+               SET scanned_at = ?
+               WHERE repo_url = (SELECT repo_url FROM target_repos ORDER BY COALESCE(scanned_at, 0) ASC, rowid ASC LIMIT 1)
                RETURNING *"""
             params = (now_ts,)
 
