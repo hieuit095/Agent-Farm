@@ -63,12 +63,20 @@ class TaskRouter:
         light_tasks = {TaskType.QUICK_FIX, TaskType.DOCS, TaskType.BULK}
         heavy_tasks = {TaskType.ANALYSIS, TaskType.CODE_GEN, TaskType.PLANNING}
 
-        if task_type in light_tasks and complexity <= 3 and self._strategy != CostStrategy.PERFORMANCE:
+        if (
+            task_type in light_tasks
+            and complexity <= 3
+            and self._strategy != CostStrategy.PERFORMANCE
+        ):
             model = MINIMAX_ABAB65S_CHAT
-            reason = f"Light task ({task_type.value}, complexity={complexity}) routed to fast model."
+            reason = (
+                f"Light task ({task_type.value}, complexity={complexity}) routed to fast model."
+            )
         elif task_type in heavy_tasks and complexity >= 7:
             model = MINIMAX_M27
-            reason = f"Heavy task ({task_type.value}, complexity={complexity}) routed to flagship model."
+            reason = (
+                f"Heavy task ({task_type.value}, complexity={complexity}) routed to flagship model."
+            )
         elif token_estimate > 100_000:
             model = MINIMAX_M27
             reason = f"Large context ({token_estimate} tokens) routed to flagship model."
@@ -90,7 +98,9 @@ class TaskRouter:
             model=model,
             task_type=task_type,
             reason=reason,
-            fallback=MINIMAX_ABAB65S_CHAT if model.name != MINIMAX_ABAB65S_CHAT.name else MINIMAX_M27,
+            fallback=MINIMAX_ABAB65S_CHAT
+            if model.name != MINIMAX_ABAB65S_CHAT.name
+            else MINIMAX_M27,
         )
 
     def get_default_assignments(self) -> dict[str, str]:

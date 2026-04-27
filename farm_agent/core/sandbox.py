@@ -126,9 +126,9 @@ def detect_language_from_extensions(repo_path: str | Path) -> str:
         return "rust"
 
     if (
-        (repo_dir / "requirements.txt").exists() or
-        (repo_dir / "pyproject.toml").exists() or
-        (repo_dir / "setup.py").exists()
+        (repo_dir / "requirements.txt").exists()
+        or (repo_dir / "pyproject.toml").exists()
+        or (repo_dir / "setup.py").exists()
     ):
         return "python"
 
@@ -147,7 +147,19 @@ def detect_language_from_extensions(repo_path: str | Path) -> str:
     # ── 2. Fallback to Extension Counting ──
     counts: dict[str, int] = {}
 
-    skip_dirs = {"node_modules", "target", ".git", "dist", "build", "__pycache__", "vendor", "venv", ".venv", ".pytest_cache", ".mypy_cache"}
+    skip_dirs = {
+        "node_modules",
+        "target",
+        ".git",
+        "dist",
+        "build",
+        "__pycache__",
+        "vendor",
+        "venv",
+        ".venv",
+        ".pytest_cache",
+        ".mypy_cache",
+    }
     try:
         for _root, dirs, files in os.walk(repo_dir):
             # Prune skip dirs in-place to avoid descending into them
@@ -192,7 +204,6 @@ def detect_language_from_repo_info(repo_info: dict | None) -> str | None:
 def get_environment_for_language(language: str) -> dict[str, str]:
     """Return the image + commands for a given language, falling back to Python."""
     return LANGUAGE_ENVIRONMENTS.get(language.lower(), DEFAULT_ENV)
-
 
 
 class DockerSandbox:
@@ -248,6 +259,7 @@ class DockerSandbox:
         if package_json.exists():
             try:
                 import json
+
                 data = json.loads(package_json.read_text(errors="ignore"))
                 if "test" in data.get("scripts", {}):
                     return "npm test"
@@ -356,7 +368,6 @@ class DockerSandbox:
         timed_out = False
         exit_code: int | None = None
 
-
         logger.info("Starting sandbox container %s for %s", container_name, repo_dir)
 
         try:
@@ -376,6 +387,7 @@ class DockerSandbox:
             # _EXECUTION_TIMEOUT_SECONDS, we kill the container and return
             # a timeout result.
             try:
+
                 async def _execute_and_collect() -> dict[str, Any]:
                     output_task = asyncio.create_task(
                         asyncio.to_thread(self._capture_output, container.id)
@@ -426,15 +438,17 @@ class DockerSandbox:
                 if len(stdout) > self._MAX_STDOUT_CHARS:
                     logger.info(
                         "Sandbox stdout truncated: %d -> %d chars",
-                        len(stdout), self._MAX_STDOUT_CHARS,
+                        len(stdout),
+                        self._MAX_STDOUT_CHARS,
                     )
-                    stdout = stdout[:self._MAX_STDOUT_CHARS]
+                    stdout = stdout[: self._MAX_STDOUT_CHARS]
                 if len(stderr) > self._MAX_STDERR_CHARS:
                     logger.info(
                         "Sandbox stderr truncated: %d -> %d chars (tail preserved)",
-                        len(stderr), self._MAX_STDERR_CHARS,
+                        len(stderr),
+                        self._MAX_STDERR_CHARS,
                     )
-                    stderr = stderr[-self._MAX_STDERR_CHARS:]
+                    stderr = stderr[-self._MAX_STDERR_CHARS :]
 
                 timed_out = False
 
@@ -467,14 +481,16 @@ class DockerSandbox:
             if container is not None:
                 await self._force_remove_container(container)
                 await self._wait_for_container_removal(run_id)
-            if 'temp_dir_obj' in locals():
+            if "temp_dir_obj" in locals():
                 # tempfile cleanup can sometimes raise if files are in use, but usually safe.
                 # However, tempfile.TemporaryDirectory's cleanup may fail on Windows if files are read-only.
                 # We'll just call it and ignore exceptions or let it throw.
                 try:
                     temp_dir_obj.cleanup()
                 except Exception as cleanup_exc:
-                    logger.debug("Failed to clean up temp dir %s: %s", temp_dir_obj.name, cleanup_exc)
+                    logger.debug(
+                        "Failed to clean up temp dir %s: %s", temp_dir_obj.name, cleanup_exc
+                    )
 
     async def _start_container(
         self,
@@ -522,8 +538,8 @@ class DockerSandbox:
             import tarfile
 
             tar_stream = io.BytesIO()
-            with tarfile.open(fileobj=tar_stream, mode='w') as tar:
-                tar.add(str(repo_dir), arcname='.')
+            with tarfile.open(fileobj=tar_stream, mode="w") as tar:
+                tar.add(str(repo_dir), arcname=".")
             tar_stream.seek(0)
 
             self.client.api.put_archive(container.id, self._WORKSPACE_PATH, tar_stream)
@@ -630,7 +646,9 @@ class DockerSandbox:
         logger.warning(
             "Container %s did not exit within %ds (timeout). "
             "The shell `timeout` wrapper will kill it at %ds.",
-            container_id, timeout, timeout,
+            container_id,
+            timeout,
+            timeout,
         )
         return self._TIMEOUT_EXIT_CODE
 
@@ -659,7 +677,9 @@ class DockerSandbox:
         try:
             return await asyncio.wait_for(output_task, timeout=self._REMOVAL_GRACE_SECONDS)
         except TimeoutError:
-            logger.warning("Sandbox output stream did not close before cleanup grace period expired")
+            logger.warning(
+                "Sandbox output stream did not close before cleanup grace period expired"
+            )
             return "", ""
         except (APIError, NotFound) as exc:
             logger.warning("Sandbox output stream closed unexpectedly: %s", exc)
