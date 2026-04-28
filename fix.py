@@ -1,7 +1,6 @@
-import sys
 import re
 
-with open('farm_agent/analysis/analyzer.py', 'r', encoding='utf-8') as f:
+with open('farm_agent/analysis/analyzer.py', encoding='utf-8') as f:
     content = f.read()
 
 # 1. Remove _check_sg_available
