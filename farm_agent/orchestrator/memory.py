@@ -800,7 +800,7 @@ class Memory:
         cursor = await self._db.execute(query, params)
         row = await cursor.fetchone()
         await self._db.commit()
-        
+
         if row is None:
             return None
 
