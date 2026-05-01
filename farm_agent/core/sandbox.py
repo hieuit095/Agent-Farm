@@ -149,7 +149,7 @@ def detect_language_from_extensions(repo_path: str | Path) -> str:
 
     skip_dirs = {"node_modules", "target", ".git", "dist", "build", "__pycache__", "vendor", "venv", ".venv", ".pytest_cache", ".mypy_cache"}
     try:
-        for _root, dirs, files in os.walk(repo_dir):
+        for root, dirs, files in os.walk(repo_dir):
             # Prune skip dirs in-place to avoid descending into them
             dirs[:] = [d for d in dirs if d not in skip_dirs]
             for file in files:
@@ -356,6 +356,8 @@ class DockerSandbox:
         timed_out = False
         exit_code: int | None = None
 
+        import shutil
+        import tempfile
 
         logger.info("Starting sandbox container %s for %s", container_name, repo_dir)
 
@@ -392,7 +394,7 @@ class DockerSandbox:
                             break
 
                         if loop.time() >= deadline:
-                            raise TimeoutError()
+                            raise asyncio.TimeoutError()
 
                         try:
                             await asyncio.to_thread(container.reload)
@@ -438,7 +440,7 @@ class DockerSandbox:
 
                 timed_out = False
 
-            except TimeoutError:
+            except asyncio.TimeoutError:
                 timed_out = True
                 logger.warning(
                     "Sandbox container %s exceeded hard execution timeout (%ds); "

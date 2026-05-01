@@ -219,7 +219,7 @@ def _extract_core_payload(raw_text: str) -> str | None:
         pass
 
     # Rule 5: Last resort — return the stripped text and let caller handle.
-    return raw_text if raw_text.strip().startswith("{") else None
+    return raw_text if raw_text.strip().startswith(("{")) else None
 
 
 class ContributionGenerator:

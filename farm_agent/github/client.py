@@ -428,7 +428,6 @@ class GitHubClient:
         )
 
         from pathlib import Path
-
         from farm_agent.core.models import TOKEN_BLACKLIST
 
         tree = []
@@ -655,7 +654,7 @@ class GitHubClient:
             raise GitHubAPIError(error_msg, status_code=status_code)
 
         pr_number = response_data.get("number", "?")
-        response_data.get("html_url", "")
+        pr_url = response_data.get("html_url", "")
         logger.info("Created PR #%s on %s/%s: %s", pr_number, owner, repo, title)
         return response_data
 

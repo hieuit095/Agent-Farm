@@ -142,7 +142,7 @@ def main():
         if answer == "y":
             for f in deletable:
                 fork_name = f["fork"]
-                fork_owner, _fork_repo = fork_name.split("/", 1)
+                fork_owner, fork_repo = fork_name.split("/", 1)
                 parent_owner, parent_name = f["parent"].split("/", 1)
 
                 # FINAL CHECK — re-verify immediately before delete to close the TOCTOU window.
