@@ -1,4 +1,4 @@
-"""Tests for JsonTargetDiscovery, DatabaseTargetDiscovery, and crash-safe circular target rotation."""
+"""Tests for JsonTargetDiscovery, DatabaseTargetDiscovery, and circular target rotation."""
 
 import json
 from datetime import UTC, datetime

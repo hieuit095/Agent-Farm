@@ -182,7 +182,7 @@ semgrep_new = '''    async def _run_semgrep(
                 logger.warning("Semgrep returned invalid JSON. Logging raw output for diagnostics:")
                 logger.warning("STDOUT (first 1000 chars): %s", stdout_text[:1000])
                 logger.warning("STDERR (first 1000 chars): %s", stderr_text[:1000])
-                
+
                 # Attempt to extract JSON from plain text warnings
                 start_idx = stdout_text.find('{')
                 end_idx = stdout_text.rfind('}')
