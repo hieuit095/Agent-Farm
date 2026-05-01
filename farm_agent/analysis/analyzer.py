@@ -1134,7 +1134,7 @@ class BloodhoundAnalyzer:
                 logger.warning("Semgrep returned invalid JSON. Logging raw output for diagnostics:")
                 logger.warning("STDOUT (first 1000 chars): %s", stdout_text[:1000])
                 logger.warning("STDERR (first 1000 chars): %s", stderr_text[:1000])
-                
+
                 # Attempt to extract JSON from plain text warnings
                 start_idx = stdout_text.find('{')
                 end_idx = stdout_text.rfind('}')
@@ -1192,12 +1192,12 @@ class BloodhoundAnalyzer:
     ) -> VulnerabilityDossier:
         context_parts = []
         max_chars = getattr(self._llm.config, "max_snippet_chars", 15000) if hasattr(self, "_llm") and hasattr(self._llm, "config") else 15000
-        
+
         for m in matches:
             severity = m.get("severity", "UNKNOWN").upper()
             if severity in ("INFO", "LOW"):
                 continue
-                
+
             snippet = m.get('match', '')
 
             # TASK 3: Programmatic pre-filter — skip garbage snippets before LLM call
@@ -1216,7 +1216,7 @@ class BloodhoundAnalyzer:
             context_parts.append(
                 f"File: {m['file']}\nLine: {m['line']}\nRule: {m['rule']}\nSnippet:\n{snippet}\n"
             )
-            
+
         if not context_parts:
             # If everything was filtered out, skip LLM call
             return VulnerabilityDossier(repo_url=repo_url, target_commit="unknown", vulnerabilities=[])
@@ -1234,7 +1234,7 @@ Your core directives:
 2. CHAINING: Do not just look at the single line; deduce how this snippet connects to user input or global state to form an exploit chain.
 3. RUTHLESSNESS: If the code relies on "security by obscurity" or weak default configurations, tear it apart.
 
-You will receive a Semgrep match report. 
+You will receive a Semgrep match report.
 - If the code is genuinely secure and cannot be exploited in any scenario, you MUST return [{"file": "NONE"}].
 - If it is exploitable, you must provide the exact attack path.
 
