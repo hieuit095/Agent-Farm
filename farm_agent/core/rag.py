@@ -51,10 +51,7 @@ class CodeChunk:
 
 def _should_index_file(path: str) -> bool:
     """Return False for files that should be excluded from RAG indexing."""
-    for pattern in EXCLUDE_PATTERNS:
-        if pattern.search(path):
-            return False
-    return True
+    return all(not pattern.search(path) for pattern in EXCLUDE_PATTERNS)
 
 
 def chunk_file(

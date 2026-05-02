@@ -692,7 +692,7 @@ class GitHubClient:
             raise GitHubAPIError(error_msg, status_code=status_code)
 
         pr_number = response_data.get("number", "?")
-        pr_url = response_data.get("html_url", "")
+        response_data.get("html_url", "")
         logger.info("Created PR #%s on %s/%s: %s", pr_number, owner, repo, title)
         return response_data
 
