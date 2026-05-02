@@ -13,14 +13,12 @@ Farm-Agent is a highly advanced system designed to discover open-source GitHub r
 
 ## Key Features
 
-- **Issue-First Pipeline:** Prioritizes solving existing, open GitHub issues before falling back to static code analysis, ensuring contributions align with maintainers' immediate needs.
 - **Polyglot Sandbox Validation:** Uses isolated Docker containers to execute and validate generated patches (across Python, Node.js, Rust, Go, etc.) before any Pull Request is created.
 - **Multi-Strategy Analysis:** Concurrently runs security, code quality, documentation, and UI/UX analyzers against repository file trees.
 - **X-Ray Context Vision:** Builds a local ChromaDB Retrieval-Augmented Generation (RAG) index to ensure code patches are contextually accurate across multiple files.
-- **PR Patrol & Janitor:** Autonomously monitors open PRs for maintainer feedback to push auto-fixes, answer questions, and sign CLAs. The "Janitor" sweeps and deletes any PRs classified as low-quality or garbage.
+- **PR Patrol:** Autonomously monitors open PRs for maintainer feedback to push auto-fixes, answer questions, and sign CLAs.
 - **Anti-Farming Filter:** A zero-tolerance gatekeeper that drops trivial findings (e.g., typos, formatting) and blocks documentation-only PRs to prevent spamming maintainers.
-- **Super Human Mode:** A 24/7 autonomous daemon that operates on a stochastic daily schedule, complete with simulated coding delays, lunch breaks, and randomized PR quotas to mimic a real developer's circadian rhythm.
-- **Familiar Grounds:** Learns from past merged PRs to prioritize repositories where the agent is already a trusted contributor.
+- **Super Human Mode:** A 24/7 autonomous daemon that runs as a continuous engine with a relentless 'Terminator execution loop' to maximize PR throughput up to daily API caps, strictly without simulated human delays or breaks.
 
 ## System Architecture (High-Level)
 
@@ -41,8 +39,8 @@ When analyzing code or solving issues, the Code Generation Engine uses an epheme
 
 1. Clone the repository:
    ```bash
-   git clone https://github.com/hieuit095/Farm-Agent.git
-   cd Farm-Agent
+   git clone https://github.com/hieuit095/Agent-Farm.git
+   cd Agent-Farm
    ```
 
 2. Install the package and development dependencies:
@@ -87,11 +85,6 @@ farm_agent superhuman
 **Monitor open PRs and auto-respond to feedback (PR Patrol):**
 ```bash
 farm_agent patrol
-```
-
-**Sweep and auto-close garbage PRs via LLM evaluation (Janitor):**
-```bash
-farm_agent janitor
 ```
 
 **View overall performance statistics:**

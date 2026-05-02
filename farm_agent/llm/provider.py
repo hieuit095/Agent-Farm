@@ -166,14 +166,18 @@ class LLMProvider(ABC):
 
         # Pattern 1: fenced tool_call block
         for match in re.finditer(
-            r"```tool_call\s*\n(.*?)\n\s*```", text, re.DOTALL,
+            r"```tool_call\s*\n(.*?)\n\s*```",
+            text,
+            re.DOTALL,
         ):
             try:
                 data = json.loads(match.group(1).strip())
-                calls.append(ToolCallRequest(
-                    tool_name=data.get("name", ""),
-                    arguments=data.get("arguments", {}),
-                ))
+                calls.append(
+                    ToolCallRequest(
+                        tool_name=data.get("name", ""),
+                        arguments=data.get("arguments", {}),
+                    )
+                )
             except (json.JSONDecodeError, AttributeError):
                 pass
 
@@ -185,11 +189,13 @@ class LLMProvider(ABC):
             end = text.rfind("}")
             if start != -1 and end != -1 and end > start:
                 try:
-                    data = json.loads(text[start:end+1])
-                    calls.append(ToolCallRequest(
-                        tool_name=data.get("name", ""),
-                        arguments=data.get("arguments", {}),
-                    ))
+                    data = json.loads(text[start : end + 1])
+                    calls.append(
+                        ToolCallRequest(
+                            tool_name=data.get("name", ""),
+                            arguments=data.get("arguments", {}),
+                        )
+                    )
                 except (json.JSONDecodeError, AttributeError):
                     pass
 
@@ -288,6 +294,7 @@ class MinimaxProvider(LLMProvider):
         for attempt in range(3):
             try:
                 import asyncio as _asyncio
+
                 # ── PROACTIVE THROTTLING: wait for semaphore slot + pace ─────────
                 async with self._semaphore:
                     await _asyncio.sleep(2.0)  # human-like think gap between LLM calls
@@ -299,9 +306,12 @@ class MinimaxProvider(LLMProvider):
                 choices = data.get("choices", [])
                 if not choices:
                     # Treat empty choices as retriable (upstream rate limit or overload)
-                    last_error = LLMError(f"Minimax returned empty choices (attempt {attempt+1}/3)")
+                    last_error = LLMError(
+                        f"Minimax returned empty choices (attempt {attempt + 1}/3)"
+                    )
                     if attempt < 2:
                         import asyncio as _asyncio
+
                         await _asyncio.sleep(10 * (attempt + 1))
                         continue
                     raise last_error
@@ -309,9 +319,10 @@ class MinimaxProvider(LLMProvider):
                 return _strip_reasoning_artifacts(content)
 
             except httpx.TimeoutException as e:
-                last_error = LLMError(f"Minimax timeout (attempt {attempt+1}/3): {e}")
+                last_error = LLMError(f"Minimax timeout (attempt {attempt + 1}/3): {e}")
                 if attempt < 2:
                     import asyncio as _asyncio
+
                     await _asyncio.sleep(10 * (attempt + 1))  # 10s, 20s backoff
                     continue
                 raise last_error from e
@@ -323,34 +334,46 @@ class MinimaxProvider(LLMProvider):
                 if status == 401:
                     raise LLMError("Minimax auth failed (401): check api_key") from e
                 if status == 529:
-                    backoff = min(10 * (2 ** attempt), 40)
+                    backoff = min(10 * (2**attempt), 40)
                     logger.warning(
                         "Minimax HTTP 529 (attempt %d/3) — backing off %.1fs before retry: %s",
-                        attempt + 1, backoff, e,
+                        attempt + 1,
+                        backoff,
+                        e,
                     )
                 elif status in (429, 402):
-                    backoff = min(5 * (2 ** attempt), 60)
+                    backoff = min(5 * (2**attempt), 60)
                     logger.warning(
                         "Minimax HTTP %d (attempt %d/3) — backing off %.1fs before retry: %s",
-                        status, attempt + 1, backoff, e,
+                        status,
+                        attempt + 1,
+                        backoff,
+                        e,
                     )
                     import asyncio as _asyncio
+
                     await _asyncio.sleep(backoff)
                     last_error = LLMRateLimitError(
-                        f"Minimax HTTP {status} (attempt {attempt+1}/3): {e}"
+                        f"Minimax HTTP {status} (attempt {attempt + 1}/3): {e}"
                     )
                     if attempt < 2:
                         continue
                     raise last_error from e
                 if status >= 500:
-                    backoff = min(5 * (2 ** attempt), 60)
+                    backoff = min(5 * (2**attempt), 60)
                     logger.warning(
                         "Minimax server error %d (attempt %d/3) — backing off %.1fs: %s",
-                        status, attempt + 1, backoff, e,
+                        status,
+                        attempt + 1,
+                        backoff,
+                        e,
                     )
                     import asyncio as _asyncio
+
                     await _asyncio.sleep(backoff)
-                    last_error = LLMError(f"Minimax server error {status} (attempt {attempt+1}/3): {e}")
+                    last_error = LLMError(
+                        f"Minimax server error {status} (attempt {attempt + 1}/3): {e}"
+                    )
                     if attempt < 2:
                         continue
                     raise last_error from e
@@ -439,9 +462,12 @@ class OpenRouterProvider(LLMProvider):
 
                 choices = data.get("choices", [])
                 if not choices:
-                    last_error = LLMError(f"OpenRouter returned empty choices (attempt {attempt + 1}/3)")
+                    last_error = LLMError(
+                        f"OpenRouter returned empty choices (attempt {attempt + 1}/3)"
+                    )
                     if attempt < 2:
                         import asyncio as _asyncio
+
                         await _asyncio.sleep(5 * (attempt + 1))
                         continue
                     raise last_error
@@ -453,6 +479,7 @@ class OpenRouterProvider(LLMProvider):
                 last_error = LLMError(f"OpenRouter timeout (attempt {attempt + 1}/3): {e}")
                 if attempt < 2:
                     import asyncio as _asyncio
+
                     await _asyncio.sleep(5 * (attempt + 1))
                     continue
                 raise last_error from e
@@ -464,29 +491,37 @@ class OpenRouterProvider(LLMProvider):
                 if status == 401:
                     raise LLMError("OpenRouter auth failed (401): check openrouter_api_key") from e
                 if status in (429, 529, 402, 403):
-                    backoff = min(5 * (2 ** attempt), 60)
+                    backoff = min(5 * (2**attempt), 60)
                     logger.warning(
                         "OpenRouter HTTP %d (attempt %d/3) — backing off %.1fs before retry: %s",
-                        status, attempt + 1, backoff, e,
+                        status,
+                        attempt + 1,
+                        backoff,
+                        e,
                     )
                     import asyncio as _asyncio
+
                     await _asyncio.sleep(backoff)
                     last_error = LLMRateLimitError(
-                        f"OpenRouter HTTP {status} (attempt {attempt+1}/3): {e}"
+                        f"OpenRouter HTTP {status} (attempt {attempt + 1}/3): {e}"
                     )
                     if attempt < 2:
                         continue
                     raise last_error from e
                 if status >= 500:
-                    backoff = min(5 * (2 ** attempt), 60)
+                    backoff = min(5 * (2**attempt), 60)
                     logger.warning(
                         "OpenRouter server error %d (attempt %d/3) — backing off %.1fs: %s",
-                        status, attempt + 1, backoff, e,
+                        status,
+                        attempt + 1,
+                        backoff,
+                        e,
                     )
                     import asyncio as _asyncio
+
                     await _asyncio.sleep(backoff)
                     last_error = LLMRateLimitError(
-                        f"OpenRouter server error {status} (attempt {attempt+1}/3): {e}"
+                        f"OpenRouter server error {status} (attempt {attempt + 1}/3): {e}"
                     )
                     if attempt < 2:
                         continue
