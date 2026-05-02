@@ -41,8 +41,7 @@ Farm-Agent is an autonomous AI agent that discovers open-source GitHub repositor
 | `farm_agent hunt` | Aggressive multi-round discovery + contribution |
 | `farm_agent hunt-circular` | Round-robin from `target_repo.json` |
 | `farm_agent patrol` | Check open PRs for review feedback, auto-respond |
-| `farm_agent superhuman` | 24/7 organic loop mimicking human developer |
-| `farm_agent janitor` | Close garbage PRs (exploratory, low-impact) |
+| `farm_agent superhuman` | 24/7 autonomous loop maximizing PR throughput without simulated delays |
 | `farm_agent solve <url>` | Solve open issues in a specific repo |
 | `farm_agent analyze <url>` | Analyze only, no PR creation |
 
@@ -84,9 +83,7 @@ CLI.run()
 Hunt mode (rounds × delay):
   → shuffled star tiers each round
   → RepoDiscovery.discover()
-  → prepend "friendly repos" (VIP alumni repos off cooldown)
-  → _hunt_process_repo() — Issues FIRST, then analysis
-  → Issues mode skips analysis if ≥1 issue PR created
+  → _hunt_process_repo() — Analysis pipeline
 ```
 
 ### Circular Target Loop (`pipeline.py:691-985`)
@@ -209,7 +206,7 @@ run_circular():
 - [Source: `sandbox.py:198-707`]
 
 **TOCTOU Quota Defense:**
-- Inside `human_typing_lock`, re-check `get_today_pr_count()` before PR creation to prevent concurrent overruns — [Source: `pipeline.py:1648-1658`]
+- Inside `pr_creation_lock`, re-check `get_today_pr_count()` before PR creation to prevent concurrent overruns — [Source: `pipeline.py:1648-1658`]
 
 ### 4.3 Fallback/Error Handling
 
@@ -275,12 +272,12 @@ farm_agent/
 ├── orchestrator/
 │   ├── pipeline.py      # ContribPipeline — main orchestrator (THIS IS THE CORE ENGINE)
 │   ├── memory.py        # Alias/sibling to core/memory.py — both point to same class
-│   ├── human.py         # SuperHumanLoop — 24/7 organic operation loop
+│   ├── human.py         # SuperHumanLoop — 24/7 autonomous operation loop
 │   └── pipeline.py      # (duplicate reference, also exports ContribPipeline)
 ├── pr/
 │   ├── manager.py       # PRManager.create_pr() — fork, branch, commit, push, create PR
 │   ├── patrol.py        # PRPatrol — check open PRs for review feedback, auto-respond
-│   └── janitor.py       # PRJanitor — close garbage PRs
+│   └── janitor.py.DISABLED # Non-functional placeholder
 ├── agents/
 │   └── registry.py      # create_default_registry() — DeerFlow agent system
 ├── plugins/
@@ -323,7 +320,6 @@ tests/
 | `P0-FIX (v2)` | Sandbox wrapped with OS-level `timeout --signal=KILL` instead of relying on Docker `stop_timeout` | `sandbox.py:499-503` |
 | `Crucible BUG` | `_wait_for_exit_code` replaced `client.api.wait()` (60s HTTP hard limit) with polling loop | `sandbox.py:585-637` |
 | `CRIT-03 FIX` | Minimax capped to max 5 concurrent repos to prevent secondary rate limit thundering herd | `pipeline.py:229-233` |
-| `CRIT-04 FIX` | Long coding delay moved OUTSIDE the `human_typing_lock` to prevent lock contention | `pipeline.py:2082-2088` |
 | `P2-FIX` | TOCTOU quota defense moved inside lock for correct concurrent quota enforcement | `pipeline.py:2091-2102` |
 | `PHASE 2-FIX` | Manifest-driven language detection (package.json → tsconfig.json → Cargo.toml) before extension counting | `sandbox.py:109-165` |
 | `PHASE 3-FIX` | Title similarity now requires 80% bigram sequence overlap, not 50% word intersection | `pipeline.py:136-186` |
@@ -335,6 +331,7 @@ tests/
 - `analysis/skills.py` — deleted. No imports found in active pipeline.
 - `analysis/strategies.py` — deleted. No imports found in active pipeline.
 - `plugins/base.py` — deleted. No imports found in active pipeline.
+- VIP features and stochastic delays removed in v3.0+
 
 **Orphaned / Incomplete Features:**
 - `analysis/mapper.py` — present but purpose not fully analyzed — **pending audit**
