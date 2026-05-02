@@ -20,6 +20,7 @@ from farm_agent.github.client import GitHubClient
 
 logger = logging.getLogger(__name__)
 
+
 def auto_check_pr_template(body: str, contrib_type: ContributionType | None = None) -> str:
     """Auto-check compliance checkboxes strictly based on contribution type.
 
@@ -49,12 +50,15 @@ def auto_check_pr_template(body: str, contrib_type: ContributionType | None = No
     lines = body.split("\n")
     for i, line in enumerate(lines):
         stripped = line.strip().lower()
-        if stripped.startswith(("- [ ]", "* [ ]")):
-            if any(term in stripped for term in allowed_terms):
-                # Only check if it safely avoids danger terms
-                if not any(danger in stripped for danger in ["breaking", "release", "deploy", "migration"]):
-                    # Replace the first unmet checkbox
-                    lines[i] = line.replace("[ ]", "[x]", 1)
+        if (
+            stripped.startswith(("- [ ]", "* [ ]"))
+            and any(term in stripped for term in allowed_terms)
+            and not any(
+                danger in stripped for danger in ["breaking", "release", "deploy", "migration"]
+            )
+        ):
+            # Replace the first unmet checkbox
+            lines[i] = line.replace("[ ]", "[x]", 1)
     return "\n".join(lines)
 
 
@@ -62,7 +66,14 @@ class PRManager:
     """Manage the full pull request lifecycle."""
 
     PR_LEDGER_PATH = Path("logs/pr_history.csv")
-    _LEDGER_HEADER = ["timestamp", "repo_url", "pr_url", "status", "error_details", "vulnerability_type"]
+    _LEDGER_HEADER = [
+        "timestamp",
+        "repo_url",
+        "pr_url",
+        "status",
+        "error_details",
+        "vulnerability_type",
+    ]
 
     def __init__(self, github: GitHubClient, llm=None):
         self._github = github
@@ -187,23 +198,27 @@ class PRManager:
             for change in all_changes:
                 if change.is_deleted:
                     # Deletion: entry with sha=null removes the file
-                    tree_entries.append({
-                        "path": change.path,
-                        "mode": "100644",
-                        "type": "blob",
-                        "sha": None,
-                    })
+                    tree_entries.append(
+                        {
+                            "path": change.path,
+                            "mode": "100644",
+                            "type": "blob",
+                            "sha": None,
+                        }
+                    )
                 else:
                     # Create blob from new content
                     blob_sha = await self._github.create_git_blob(
                         fork_owner, fork_name, change.new_content
                     )
-                    tree_entries.append({
-                        "path": change.path,
-                        "mode": "100644",
-                        "type": "blob",
-                        "sha": blob_sha,
-                    })
+                    tree_entries.append(
+                        {
+                            "path": change.path,
+                            "mode": "100644",
+                            "type": "blob",
+                            "sha": blob_sha,
+                        }
+                    )
 
             # 4c. Create tree from all file entries (base_tree enables recursive diff)
             new_tree_sha = await self._github.create_git_tree(
@@ -218,13 +233,20 @@ class PRManager:
             # Author with backdated timestamp (anti-spam jitter: 15-45 min in the past)
             import random
             from datetime import UTC, datetime, timedelta
+
             author_name = user.get("name") or user.get("login", "Farm-Agent")
-            author_email = user.get("email") or f"{user.get('id', '9919')}+{user.get('login', 'farm_agent')}@users.noreply.github.com"
-            author_date = (datetime.now(UTC) - timedelta(minutes=random.randint(15, 45))).strftime("%Y-%m-%dT%H:%M:%SZ")
+            fallback_login = user.get("login", "farm_agent")
+            fallback_id = user.get("id", "9919")
+            fallback_email = f"{fallback_id}+{fallback_login}@users.noreply.github.com"
+            author_email = user.get("email") or fallback_email
+            author_date = (datetime.now(UTC) - timedelta(minutes=random.randint(15, 45))).strftime(
+                "%Y-%m-%dT%H:%M:%SZ"
+            )
 
             # 4e. Create commit
             new_commit_sha = await self._github.create_git_commit(
-                fork_owner, fork_name,
+                fork_owner,
+                fork_name,
                 message=commit_msg,
                 tree_sha=new_tree_sha,
                 parent_shas=[base_commit_sha],
@@ -248,16 +270,16 @@ class PRManager:
                 issue_number = await self._create_issue_for_finding(contribution, target_repo)
 
             # 4. Create PR body — Diplomat Protocol Task 3: LLM-powered template filling
-            from farm_agent.core.models import ContributionType as _CT2
+            from farm_agent.core.models import ContributionType
 
             _type_info = {
-                _CT2.SECURITY_FIX: ("🔒", "Reliability Improvement"),
-                _CT2.CODE_QUALITY: ("✨", "Code Quality"),
-                _CT2.README_FIX: ("📝", "Documentation"),
-                _CT2.UI_UX_FIX: ("🎨", "UI/UX Improvement"),
-                _CT2.PERFORMANCE_OPT: ("⚡", "Performance"),
-                _CT2.FEATURE_ADD: ("🚀", "New Feature"),
-                _CT2.REFACTOR: ("♻️", "Refactoring"),
+                ContributionType.SECURITY_FIX: ("🔒", "Reliability Improvement"),
+                ContributionType.CODE_QUALITY: ("✨", "Code Quality"),
+                ContributionType.README_FIX: ("📝", "Documentation"),
+                ContributionType.UI_UX_FIX: ("🎨", "UI/UX Improvement"),
+                ContributionType.PERFORMANCE_OPT: ("⚡", "Performance"),
+                ContributionType.FEATURE_ADD: ("🚀", "New Feature"),
+                ContributionType.REFACTOR: ("♻️", "Refactoring"),
             }
             pr_emoji, pr_label = _type_info.get(contribution.finding.type, ("🔧", "Fix"))
             pr_files_list = "\n".join(
@@ -398,9 +420,7 @@ class PRManager:
         finding = contribution.finding
 
         # Files changed summary (compact, no heavy formatting)
-        files_list = ", ".join(
-            c.path.split("/")[-1] for c in contribution.changes
-        )
+        files_list = ", ".join(c.path.split("/")[-1] for c in contribution.changes)
 
         # Build a tired-dev style body: short, direct, no fluff
         body_lines = [
