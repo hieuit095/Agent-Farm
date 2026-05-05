@@ -7,8 +7,10 @@ discover → analyze → generate → PR.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
+import re
 import subprocess
 import tempfile
 from dataclasses import dataclass, field
@@ -30,7 +32,6 @@ from farm_agent.core.models import (
     RepoContext,
     Repository,
     Severity,
-    VulnerabilityDossier,
 )
 from farm_agent.generator.engine import ContributionGenerator, GenerationResult
 from farm_agent.generator.scorer import QAHardcoreScorer
@@ -2103,7 +2104,7 @@ class ContribPipeline:
                             return result
 
                         logger.info("⏳ Chuẩn bị push code... (Taking a deep breath)")
-                        await asyncio.sleep(random.randint(15, 45))
+                        await asyncio.sleep(15)
 
                     logger.info(
                         "📤 Creating PR for issue #%d in %s...", issue.number, repo.full_name
