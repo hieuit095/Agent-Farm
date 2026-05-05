@@ -68,7 +68,7 @@ def setup_logging(verbose: bool = False, config=None):
 
 
 def print_banner():
-    banner = f"""[bold cyan]
+    banner = rf"""[bold cyan]
      _                    _     _____
     / \   __ _  ___ _ __ | |_  |  ___|_ _ _ __ _ __ ___
    / _ \ / _` |/ _ \ '_ \| __| | |_ / _` | '__| '_ ` _ \\
