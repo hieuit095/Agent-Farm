@@ -93,6 +93,7 @@ exclude_lines = [
     "if __name__",
     "if TYPE_CHECKING",
 ]
+fail_under = 10
 
 [tool.hatch.build.targets.wheel]
 packages = ["farm_agent"]
