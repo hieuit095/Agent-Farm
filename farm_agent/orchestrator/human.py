@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-
 from datetime import UTC, date, datetime
 
 from farm_agent.core.exceptions import FarmAgentError, GitHubAPIError, LLMRateLimitError
