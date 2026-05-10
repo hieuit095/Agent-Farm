@@ -1,101 +1,98 @@
-# 🛠️ Farm-Agent
+# 🤖 Farm-Agent
 
-**Autonomous, Precision Open Source Contributor for GitHub Ecosystems**
+**Autonomous AI Agent That Contributes to Open Source — Without Looking Like One.**
 
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-3776AB?logo=python&logoColor=white)](https://python.org)
-[![Docker](https://img.shields.io/badge/docker-ready-2496ED?logo=docker&logoColor=white)](docker-compose.yml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Docker Ready](https://img.shields.io/badge/docker-ready-2496ED?logo=docker&logoColor=white)](docker-compose.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 [![Code Style: Ruff](https://img.shields.io/badge/code%20style-ruff-000000?logo=ruff)](https://github.com/astral-sh/ruff)
+[![Tests](https://img.shields.io/badge/tests-pytest-brightgreen?logo=pytest)](tests/)
 
 ## Overview
-
-Farm-Agent is a relentless, autonomous system designed to discover GitHub repositories, analyze them for vulnerabilities or quality issues, generate patches, validate them in a secure polyglot sandbox, and submit fully vetted Pull Requests. Version 3.0+ introduces high-throughput, non-stop operation loops and stringent quality gates.
+Farm-Agent is an autonomous AI agent that manages the full contribution lifecycle for open-source GitHub repositories. It discovers repositories, analyzes their codebases for real bugs and quality issues, generates context-aware fixes, validates them in a polyglot sandbox, and submits pull requests. It operates under a strict anti-farming filter to block trivial changes and disguises its operational patterns behind realistic human behavioral simulation.
 
 ## Key Features
-
-- **Bloodhound Red Team & DEV-QA Loop:** Utilizes integrated ast-grep and Semgrep pipelines paired with an LLM generator to discover, write, and critique code prior to execution.
-- **Polyglot Sandbox Validation:** Uses Docker containers to strictly validate and execute generated code across multiple languages before PR submission, enforcing zero tolerance for regressions.
-- **Terminator Execution Loop:** Orchestrated 24/7 autonomous operation that maximizes API rate limits with continuous discovery and PR generation.
-- **Anti-Farming Filter:** A strict, non-bypassable gatekeeper that outright rejects trivial formatting, typo fixes, or documentation-only PRs to prevent maintainer spam.
-- **PR Patrol:** Autonomously monitors open Farm-Agent PRs for review comments, leverages LLMs to classify the feedback, and automatically pushes follow-up code fixes to the branch.
-- **Local RAG Integration:** Employs ChromaDB to build local code embeddings for contextually accurate cross-file fixes.
+- **Issue-First Pipeline:** Solves open GitHub issues before falling back to static analysis, prioritizing what maintainers actually want fixed.
+- **Polyglot Sandbox Validation:** Uses isolated Docker containers to validate patches for Python, Node.js, TypeScript, Rust, Go, Java, C#, Ruby, PHP, C, and C++ before any PR is created.
+- **X-Ray Vision (RAG):** Builds a local ChromaDB vector index of the repository using a word-frequency embedding model to ensure patches are contextually accurate and do not break downstream code.
+- **PR Patrol:** Monitors open PRs for maintainer comments, auto-generates code fixes, answers questions, re-signs CLAs, and addresses style feedback.
+- **Anti-Farming Filter:** Drops trivial/low-impact findings and filters out any finding where the title or description contains farming keywords.
+- **Superhuman Mode:** Operates on a stochastic daily schedule with randomized wake times, typing WPM simulation, probabilistic ghosting, and circadian rhythm simulation.
+- **Familiar Grounds (Alumni Repo Prioritization):** Scores and prioritizes repositories the user has previously contributed to, syncing merged PR history from GitHub.
 
 ## System Architecture (High-Level)
-
-The system orchestrator (`ContribPipeline`) drives the core execution flow: **Discovery -> Gate -> Analysis -> Engine -> Sandbox -> PR**.
-Farm-Agent supports multi-model LLM generation (routing to Minimax, OpenRouter, Gemini, OpenAI, Anthropic, or Ollama) using an internal task router. Target code is pulled into an ephemeral, tightly constrained Docker environment where dependencies are installed and test suites executed. Only validated code passes to the PR Manager. State and quotas are tracked securely in a local WAL-enabled SQLite database (`memory.db`).
+Farm-Agent is built with a Click-based CLI orchestrating the agent pipeline (`ContribPipeline` and `SuperHumanLoop`). It interacts with an agentic LLM Engine (supporting Minimax, Gemini, and others), a persistent SQLite Memory (with WAL mode) for tracking progress and learned outcomes, and the GitHub API for operations. The Code Generation Engine utilizes an ephemeral RAG system (ChromaDB) to gain cross-file context, validates fixes using a Polyglot Sandbox (Docker), and employs an event-driven architecture routed through middlewares (RateLimit, DCO, QualityGate) to ensure high-quality and safe PRs.
 
 ## Getting Started
 
 ### Prerequisites
-
-- **Python:** 3.11 or higher
-- **Docker:** 7.1 or higher (mandatory for Polyglot Sandbox Validation)
+- Python 3.11 or higher
+- Docker 7.1 or higher (for Sandbox Validation and Superhuman daemon)
+- GitHub Personal Access Token (with `repo` scope)
+- LLM API Key (Minimax API key or Gemini API key required by default)
 
 ### Installation
-
 1. Clone the repository:
-   ```bash
+   ```sh
    git clone https://github.com/hieuit095/Farm-Agent.git
    cd Farm-Agent
    ```
 
-2. Install the package and development dependencies via `pip`:
-   ```bash
-   pip install -e .[dev]
+2. Install the package with dependencies:
+   ```sh
+   make install
    ```
 
 ### Environment Variables
+Farm-Agent uses a configuration system backed by `config.yaml` with `.env` fallbacks. Key environment variables include:
+- `GITHUB_TOKEN`: Your GitHub Personal Access Token.
+- `MINIMAX_API_KEY` (or `GEMINI_API_KEY`): Your LLM API Key.
+- `MINIMAX_GROUP_ID`: Your Minimax Group ID (if applicable).
+- `TZ`: Set time zone for Superhuman mode (e.g., `Asia/Ho_Chi_Minh` in docker-compose).
 
-Configuration is driven by `.env` or `config.yaml`. Copy the examples:
-```bash
-cp .env.example .env
-cp config.example.yaml config.yaml
-```
-
-**Essential `.env` variables:**
-- `GITHUB_TOKEN`: Your primary GitHub Personal Access Token (PAT) for PR and Issue creation.
-- `GITHUB_SECONDARY_TOKENS`: Comma-separated PATs for GET request load balancing.
-- `MINIMAX_API_KEY`: API Key for the default Minimax LLM.
-- `MINIMAX_GROUP_ID`: Your Minimax Group ID.
-- `OPENROUTER_API_KEY`: (Optional) Used for Bloodhound White-Hat auditing routing.
+*Alternatively, copy `config.example.yaml` to `config.yaml` and configure your credentials.*
 
 ## Usage
 
-Interact with Farm-Agent primarily through its comprehensive CLI.
-
-**Target a specific repository directly:**
-```bash
-farm_agent target https://github.com/owner/repo
+**Run a single hunt round (discover repos, analyze, create PRs):**
+```sh
+farm_agent hunt --rounds 1 --dry-run
 ```
 
-**Run a complete hunt loop (Discover -> Analyze -> PR):**
-```bash
-farm_agent hunt
+**Target a specific repository:**
+```sh
+farm_agent target https://github.com/owner/repo --dry-run
 ```
 
-**Execute the continuous, relentless Terminator loop:**
-```bash
-farm_agent hunt-circular
-```
-
-**Solve a specific GitHub Issue:**
-```bash
+**Solve open issues in a repository:**
+```sh
 farm_agent solve https://github.com/owner/repo
 ```
 
-**Monitor and respond to PR feedback (PR Patrol):**
-```bash
+**Run 24/7 autonomous mode (Superhuman):**
+```sh
+docker compose up -d superhuman
+```
+*(Or manually via `farm_agent superhuman`)*
+
+**Monitor open PRs and auto-respond to feedback (PR Patrol):**
+```sh
 farm_agent patrol
 ```
 
-**View overall system stats and memory database:**
-```bash
+**Scan and auto-close garbage PRs via LLM (Janitor):**
+```sh
+farm_agent janitor
+```
+
+**Show overall statistics and system status:**
+```sh
+farm_agent stats
 farm_agent system-status
 ```
 
-## Contributing & License
+## Contributing
+We welcome contributions! Please refer to the standard open-source boilerplate in `CONTRIBUTING.md` for details on our code of conduct and the process for submitting pull requests.
 
-Contributions are welcome! Please ensure you verify your changes and adhere to the project's Ruff formatting guidelines.
-
-This project is licensed under the **MIT License**. See the [LICENSE](LICENSE) file for more details.
+## License
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
