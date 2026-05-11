@@ -393,7 +393,7 @@ class GitHubClient:
                     return True
             # 204 No Content → no limits
             return False
-        except Exception:
+        except Exception as exc:
             return False
 
     # ── Rate Limit ─────────────────────────────────────────────────────────
@@ -673,7 +673,7 @@ class GitHubClient:
         status_code = response.status_code
         try:
             response_data = response.json() if response.content else {}
-        except Exception:
+        except Exception as exc:
             response_data = {"raw": response.text}
 
         logger.debug(
@@ -820,7 +820,7 @@ class GitHubClient:
                         "fetch_user_merged_prs: GET /user returned no login, using provided '%s'",
                         username,
                     )
-        except Exception:
+        except Exception as exc:
             logger.warning(
                 "fetch_user_merged_prs: could not validate username via GET /user: %s — "
                 "using provided '%s'",
@@ -1105,7 +1105,7 @@ class GitHubClient:
                 params={"per_page": 100},
             )
             return data.get("check_runs", [])
-        except Exception:
+        except Exception as exc:
             return []
 
     async def download_check_run_log(self, owner: str, repo: str, check_run_id: int) -> str:
@@ -1140,7 +1140,7 @@ class GitHubClient:
                 exc.response.status_code,
             )
             return ""
-        except Exception:
+        except Exception as exc:
             logger.warning("Failed to download CI log for job %d: %s", check_run_id, exc)
             return ""
 
@@ -1222,7 +1222,7 @@ class GitHubClient:
                     await asyncio.sleep(poll_interval)
                     continue
                 raise
-            except Exception:
+            except Exception as exc:
                 await asyncio.sleep(poll_interval)
                 continue
 
@@ -1402,7 +1402,7 @@ class GitHubClient:
         try:
             async with self._sem:
                 return await self._post(url, json={"content": reaction})
-        except Exception:
+        except Exception as exc:
             return None
 
     # ── Style Mimicry ──────────────────────────────────────────────────────
@@ -1427,7 +1427,7 @@ class GitHubClient:
                     "per_page": min(limit * 6, 100),  # over-fetch to survive filtering
                 },
             )
-        except Exception:
+        except Exception as exc:
             return []
 
         merged: list[dict] = []
@@ -1479,7 +1479,7 @@ class GitHubClient:
                     "per_page": min(limit * 2, 10),
                 },
             )
-        except Exception:
+        except Exception as exc:
             return ""
 
         comments_parts: list[str] = []
@@ -1504,7 +1504,7 @@ class GitHubClient:
             # Fetch review comments for this PR
             try:
                 reviews = await self._get(f"/repos/{owner}/{repo}/pulls/{pr_number}/reviews")
-            except Exception:
+            except Exception as exc:
                 continue
 
             sampled += 1

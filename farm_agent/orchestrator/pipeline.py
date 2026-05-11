@@ -860,11 +860,11 @@ class ContribPipeline:
             if not repo_style_guide_text and guidelines and guidelines.style_guide:
                 repo_style_guide_text = guidelines.style_guide.raw_summary
 
-            for cycle in range(MAX_DEV_QA_CYCLES):
+            for cycle in range(3):
                 logger.info(
                     "Starting DEV-QA Cycle %d/%d for %s",
                     cycle + 1,
-                    MAX_DEV_QA_CYCLES,
+                    3,
                     target.repo_url,
                 )
 
@@ -972,7 +972,7 @@ class ContribPipeline:
                 logger.warning(
                     "Bailout: Complexity exceeded after %d DEV-QA cycles for %s. "
                     "Cutting losses to save tokens.",
-                    MAX_DEV_QA_CYCLES,
+                    3,
                     target.repo_url,
                 )
                 await discovery.mark_status(target.repo_url, "COMPLETED_TOO_COMPLEX")
@@ -2111,6 +2111,7 @@ class ContribPipeline:
                             return result
 
                         logger.info("⏳ Chuẩn bị push code... (Taking a deep breath)")
+                        import random
                         await asyncio.sleep(random.randint(15, 45))
 
                     logger.info(

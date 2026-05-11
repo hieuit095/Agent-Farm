@@ -363,6 +363,7 @@ class DockerSandbox:
         }
 
         container: Container | None = None
+        temp_dir_obj = None
         output_task: asyncio.Task[tuple[str, str]] | None = None
         wait_task: asyncio.Task[int | None] | None = None
         timed_out = False
@@ -481,7 +482,7 @@ class DockerSandbox:
             if container is not None:
                 await self._force_remove_container(container)
                 await self._wait_for_container_removal(run_id)
-            if "temp_dir_obj" in locals():
+            if temp_dir_obj is not None:
                 # tempfile cleanup can sometimes raise if files are in use, but usually safe.
                 # However, tempfile.TemporaryDirectory's cleanup may fail on Windows if files are read-only.
                 # We'll just call it and ignore exceptions or let it throw.

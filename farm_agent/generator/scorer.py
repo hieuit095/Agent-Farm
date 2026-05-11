@@ -1,16 +1,16 @@
+from __future__ import annotations
 """Contribution quality scorer.
 
 Evaluates generated contributions before submission
 to prevent low-quality PRs from being created.
 """
 
-from __future__ import annotations
 
 import logging
 import re
 from dataclasses import dataclass
 
-from farm_agent.core.models import Contribution, ContributionType
+from farm_agent.core.models import Contribution, ContributionType, QAResult, VulnerabilityDossier
 
 logger = logging.getLogger(__name__)
 
