@@ -364,8 +364,6 @@ class DockerSandbox:
 
         container: Container | None = None
         temp_dir_obj = None
-        output_task: asyncio.Task[tuple[str, str]] | None = None
-        wait_task: asyncio.Task[int | None] | None = None
         timed_out = False
         exit_code: int | None = None
 

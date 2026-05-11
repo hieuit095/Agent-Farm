@@ -393,7 +393,7 @@ class GitHubClient:
                     return True
             # 204 No Content → no limits
             return False
-        except Exception as exc:
+        except Exception:
             return False
 
     # ── Rate Limit ─────────────────────────────────────────────────────────
@@ -673,7 +673,7 @@ class GitHubClient:
         status_code = response.status_code
         try:
             response_data = response.json() if response.content else {}
-        except Exception as exc:
+        except Exception:
             response_data = {"raw": response.text}
 
         logger.debug(
@@ -1105,7 +1105,7 @@ class GitHubClient:
                 params={"per_page": 100},
             )
             return data.get("check_runs", [])
-        except Exception as exc:
+        except Exception:
             return []
 
     async def download_check_run_log(self, owner: str, repo: str, check_run_id: int) -> str:
@@ -1222,7 +1222,7 @@ class GitHubClient:
                     await asyncio.sleep(poll_interval)
                     continue
                 raise
-            except Exception as exc:
+            except Exception:
                 await asyncio.sleep(poll_interval)
                 continue
 
@@ -1402,7 +1402,7 @@ class GitHubClient:
         try:
             async with self._sem:
                 return await self._post(url, json={"content": reaction})
-        except Exception as exc:
+        except Exception:
             return None
 
     # ── Style Mimicry ──────────────────────────────────────────────────────
@@ -1427,7 +1427,7 @@ class GitHubClient:
                     "per_page": min(limit * 6, 100),  # over-fetch to survive filtering
                 },
             )
-        except Exception as exc:
+        except Exception:
             return []
 
         merged: list[dict] = []
@@ -1479,7 +1479,7 @@ class GitHubClient:
                     "per_page": min(limit * 2, 10),
                 },
             )
-        except Exception as exc:
+        except Exception:
             return ""
 
         comments_parts: list[str] = []
@@ -1504,7 +1504,7 @@ class GitHubClient:
             # Fetch review comments for this PR
             try:
                 reviews = await self._get(f"/repos/{owner}/{repo}/pulls/{pr_number}/reviews")
-            except Exception as exc:
+            except Exception:
                 continue
 
             sampled += 1

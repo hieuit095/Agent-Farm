@@ -1,4 +1,5 @@
 from __future__ import annotations
+
 """Contribution quality scorer.
 
 Evaluates generated contributions before submission
