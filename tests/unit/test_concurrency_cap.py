@@ -30,6 +30,7 @@ def test_get_max_concurrency_minimax_capped():
     pipeline = ContribPipeline(config)
     assert pipeline._get_max_concurrency() == 5
 
+
 def test_get_max_concurrency_minimax_under_cap():
     config = MagicMock()
     config.pipeline.max_concurrent_repos = 3
@@ -37,6 +38,7 @@ def test_get_max_concurrency_minimax_under_cap():
 
     pipeline = ContribPipeline(config)
     assert pipeline._get_max_concurrency() == 3
+
 
 def test_get_max_concurrency_other_provider():
     config = MagicMock()
