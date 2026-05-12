@@ -30,7 +30,6 @@ from farm_agent.core.models import (
     RepoContext,
     Repository,
     Severity,
-    VulnerabilityDossier,
 )
 from farm_agent.generator.engine import ContributionGenerator, GenerationResult
 from farm_agent.generator.scorer import QAHardcoreScorer
@@ -840,7 +839,7 @@ class ContribPipeline:
             )
 
             # ── 3-Cycle DEV-QA Bounty Loop (FinOps Circuit Breaker) ────────────
-            MAX_DEV_QA_CYCLES = 3
+            max_dev_qa_cycles = 3
             qa_passed = False
             winning_contribution: Contribution | None = None
             failure_context = ""  # Accumulates sandbox/QA failure traces across cycles
@@ -860,10 +859,10 @@ class ContribPipeline:
             if not repo_style_guide_text and guidelines and guidelines.style_guide:
                 repo_style_guide_text = guidelines.style_guide.raw_summary
 
-            for cycle in range(MAX_DEV_QA_CYCLES):
+            for cycle in range(max_dev_qa_cycles):
                 logger.info(
                     "Starting DEV-QA Cycle %d/%d for %s",
-                    cycle + 1, MAX_DEV_QA_CYCLES, target.repo_url,
+                    cycle + 1, max_dev_qa_cycles, target.repo_url,
                 )
 
                 # 1. DEV generates patches (auto-injects QA Lessons + failure context)
@@ -964,7 +963,7 @@ class ContribPipeline:
                 logger.warning(
                     "Bailout: Complexity exceeded after %d DEV-QA cycles for %s. "
                     "Cutting losses to save tokens.",
-                    MAX_DEV_QA_CYCLES, target.repo_url,
+                    max_dev_qa_cycles, target.repo_url,
                 )
                 await discovery.mark_status(target.repo_url, "COMPLETED_TOO_COMPLEX")
 
@@ -2103,6 +2102,7 @@ class ContribPipeline:
                             return result
 
                         logger.info("⏳ Chuẩn bị push code... (Taking a deep breath)")
+                        import random
                         await asyncio.sleep(random.randint(15, 45))
 
                     logger.info(
@@ -2328,6 +2328,7 @@ class ContribPipeline:
             # Parse JSON response
             try:
                 response_text = response.strip()
+                import re
                 fence_match = re.search(r"```(?:json)?\s*(.*?)```", response_text, re.DOTALL | re.IGNORECASE)
                 if fence_match:
                     response_text = fence_match.group(1).strip()
@@ -2336,6 +2337,7 @@ class ContribPipeline:
                 if brace_start != -1 and brace_end != -1 and brace_end > brace_start:
                     response_text = response_text[brace_start:brace_end + 1]
 
+                import json
                 parsed = json.loads(response_text)
 
                 devil_advocate = parsed.get("devil_advocate_critique", "")
@@ -2377,7 +2379,7 @@ class ContribPipeline:
                 )
                 validated.append(finding)
 
-            except (json.JSONDecodeError, ValueError, TypeError, AttributeError) as e:
+            except (Exception, ValueError, TypeError, AttributeError) as e:
                 # Finding is genuinely invalid — skip it, don't retry
                 logger.warning("Finding %s failed validation (parse error): %s", finding.title, e)
                 continue
