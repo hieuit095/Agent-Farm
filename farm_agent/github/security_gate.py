@@ -282,7 +282,9 @@ async def run_security_gate(
     saved_path = save_secret_findings(
         repo_full_name=result.repo_full_name,
         findings=findings_data,
-        dossier_data={"repo_url": str(dossier.repo_url)} if dossier and hasattr(dossier, "repo_url") else None,
+        dossier_data={"repo_url": str(dossier.repo_url)}
+        if dossier and hasattr(dossier, "repo_url")
+        else None,
     )
 
     # Send Telegram notification (blocking await — guarantees delivery)

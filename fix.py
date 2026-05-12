@@ -1,27 +1,36 @@
 import re
 
-with open('farm_agent/analysis/analyzer.py', encoding='utf-8') as f:
+with open("farm_agent/analysis/analyzer.py", encoding="utf-8") as f:
     content = f.read()
 
 # 1. Remove _check_sg_available
-content = re.sub(r'    def _check_sg_available\(self.*?return self\._sg_available\n', '', content, flags=re.DOTALL)
+content = re.sub(
+    r"    def _check_sg_available\(self.*?return self\._sg_available\n",
+    "",
+    content,
+    flags=re.DOTALL,
+)
 
 # 2. Remove _resolve_rule_files
-content = re.sub(r'    def _resolve_rule_files\(self.*?return rule_files\n', '', content, flags=re.DOTALL)
+content = re.sub(
+    r"    def _resolve_rule_files\(self.*?return rule_files\n", "", content, flags=re.DOTALL
+)
 
 # 3. Remove _run_sg_scan
-content = re.sub(r'    async def _run_sg_scan\(self.*?return \[\]\n', '', content, flags=re.DOTALL)
+content = re.sub(r"    async def _run_sg_scan\(self.*?return \[\]\n", "", content, flags=re.DOTALL)
 
 # 4. Remove _run_ast_grep
-content = re.sub(r'    async def _run_ast_grep\(self.*?return unique\n', '', content, flags=re.DOTALL)
+content = re.sub(
+    r"    async def _run_ast_grep\(self.*?return unique\n", "", content, flags=re.DOTALL
+)
 
 # 5. Remove LANGUAGE_RULE_PREFIX
-content = re.sub(r'    LANGUAGE_RULE_PREFIX.*?\n    \}\n', '', content, flags=re.DOTALL)
-content = re.sub(r'    SG_SCAN_TIMEOUT = 120\n', '', content)
-content = re.sub(r'        self\._sg_available: bool \| None = None\n', '', content)
+content = re.sub(r"    LANGUAGE_RULE_PREFIX.*?\n    \}\n", "", content, flags=re.DOTALL)
+content = re.sub(r"    SG_SCAN_TIMEOUT = 120\n", "", content)
+content = re.sub(r"        self\._sg_available: bool \| None = None\n", "", content)
 
 # 6. Update run_bloodhound
-bloodhound_old = r'''        try:
+bloodhound_old = r"""        try:
             # ── Concurrent Radar: ast-grep \+ Semgrep ──
             tasks = \[\]
             task_labels = \[\]
@@ -55,9 +64,9 @@ bloodhound_old = r'''        try:
                     "No radar tools available \(ast-grep=%s, semgrep=%s\) for %s — skipping bloodhound",
                     sg_available, use_semgrep, repo\.full_name,
                 \)
-                return empty_dossier'''
+                return empty_dossier"""
 
-bloodhound_new = '''        try:
+bloodhound_new = """        try:
             # ── Concurrent Radar: Semgrep ──
             tasks = []
             task_labels = []
@@ -80,12 +89,12 @@ bloodhound_new = '''        try:
             # If tool is not available
             if not tasks:
                 logger.warning("No radar tools available for %s — skipping bloodhound", repo.full_name)
-                return empty_dossier'''
+                return empty_dossier"""
 
 content = re.sub(bloodhound_old, bloodhound_new, content, flags=re.DOTALL)
 
 # Fix semgrep
-semgrep_old = r'''    async def _run_semgrep\(
+semgrep_old = r"""    async def _run_semgrep\(
         self, repo_path: Path, extra_rulesets: list\[str\] \| None = None
     \) -> list\[dict\]:
         if not self\._check_semgrep_available\(\):
@@ -128,9 +137,9 @@ semgrep_old = r'''    async def _run_semgrep\(
                 \)
 
             data = json\.loads\(stdout\.decode\("utf-8", errors="replace"\)\)
-            results = data\.get\("results", \[\]\)'''
+            results = data\.get\("results", \[\]\)"""
 
-semgrep_new = '''    async def _run_semgrep(
+semgrep_new = """    async def _run_semgrep(
         self, repo_path: Path, extra_rulesets: list[str] | None = None
     ) -> list[dict]:
         if not self._check_semgrep_available():
@@ -182,7 +191,7 @@ semgrep_new = '''    async def _run_semgrep(
                 logger.warning("Semgrep returned invalid JSON. Logging raw output for diagnostics:")
                 logger.warning("STDOUT (first 1000 chars): %s", stdout_text[:1000])
                 logger.warning("STDERR (first 1000 chars): %s", stderr_text[:1000])
-                
+
                 # Attempt to extract JSON from plain text warnings
                 start_idx = stdout_text.find('{')
                 end_idx = stdout_text.rfind('}')
@@ -197,9 +206,9 @@ semgrep_new = '''    async def _run_semgrep(
                 else:
                     return []
 
-            results = data.get("results", [])'''
+            results = data.get("results", [])"""
 
 content = re.sub(semgrep_old, semgrep_new, content, flags=re.DOTALL)
 
-with open('farm_agent/analysis/analyzer.py', 'w', encoding='utf-8') as f:
+with open("farm_agent/analysis/analyzer.py", "w", encoding="utf-8") as f:
     f.write(content)

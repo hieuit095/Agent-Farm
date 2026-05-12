@@ -250,25 +250,28 @@ class QAHardcoreScorer:
             if change.original_content:
                 import difflib
 
-                diff = "".join(difflib.unified_diff(
-                    change.original_content.splitlines(keepends=True),
-                    change.new_content.splitlines(keepends=True),
-                    fromfile=f"a/{change.path}",
-                    tofile=f"b/{change.path}",
-                    n=3,
-                ))
+                diff = "".join(
+                    difflib.unified_diff(
+                        change.original_content.splitlines(keepends=True),
+                        change.new_content.splitlines(keepends=True),
+                        fromfile=f"a/{change.path}",
+                        tofile=f"b/{change.path}",
+                        n=3,
+                    )
+                )
                 diff_parts.append(diff[:4000])
             else:
-                diff_parts.append(
-                    f"[NEW FILE] {change.path}\n{change.new_content[:4000]}"
-                )
+                diff_parts.append(f"[NEW FILE] {change.path}\n{change.new_content[:4000]}")
         diff_str = "\n\n".join(diff_parts) if diff_parts else "No diff available."
 
         if not diff_str.strip() or diff_str == "No diff available.":
             from farm_agent.core.models import QAResult
+
             return QAResult(
                 score=0.0,
-                critiques=["Your Search block did not match the file. Copy the lines EXACTLY from the source including all whitespace."],
+                critiques=[
+                    "Your Search block did not match the file. Copy the lines EXACTLY from the source including all whitespace."
+                ],
                 approved=False,
             )
 
@@ -360,7 +363,9 @@ class QAHardcoreScorer:
 
         try:
             response = await self._llm.complete(
-                user_prompt, system=system_prompt, temperature=0.1,
+                user_prompt,
+                system=system_prompt,
+                temperature=0.1,
             )
         except Exception as exc:
             logger.error("QA Hardcore LLM call failed: %s", exc)
@@ -375,9 +380,8 @@ class QAHardcoreScorer:
 
         # Strip markdown fences if present
         import re as _re
-        fence_match = _re.search(
-            r"```(?:json)?\s*(.*?)```", text, _re.DOTALL | _re.IGNORECASE
-        )
+
+        fence_match = _re.search(r"```(?:json)?\s*(.*?)```", text, _re.DOTALL | _re.IGNORECASE)
         if fence_match:
             text = fence_match.group(1).strip()
 
@@ -385,7 +389,7 @@ class QAHardcoreScorer:
         brace_start = text.find("{")
         brace_end = text.rfind("}")
         if brace_start != -1 and brace_end != -1 and brace_end > brace_start:
-            text = text[brace_start:brace_end + 1]
+            text = text[brace_start : brace_end + 1]
 
         try:
             parsed = _json.loads(text)
