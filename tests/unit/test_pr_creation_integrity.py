@@ -14,7 +14,6 @@ import pytest
 from farm_agent.core.exceptions import GitHubAPIError, PRCreationError
 from farm_agent.core.models import Contribution, Finding, Repository
 from farm_agent.github.client import GitHubClient
-from farm_agent.pr.manager import PRManager
 
 
 @pytest.fixture
@@ -29,6 +28,7 @@ def mock_httpx_response():
         else:
             resp.json = MagicMock(side_effect=Exception("no json"))
         return resp
+
     return _make
 
 
@@ -56,20 +56,27 @@ class TestCreatePullRequest201Enforcement:
         }
         github_client.get_repo_details = AsyncMock(
             return_value=Repository(
-                owner="owner", name="repo", full_name="owner/repo",
-                default_branch="main", description="", language="Python",
-                stars=100, fork=False, url="https://github.com/owner/repo",
+                owner="owner",
+                name="repo",
+                full_name="owner/repo",
+                default_branch="main",
+                description="",
+                language="Python",
+                stars=100,
+                fork=False,
+                url="https://github.com/owner/repo",
             )
         )
 
-        github_client._client.request = AsyncMock(
-            return_value=mock_httpx_response(201, payload)
-        )
+        github_client._client.request = AsyncMock(return_value=mock_httpx_response(201, payload))
 
         result = await github_client.create_pull_request(
-            owner="owner", repo="repo",
-            title="fix: vuln", body="desc",
-            head="forkuser:fix-branch", base="main",
+            owner="owner",
+            repo="repo",
+            title="fix: vuln",
+            body="desc",
+            head="forkuser:fix-branch",
+            base="main",
         )
 
         assert result["number"] == 42
@@ -81,35 +88,41 @@ class TestCreatePullRequest201Enforcement:
             "message": "Validation Failed",
             "errors": [{"message": "No commits between main and fix-branch"}],
         }
-        github_client._client.request = AsyncMock(
-            return_value=mock_httpx_response(422, error_body)
-        )
+        github_client._client.request = AsyncMock(return_value=mock_httpx_response(422, error_body))
 
         with pytest.raises(GitHubAPIError) as exc_info:
             await github_client.create_pull_request(
-                owner="owner", repo="repo",
-                title="fix: vuln", body="desc",
-                head="forkuser:fix-branch", base="main",
+                owner="owner",
+                repo="repo",
+                title="fix: vuln",
+                body="desc",
+                head="forkuser:fix-branch",
+                base="main",
             )
 
         error = exc_info.value
         assert error.status_code == 422
         assert "422" in str(error)
-        assert "expected 201" in str(error).lower() or "Expected 201" in str(error) or "PR CREATION FAILED" in str(error)
+        assert (
+            "expected 201" in str(error).lower()
+            or "Expected 201" in str(error)
+            or "PR CREATION FAILED" in str(error)
+        )
         assert "forkuser:fix-branch" in str(error)
 
     @pytest.mark.asyncio
     async def test_403_raises(self, github_client, mock_httpx_response):
         error_body = {"message": "Forbidden"}
-        github_client._client.request = AsyncMock(
-            return_value=mock_httpx_response(403, error_body)
-        )
+        github_client._client.request = AsyncMock(return_value=mock_httpx_response(403, error_body))
 
         with pytest.raises(GitHubAPIError) as exc_info:
             await github_client.create_pull_request(
-                owner="owner", repo="repo",
-                title="fix", body="desc",
-                head="user:branch", base="main",
+                owner="owner",
+                repo="repo",
+                title="fix",
+                body="desc",
+                head="user:branch",
+                base="main",
             )
 
         assert exc_info.value.status_code == 403
@@ -117,15 +130,16 @@ class TestCreatePullRequest201Enforcement:
     @pytest.mark.asyncio
     async def test_404_raises(self, github_client, mock_httpx_response):
         error_body = {"message": "Not Found"}
-        github_client._client.request = AsyncMock(
-            return_value=mock_httpx_response(404, error_body)
-        )
+        github_client._client.request = AsyncMock(return_value=mock_httpx_response(404, error_body))
 
         with pytest.raises(GitHubAPIError) as exc_info:
             await github_client.create_pull_request(
-                owner="owner", repo="repo",
-                title="fix", body="desc",
-                head="user:branch", base="main",
+                owner="owner",
+                repo="repo",
+                title="fix",
+                body="desc",
+                head="user:branch",
+                base="main",
             )
 
         assert exc_info.value.status_code == 404
@@ -133,15 +147,16 @@ class TestCreatePullRequest201Enforcement:
     @pytest.mark.asyncio
     async def test_500_raises(self, github_client, mock_httpx_response):
         error_body = {"message": "Internal Server Error"}
-        github_client._client.request = AsyncMock(
-            return_value=mock_httpx_response(500, error_body)
-        )
+        github_client._client.request = AsyncMock(return_value=mock_httpx_response(500, error_body))
 
         with pytest.raises(GitHubAPIError) as exc_info:
             await github_client.create_pull_request(
-                owner="owner", repo="repo",
-                title="fix", body="desc",
-                head="user:branch", base="main",
+                owner="owner",
+                repo="repo",
+                title="fix",
+                body="desc",
+                head="user:branch",
+                base="main",
             )
 
         assert exc_info.value.status_code == 500
@@ -149,25 +164,38 @@ class TestCreatePullRequest201Enforcement:
     @pytest.mark.asyncio
     async def test_payload_logged_before_send(self, github_client, mock_httpx_response, caplog):
         import logging
-        with caplog.at_level(logging.INFO):
+
+        with caplog.at_level(logging.DEBUG):
             github_client.get_repo_details = AsyncMock(
                 return_value=Repository(
-                    owner="owner", name="repo", full_name="owner/repo",
-                    default_branch="main", description="", language="Python",
-                    stars=100, fork=False, url="https://github.com/owner/repo",
+                    owner="owner",
+                    name="repo",
+                    full_name="owner/repo",
+                    default_branch="main",
+                    description="",
+                    language="Python",
+                    stars=100,
+                    fork=False,
+                    url="https://github.com/owner/repo",
                 )
             )
             github_client._client.request = AsyncMock(
-                return_value=mock_httpx_response(201, {
-                    "number": 1,
-                    "html_url": "https://github.com/owner/repo/pull/1",
-                })
+                return_value=mock_httpx_response(
+                    201,
+                    {
+                        "number": 1,
+                        "html_url": "https://github.com/owner/repo/pull/1",
+                    },
+                )
             )
 
             await github_client.create_pull_request(
-                owner="owner", repo="repo",
-                title="fix: vuln", body="desc",
-                head="forkuser:fix-branch", base="main",
+                owner="owner",
+                repo="repo",
+                title="fix: vuln",
+                body="desc",
+                head="forkuser:fix-branch",
+                base="main",
             )
 
         assert any("PR CREATE REQUEST" in r.message for r in caplog.records)
@@ -176,25 +204,38 @@ class TestCreatePullRequest201Enforcement:
     @pytest.mark.asyncio
     async def test_response_logged_after_send(self, github_client, mock_httpx_response, caplog):
         import logging
-        with caplog.at_level(logging.INFO):
+
+        with caplog.at_level(logging.DEBUG):
             github_client.get_repo_details = AsyncMock(
                 return_value=Repository(
-                    owner="owner", name="repo", full_name="owner/repo",
-                    default_branch="main", description="", language="Python",
-                    stars=100, fork=False, url="https://github.com/owner/repo",
+                    owner="owner",
+                    name="repo",
+                    full_name="owner/repo",
+                    default_branch="main",
+                    description="",
+                    language="Python",
+                    stars=100,
+                    fork=False,
+                    url="https://github.com/owner/repo",
                 )
             )
             github_client._client.request = AsyncMock(
-                return_value=mock_httpx_response(201, {
-                    "number": 1,
-                    "html_url": "https://github.com/owner/repo/pull/1",
-                })
+                return_value=mock_httpx_response(
+                    201,
+                    {
+                        "number": 1,
+                        "html_url": "https://github.com/owner/repo/pull/1",
+                    },
+                )
             )
 
             await github_client.create_pull_request(
-                owner="owner", repo="repo",
-                title="fix: vuln", body="desc",
-                head="forkuser:fix-branch", base="main",
+                owner="owner",
+                repo="repo",
+                title="fix: vuln",
+                body="desc",
+                head="forkuser:fix-branch",
+                base="main",
             )
 
         assert any("PR CREATE RESPONSE" in r.message for r in caplog.records)
@@ -216,7 +257,7 @@ class TestHeadFormatValidation:
     async def test_manager_rejects_bare_branch(self):
         from farm_agent.core.models import ContributionType, Severity
 
-        contribution = Contribution(
+        Contribution(
             title="fix: vuln",
             commit_message="fix: vuln",
             contribution_type=ContributionType.SECURITY_FIX,
