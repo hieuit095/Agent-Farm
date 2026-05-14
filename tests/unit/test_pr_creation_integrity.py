@@ -12,9 +12,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from farm_agent.core.exceptions import GitHubAPIError, PRCreationError
-from farm_agent.core.models import Contribution, Finding, Repository
+from farm_agent.core.models import Repository
 from farm_agent.github.client import GitHubClient
-from farm_agent.pr.manager import PRManager
 
 
 @pytest.fixture
@@ -95,7 +94,11 @@ class TestCreatePullRequest201Enforcement:
         error = exc_info.value
         assert error.status_code == 422
         assert "422" in str(error)
-        assert "expected 201" in str(error).lower() or "Expected 201" in str(error) or "PR CREATION FAILED" in str(error)
+        assert (
+            "expected 201" in str(error).lower()
+            or "Expected 201" in str(error)
+            or "PR CREATION FAILED" in str(error)
+        )
         assert "forkuser:fix-branch" in str(error)
 
     @pytest.mark.asyncio
@@ -149,7 +152,7 @@ class TestCreatePullRequest201Enforcement:
     @pytest.mark.asyncio
     async def test_payload_logged_before_send(self, github_client, mock_httpx_response, caplog):
         import logging
-        with caplog.at_level(logging.INFO):
+        with caplog.at_level(logging.DEBUG):
             github_client.get_repo_details = AsyncMock(
                 return_value=Repository(
                     owner="owner", name="repo", full_name="owner/repo",
@@ -176,7 +179,7 @@ class TestCreatePullRequest201Enforcement:
     @pytest.mark.asyncio
     async def test_response_logged_after_send(self, github_client, mock_httpx_response, caplog):
         import logging
-        with caplog.at_level(logging.INFO):
+        with caplog.at_level(logging.DEBUG):
             github_client.get_repo_details = AsyncMock(
                 return_value=Repository(
                     owner="owner", name="repo", full_name="owner/repo",
@@ -214,25 +217,6 @@ class TestHeadFormatValidation:
 
     @pytest.mark.asyncio
     async def test_manager_rejects_bare_branch(self):
-        from farm_agent.core.models import ContributionType, Severity
-
-        contribution = Contribution(
-            title="fix: vuln",
-            commit_message="fix: vuln",
-            contribution_type=ContributionType.SECURITY_FIX,
-            description="Fix XSS vulnerability",
-            finding=Finding(
-                title="XSS vulnerability",
-                severity=Severity.HIGH,
-                type="security_fix",
-                description="desc",
-                file_path="app.py",
-                vulnerable_code="old",
-                fix_code="new",
-            ),
-            changes=[],
-        )
-
         # The guard in PRManager checks: if ":" not in head → raise PRCreationError
         # Simulate a bare branch name slipping through:
         head = "fix-branch"
