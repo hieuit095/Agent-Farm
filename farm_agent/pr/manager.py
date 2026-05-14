@@ -49,12 +49,16 @@ def auto_check_pr_template(body: str, contrib_type: ContributionType | None = No
     lines = body.split("\n")
     for i, line in enumerate(lines):
         stripped = line.strip().lower()
-        if stripped.startswith(("- [ ]", "* [ ]")):
-            if any(term in stripped for term in allowed_terms):
-                # Only check if it safely avoids danger terms
-                if not any(danger in stripped for danger in ["breaking", "release", "deploy", "migration"]):
-                    # Replace the first unmet checkbox
-                    lines[i] = line.replace("[ ]", "[x]", 1)
+        if (
+            stripped.startswith(("- [ ]", "* [ ]"))
+            and any(term in stripped for term in allowed_terms)
+            and not any(
+                danger in stripped
+                for danger in ["breaking", "release", "deploy", "migration"]
+            )
+        ):
+            # Replace the first unmet checkbox
+            lines[i] = line.replace("[ ]", "[x]", 1)
     return "\n".join(lines)
 
 
@@ -62,7 +66,9 @@ class PRManager:
     """Manage the full pull request lifecycle."""
 
     PR_LEDGER_PATH = Path("logs/pr_history.csv")
-    _LEDGER_HEADER = ["timestamp", "repo_url", "pr_url", "status", "error_details", "vulnerability_type"]
+    _LEDGER_HEADER = [
+        "timestamp", "repo_url", "pr_url", "status", "error_details", "vulnerability_type"
+    ]
 
     def __init__(self, github: GitHubClient, llm=None):
         self._github = github
@@ -219,8 +225,11 @@ class PRManager:
             import random
             from datetime import UTC, datetime, timedelta
             author_name = user.get("name") or user.get("login", "Farm-Agent")
-            author_email = user.get("email") or f"{user.get('id', '9919')}+{user.get('login', 'farm_agent')}@users.noreply.github.com"
-            author_date = (datetime.now(UTC) - timedelta(minutes=random.randint(15, 45))).strftime("%Y-%m-%dT%H:%M:%SZ")
+            author_id = user.get('id', '9919')
+            author_login = user.get('login', 'farm_agent')
+            author_email = user.get("email") or f"{author_id}+{author_login}@noreply.github.com"
+            past_date = datetime.now(UTC) - timedelta(minutes=random.randint(15, 45))
+            author_date = past_date.strftime("%Y-%m-%dT%H:%M:%SZ")
 
             # 4e. Create commit
             new_commit_sha = await self._github.create_git_commit(
@@ -248,16 +257,16 @@ class PRManager:
                 issue_number = await self._create_issue_for_finding(contribution, target_repo)
 
             # 4. Create PR body — Diplomat Protocol Task 3: LLM-powered template filling
-            from farm_agent.core.models import ContributionType as _CT2
+            from farm_agent.core.models import ContributionType
 
             _type_info = {
-                _CT2.SECURITY_FIX: ("🔒", "Reliability Improvement"),
-                _CT2.CODE_QUALITY: ("✨", "Code Quality"),
-                _CT2.README_FIX: ("📝", "Documentation"),
-                _CT2.UI_UX_FIX: ("🎨", "UI/UX Improvement"),
-                _CT2.PERFORMANCE_OPT: ("⚡", "Performance"),
-                _CT2.FEATURE_ADD: ("🚀", "New Feature"),
-                _CT2.REFACTOR: ("♻️", "Refactoring"),
+                ContributionType.SECURITY_FIX: ("🔒", "Reliability Improvement"),
+                ContributionType.CODE_QUALITY: ("✨", "Code Quality"),
+                ContributionType.README_FIX: ("📝", "Documentation"),
+                ContributionType.UI_UX_FIX: ("🎨", "UI/UX Improvement"),
+                ContributionType.PERFORMANCE_OPT: ("⚡", "Performance"),
+                ContributionType.FEATURE_ADD: ("🚀", "New Feature"),
+                ContributionType.REFACTOR: ("♻️", "Refactoring"),
             }
             pr_emoji, pr_label = _type_info.get(contribution.finding.type, ("🔧", "Fix"))
             pr_files_list = "\n".join(
