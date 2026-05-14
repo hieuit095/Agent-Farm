@@ -1,7 +1,7 @@
 # PROJECT_MAP.md — Farm-Agent Ground Truth
 
 **Generated:** 2026-04-15
-**Version:** v3.2.0 (from git tag at commit `0b96a08`)
+**Version:** v3.0.0
 **Entry Point:** `farm_agent/cli/main.py` → `cli()` (Click-based CLI)
 **Language:** Python 3.11+
 
@@ -30,7 +30,97 @@ Farm-Agent is an autonomous AI agent that discovers open-source GitHub repositor
 
 ---
 
-## 2. Core Execution Pipeline & Data Flow
+## 2. Directory Structure
+
+```text
+farm_agent/
+├── agents/
+│   └── registry.py      # DeerFlow agent system
+├── analysis/
+│   ├── analyzer.py      # CodeAnalyzer.analyze() — static code analysis
+│   ├── bloodhound.py    # BloodhoundAnalyzer — Semgrep pre-scan for vulnerability discovery
+│   └── mapper.py        # Abstract mapper for code structures
+├── cli/
+│   └── main.py          # Click CLI, all commands (run, hunt, patrol, etc.)
+├── core/
+│   ├── config.py        # Pydantic config system, load_config(), FarmAgentConfig
+│   ├── daily_log.py     # Component to manage logging per day
+│   ├── exceptions.py    # GitHubAPIError, LLMRateLimitError, ConfigError, RateLimitError
+│   ├── leaderboard.py   # PR stats and repo rankings
+│   ├── logger.py        # Daily rolling file logger setup
+│   ├── middleware.py    # Middleware chain for quota/quality enforcement
+│   ├── models.py        # Pydantic models: Repository, Finding, Contribution, etc.
+│   ├── memory.py        # SQLite-backed Memory class
+│   ├── notifier.py      # TelegramNotifier
+│   ├── profiles.py      # Contribution profiles
+│   ├── quotas.py        # Quota tracking
+│   ├── rag.py           # RAG pipeline for knowledge retrieval
+│   ├── retry.py         # Async retry decorators
+│   └── sandbox.py       # DockerSandbox — Polyglot execution sandbox
+├── generator/
+│   ├── engine.py        # ContributionGenerator.generate()
+│   ├── reviewer.py      # ContributionReviewer
+│   └── scorer.py        # QAHardcoreScorer — QA evaluation
+├── github/
+│   ├── client.py        # GitHubClient — API interactions
+│   ├── discovery.py     # RepoDiscovery + DatabaseTargetDiscovery
+│   ├── guidelines.py    # fetch_repo_guidelines()
+│   └── security_gate.py # Security Disclosure Gate
+├── issues/
+│   └── solver.py        # IssueSolver — fetch + classify + solve GitHub issues
+├── llm/
+│   ├── agents.py        # LLM agent definitions
+│   ├── models.py        # ALL_MODELS catalog, TaskType enum
+│   ├── provider.py      # create_llm_provider()
+│   └── router.py        # TaskRouter — default model assignments
+├── notifications/
+│   └── notifier.py      # Slack/Discord/Telegram webhooks
+├── orchestrator/
+│   ├── human.py         # SuperHumanLoop — 24/7 continuous operation loop
+│   ├── memory.py        # Points to core/memory.py logic
+│   └── pipeline.py      # ContribPipeline — main orchestrator
+├── plugins/
+│   └── base.py          # Plugin interfaces
+├── pr/
+│   ├── janitor.py.DISABLED # Disabled PR cleanup code
+│   ├── manager.py       # PRManager.create_pr() — handles PR logic
+│   └── patrol.py        # PRPatrol — check PRs for feedback
+├── templates/
+│   └── registry.py      # TemplateRegistry
+├── tools/
+│   └── protocol.py      # create_default_tools()
+└── __init__.py          # Version = "3.0.0"
+
+tests/                   # Pytest test suite
+```
+
+---
+
+## 3. Core Module Dependency Graph
+
+```mermaid
+graph TD
+    CLI(cli/main.py) --> Pipeline(orchestrator/pipeline.py)
+    CLI --> HumanLoop(orchestrator/human.py)
+    Pipeline --> Config(core/config.py)
+    Pipeline --> GitHubClient(github/client.py)
+    Pipeline --> LLM(llm/provider.py)
+    Pipeline --> Memory(core/memory.py)
+    Pipeline --> Discovery(github/discovery.py)
+    Pipeline --> CodeAnalyzer(analysis/analyzer.py)
+    Pipeline --> Bloodhound(analysis/bloodhound.py)
+    Pipeline --> IssueSolver(issues/solver.py)
+    Pipeline --> Generator(generator/engine.py)
+    Pipeline --> Sandbox(core/sandbox.py)
+    Pipeline --> PRManager(pr/manager.py)
+    CodeAnalyzer --> RAG(core/rag.py)
+    Generator --> Scorer(generator/scorer.py)
+    Bloodhound --> SecurityGate(github/security_gate.py)
+```
+
+---
+
+## 4. Core Execution Pipeline & Data Flow
 
 ### Primary CLI Commands (from `main.py`)
 
@@ -41,20 +131,20 @@ Farm-Agent is an autonomous AI agent that discovers open-source GitHub repositor
 | `farm_agent hunt` | Aggressive multi-round discovery + contribution |
 | `farm_agent hunt-circular` | Round-robin from `target_repo.json` |
 | `farm_agent patrol` | Check open PRs for review feedback, auto-respond |
-| `farm_agent superhuman` | 24/7 organic loop mimicking human developer |
+| `farm_agent superhuman` | 24/7 continuous operation loop (Super Human Mode) |
 | `farm_agent janitor` | Close garbage PRs (exploratory, low-impact) |
 | `farm_agent solve <url>` | Solve open issues in a specific repo |
 | `farm_agent analyze <url>` | Analyze only, no PR creation |
 
 ### Pipeline Data Flow (for `run` command)
 
-```
+```text
 CLI.run()
-  → load_config()        [Source: config.py:232-263]
-  → ContribPipeline.run() [Source: pipeline.py:333-434]
+  → load_config()
+  → ContribPipeline.run()
       → RepoDiscovery.discover()      → list[Repository]
       → asyncio.Semaphore(max_conc=3, capped at 5 for Minimax)
-          → _process_repo()           [pipeline.py:1001-1724]
+          → _process_repo()
               1. _check_ai_policy()   → skip if AI-banned repo
               2. check_interaction_limits() → skip if contributor-only
               3. fetch_repo_guidelines() → CommitFormat, PR template
@@ -78,20 +168,9 @@ CLI.run()
                   → _check_ci_and_close_if_failed()
 ```
 
-### Hunt Mode Flow (`pipeline.py:436-585`)
+### Circular Target Loop
 
-```
-Hunt mode (rounds × delay):
-  → shuffled star tiers each round
-  → RepoDiscovery.discover()
-  → prepend "friendly repos" (VIP alumni repos off cooldown)
-  → _hunt_process_repo() — Issues FIRST, then analysis
-  → Issues mode skips analysis if ≥1 issue PR created
-```
-
-### Circular Target Loop (`pipeline.py:691-985`)
-
-```
+```text
 run_circular():
   → DatabaseTargetDiscovery.get_next_target() — picks oldest scanned_at
   → BloodhoundAnalyzer.run_bloodhound() — Semgrep pre-scan
@@ -108,13 +187,13 @@ run_circular():
 
 ---
 
-## 3. Database Schema & State
+## 5. Database Schema & State
 
 **SQLite DB at:** `data/memory.db` (default, configurable via `storage.db_path`)
 
 **WAL Journal Mode** — falls back to DELETE on Docker volume filesystems.
 
-**Schema (from `memory.py:19-135`):**
+**Schema (from `memory.py`):**
 
 | Table | Primary Columns | Purpose |
 |-------|-----------------|---------|
@@ -131,13 +210,11 @@ run_circular():
 | `target_repos` | `repo_url` (PK), `status`, `scanned_at` (Unix ts), `language`, `bounty_amount`, `diamond_target` | Circular loop targets |
 | `repo_style_guides` | `repo` (PK), `style_summary`, `contributing_md`, `pr_template`, `created_at`, `updated_at` | Cached CONTRIBUTING.md parses |
 
-**Migrations:** On init, `ci_fix_attempts` and `discussion_replies` columns are added to `submitted_prs` if missing.
-
 ---
 
-## 4. Critical Guardrails, Limits & Business Rules
+## 6. Critical Guardrails, Limits & Business Rules
 
-### 4.1 Thresholds & Limits
+### 6.1 Thresholds & Limits
 
 | Limit | Value | Source |
 |-------|-------|--------|
@@ -162,7 +239,7 @@ run_circular():
 | LLM Quota: 5-hour window | 950 requests (95% of 1000 limit) | `memory.py:943` |
 | LLM Quota: 7-day window | 9500 requests (95% of 10000 limit) | `memory.py:953` |
 
-### 4.2 Validation Rules (Active Guards)
+### 6.2 Validation Rules (Active Guards)
 
 **AI Policy Block:**
 - Scans `AI_POLICY.md`, `.github/AI_POLICY.md` for ban keywords ("do not accept ai", "no ai-generated", etc.) — [Source: `pipeline.py:2314-2375`]
@@ -211,7 +288,7 @@ run_circular():
 **TOCTOU Quota Defense:**
 - Inside `human_typing_lock`, re-check `get_today_pr_count()` before PR creation to prevent concurrent overruns — [Source: `pipeline.py:1648-1658`]
 
-### 4.3 Fallback/Error Handling
+### 6.3 Fallback/Error Handling
 
 | Scenario | Behavior |
 |----------|----------|
@@ -225,123 +302,3 @@ run_circular():
 | LLM error | `llm_retry`: 3 retries, base 3s, max 60s |
 | Rate limit error (429) | `rate_limit_retry`: 5 retries, base 10s, max 120s |
 | Sandbox timeout | Exit code 137, stderr = "Sandbox execution timed out after 60s" |
-
----
-
-## 5. Directory & Module Architecture
-
-```
-farm_agent/
-├── cli/
-│   ├── main.py          # Click CLI, all commands (run, hunt, patrol, etc.)
-│   └── tui.py           # Interactive TUI mode (referenced but minimal implementation)
-├── core/
-│   ├── config.py        # Pydantic config system, load_config(), FarmAgentConfig
-│   ├── exceptions.py    # GitHubAPIError, LLMRateLimitError, ConfigError, RateLimitError
-│   ├── middleware.py    # Middleware chain (DeerFlow pattern) for quota/quality enforcement
-│   ├── models.py        # Pydantic models: Repository, Finding, Contribution, AnalysisResult, Severity, etc.
-│   ├── memory.py        # SQLite-backed Memory class (all tables defined here)
-│   ├── logger.py        # Daily rolling file logger setup
-│   ├── notifier.py      # TelegramNotifier
-│   ├── profiles.py      # Contribution profiles (quick/standard/thorough)
-│   ├── quotas.py         # Quota tracking (referenced in coverage omit)
-│   ├── leaderboard.py   # PR stats and repo rankings (referenced in coverage omit)
-│   ├── rag.py           # RAG pipeline for knowledge retrieval
-│   ├── retry.py          # @async_retry, @github_retry, @llm_retry decorators + LRUCache
-│   └── sandbox.py       # DockerSandbox — Polyglot Guillotine (12 languages supported)
-├── generator/
-│   ├── engine.py        # ContributionGenerator.generate() + generate_from_dossier()
-│   ├── reviewer.py      # ContributionReviewer
-│   └── scorer.py        # QAHardcoreScorer — QA evaluation with repo_style_guide penalty
-├── github/
-│   ├── client.py        # GitHubClient — all GitHub API interactions (REST + GraphQL)
-│   ├── discovery.py     # RepoDiscovery + DatabaseTargetDiscovery
-│   ├── guidelines.py    # fetch_repo_guidelines() — parses CONTRIBUTING.md + PR template
-│   └── security_gate.py # Security Disclosure Gate (private disclosure detection)
-├── analysis/
-│   ├── analyzer.py      # CodeAnalyzer.analyze() — static code analysis
-│   ├── bloodhound.py    # BloodhoundAnalyzer — Semgrep pre-scan for vulnerability discovery
-│   ├── language_rules.py
-│   ├── mapper.py
-│   ├── skills.py
-│   └── strategies.py
-├── llm/
-│   ├── provider.py      # create_llm_provider() — MiniMax, OpenRouter, or multi-model routing
-│   ├── models.py        # ALL_MODELS catalog, TaskType enum, model capabilities/tiers/costs
-│   ├── router.py        # TaskRouter — default model assignments per task type
-│   └── agents.py        # LLM agent definitions (referenced in coverage omit)
-├── issues/
-│   └── solver.py        # IssueSolver — fetch + classify + solve GitHub issues
-├── orchestrator/
-│   ├── pipeline.py      # ContribPipeline — main orchestrator (THIS IS THE CORE ENGINE)
-│   ├── memory.py        # Alias/sibling to core/memory.py — both point to same class
-│   ├── human.py         # SuperHumanLoop — 24/7 organic operation loop
-│   └── pipeline.py      # (duplicate reference, also exports ContribPipeline)
-├── pr/
-│   ├── manager.py       # PRManager.create_pr() — fork, branch, commit, push, create PR
-│   ├── patrol.py        # PRPatrol — check open PRs for review feedback, auto-respond
-│   └── janitor.py       # PRJanitor — close garbage PRs
-├── agents/
-│   └── registry.py      # create_default_registry() — DeerFlow agent system
-├── plugins/
-│   └── base.py          # Plugin base class (referenced in coverage omit)
-├── notifications/
-│   └── notifier.py      # Notifier — Slack/Discord/Telegram webhooks
-├── templates/
-│   └── registry.py      # TemplateRegistry — contribution templates
-├── tools/
-│   └── protocol.py      # create_default_tools() — DeerFlow tool system
-└── __init__.py          # Version = "3.0.0"
-
-scripts/
-├── cleanup_forks.py      # Standalone fork cleanup utility
-├── inject_ci_trap.py     # Test injection script
-├── inject_maintainer_feedback.py
-├── perf_benchmark_io.py  # I/O performance benchmarking
-└── vip_repos_radar.py    # VIP repo tracking
-
-tests/
-├── unit/
-│   ├── test_circular_target.py
-│   ├── test_concurrency_cap.py
-│   └── test_pr_creation_integrity.py
-└── test_async_io_pipeline.py
-```
-
----
-
-## 6. Version Assessment & Technical Debt
-
-**Maturity:** `Development Status :: 4 - Beta` (per `pyproject.toml`)
-
-**Known Technical Debt / Incomplete Features:**
-
-| Item | Description | Source |
-|------|-------------|--------|
-| `DEBT-04` | Missing index for sliding-window quota queries — flagged in `memory.py:162-165` | `memory.py:163` comment |
-| `P0-FIX (v2)` | Replaced volatile in-RAM quota cleanup with `task_schedule` table for multi-process coordination | `memory.py:970-993` |
-| `P0-FIX (v2)` | Sandbox wrapped with OS-level `timeout --signal=KILL` instead of relying on Docker `stop_timeout` | `sandbox.py:499-503` |
-| `Crucible BUG` | `_wait_for_exit_code` replaced `client.api.wait()` (60s HTTP hard limit) with polling loop | `sandbox.py:585-637` |
-| `CRIT-03 FIX` | Minimax capped to max 5 concurrent repos to prevent secondary rate limit thundering herd | `pipeline.py:229-233` |
-| `CRIT-04 FIX` | Long coding delay moved OUTSIDE the `human_typing_lock` to prevent lock contention | `pipeline.py:2082-2088` |
-| `P2-FIX` | TOCTOU quota defense moved inside lock for correct concurrent quota enforcement | `pipeline.py:2091-2102` |
-| `PHASE 2-FIX` | Manifest-driven language detection (package.json → tsconfig.json → Cargo.toml) before extension counting | `sandbox.py:109-165` |
-| `PHASE 3-FIX` | Title similarity now requires 80% bigram sequence overlap, not 50% word intersection | `pipeline.py:136-186` |
-| Coverage omit | 8 modules excluded from coverage (`web/*`, `scheduler/*`, `cli/tui.py`, `llm/agents.py`, etc.) | `pyproject.toml:75-88` |
-
-**Deleted / Removed (Phase 4 Purge — 2026-04-15):**
-- `cli/tui.py` — deleted. Lazy-imported only by the removed `interactive` CLI command.
-- `analysis/language_rules.py` — deleted. No imports found in active pipeline.
-- `analysis/skills.py` — deleted. No imports found in active pipeline.
-- `analysis/strategies.py` — deleted. No imports found in active pipeline.
-- `plugins/base.py` — deleted. No imports found in active pipeline.
-
-**Orphaned / Incomplete Features:**
-- `analysis/mapper.py` — present but purpose not fully analyzed — **pending audit**
-- `core/rag.py` — **ACTIVE** (ChromaDB RAG engine, used by `pipeline.py` and `analyzer.py`)
-
-**Secret Findings:** Security-gated vulnerabilities are saved to `secret_findings/` directory for manual reporting.
-
----
-
-*Evidence anchored to source files. No speculation. No assumptions.*
