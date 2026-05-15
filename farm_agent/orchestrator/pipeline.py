@@ -30,6 +30,7 @@ from farm_agent.core.models import (
     RepoContext,
     Repository,
     Severity,
+    VulnerabilityDossier,
 )
 from farm_agent.generator.engine import ContributionGenerator, GenerationResult
 from farm_agent.generator.scorer import QAHardcoreScorer
