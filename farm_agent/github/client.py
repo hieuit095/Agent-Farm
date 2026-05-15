@@ -426,10 +426,10 @@ class GitHubClient:
             f"/repos/{owner}/{repo}/git/trees/{branch}",
             params={"recursive": "1"},
         )
-        
+
         from pathlib import Path
         from farm_agent.core.models import TOKEN_BLACKLIST
-        
+
         tree = []
         for item in data.get("tree", []):
             path_parts = Path(item["path"]).parts
