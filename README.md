@@ -9,31 +9,33 @@
 
 ## Overview
 
-Farm-Agent is a highly advanced autonomous system designed to automatically discover open-source GitHub repositories, identify real bugs or quality issues, generate precise fixes, and submit pull requests. It operates behind a sophisticated human behavior simulation layer to ensure all contributions provide genuine value to maintainers without causing spam. By combining static analysis, issue solving, and Red Team audits, it acts as an autonomous senior open-source contributor.
+Farm-Agent is a highly advanced system designed to discover open-source GitHub repositories, identify real bugs or quality issues, generate precise fixes, and submit pull requests. It operates behind a sophisticated human behavior simulation layer to ensure all contributions provide genuine value to maintainers.
 
 ## Key Features
 
 - **Issue-First Pipeline:** Prioritizes solving existing, open GitHub issues before falling back to static code analysis, ensuring contributions align with maintainers' immediate needs.
 - **Polyglot Sandbox Validation:** Uses isolated Docker containers to execute and validate generated patches (across Python, Node.js, Rust, Go, etc.) before any Pull Request is created.
-- **Multi-Strategy Analysis:** Concurrently runs security, code quality, documentation, and UI/UX analyzers against repository file trees. Features a Bloodhound Red Team pipeline via OpenRouter.
+- **Multi-Strategy Analysis:** Concurrently runs security, code quality, documentation, and UI/UX analyzers against repository file trees.
 - **X-Ray Context Vision:** Builds a local ChromaDB Retrieval-Augmented Generation (RAG) index to ensure code patches are contextually accurate across multiple files.
 - **PR Patrol & Janitor:** Autonomously monitors open PRs for maintainer feedback to push auto-fixes, answer questions, and sign CLAs. The "Janitor" sweeps and deletes any PRs classified as low-quality or garbage.
 - **Anti-Farming Filter:** A zero-tolerance gatekeeper that drops trivial findings (e.g., typos, formatting) and blocks documentation-only PRs to prevent spamming maintainers.
 - **Super Human Mode:** A 24/7 autonomous daemon that operates on a stochastic daily schedule, complete with simulated coding delays, lunch breaks, and randomized PR quotas to mimic a real developer's circadian rhythm.
-- **Familiar Grounds:** Learns from past merged PRs to prioritize repositories where the agent is already a trusted contributor via the VIP Roster system.
+- **Familiar Grounds:** Learns from past merged PRs to prioritize repositories where the agent is already a trusted contributor.
 
 ## System Architecture (High-Level)
 
-Farm-Agent orchestrates its pipeline via a Click-based CLI (`farm_agent`). The core orchestrator (`ContribPipeline` / `SuperHumanLoop`) interacts with an LLM Provider (primarily utilizing Minimax ABAB models, with OpenRouter for Red Team audits) and the GitHub API.
+Farm-Agent orchestrates its pipeline via a Click-based CLI (`farm_agent`). The core orchestrator (`ContribPipeline` / `SuperHumanLoop`) interacts with an LLM Provider (primarily utilizing Minimax ABAB models) and the GitHub REST API. State is persistently managed in an SQLite database using WAL mode (`aiosqlite`).
 
-State is persistently managed in an SQLite database using WAL mode (`aiosqlite`), tracking analyzed repositories, submitted PRs, and run history. When analyzing code or solving issues, the Code Generation Engine uses an ephemeral ChromaDB vector store for context retrieval. Crucially, before submission, the generated code patch is validated inside an ephemeral Docker Sandbox. If the patch fails tests or linters, the agent enters a self-correction DEV-QA Bounty Loop before attempting to submit the PR.
+When analyzing code or solving issues, the Code Generation Engine uses an ephemeral ChromaDB vector store for context retrieval. Crucially, before submission, the generated code patch is validated inside an ephemeral Docker Sandbox. If the patch fails tests or linters, the agent enters a self-correction loop before attempting to submit the PR.
 
 ## Getting Started
 
 ### Prerequisites
 
-- **Python:** `3.11` or higher
-- **Docker:** `7.1` or higher (Required for Polyglot Sandbox Validation)
+- **Python:** 3.11 or higher
+- **Docker:** 7.1 or higher (Required for Polyglot Sandbox Validation)
+- **GitHub PAT:** A Personal Access Token with `repo` scope
+- **LLM API Key:** Minimax API key (default) or supported alternatives
 
 ### Installation
 
@@ -50,16 +52,13 @@ State is persistently managed in an SQLite database using WAL mode (`aiosqlite`)
 
 ### Environment Variables
 
-Configure the agent using `config.yaml` or set the following environment variables (copy `.env.example` to `.env`):
+Configure the agent using `config.yaml` or set the following key environment variables:
 
-- `GITHUB_TOKEN`: Your GitHub Personal Access Token (requires `repo`, `read:org`, and `workflow` scopes).
-- `GITHUB_SECONDARY_TOKENS`: Additional tokens for GET request rotation (comma-separated) to manage rate limits.
-- `MINIMAX_API_KEY`: Your Minimax API Key for primary LLM access.
-- `MINIMAX_GROUP_ID`: Your Minimax Group ID (if required by your plan).
-- `OPENROUTER_API_KEY`: OpenRouter API key for Red Team Bloodhound audits (optional fallback to Minimax).
-- `EXCLUDED_LANGUAGES`: Filter out verbose/costly languages (comma-separated, e.g., `javascript,typescript`).
-- `TELEGRAM_BOT_TOKEN`: (Optional) Telegram bot token for push notifications.
-- `TELEGRAM_CHAT_ID`: (Optional) Telegram chat ID for push notifications.
+- `GITHUB_TOKEN`: Your GitHub Personal Access Token.
+- `MINIMAX_API_KEY`: Your Minimax API Key for LLM access.
+- `MINIMAX_GROUP_ID`: Your Minimax Group ID.
+
+Alternatively, copy `config.example.yaml` to `config.yaml` and fill in your details.
 
 ## Usage
 
