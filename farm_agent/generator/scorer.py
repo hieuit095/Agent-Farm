@@ -11,8 +11,7 @@ import logging
 import re
 from dataclasses import dataclass
 
-from farm_agent.core.models import Contribution, ContributionType, VulnerabilityDossier
-from farm_agent.core.models import QAResult
+from farm_agent.core.models import Contribution, ContributionType, QAResult, VulnerabilityDossier
 
 logger = logging.getLogger(__name__)
 
