@@ -1,3 +1,4 @@
+
 """LLM Provider abstraction with multi-provider support.
 
 Gemini is the primary/default provider. All providers implement
@@ -6,6 +7,7 @@ the same async interface for easy swapping.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
@@ -202,7 +204,6 @@ class LLMProvider(ABC):
 # ── Minimax ─────────────────────────────────────────────────────────────────────
 
 # Module-level semaphore shared by ALL MinimaxProvider instances so the
-import asyncio
 
 # concurrent-call cap is enforced globally, not per-instance.
 _LLM_SEMAPHORE: asyncio.Semaphore | None = None

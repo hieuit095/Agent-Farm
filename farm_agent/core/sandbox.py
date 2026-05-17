@@ -149,7 +149,7 @@ def detect_language_from_extensions(repo_path: str | Path) -> str:
 
     skip_dirs = {"node_modules", "target", ".git", "dist", "build", "__pycache__", "vendor", "venv", ".venv", ".pytest_cache", ".mypy_cache"}
     try:
-        for root, dirs, files in os.walk(repo_dir):
+        for _root, dirs, files in os.walk(repo_dir):
             # Prune skip dirs in-place to avoid descending into them
             dirs[:] = [d for d in dirs if d not in skip_dirs]
             for file in files:
@@ -235,7 +235,7 @@ class DockerSandbox:
 
         if (repo_path / "tox.ini").exists():
             return "tox"
-        
+
         makefile = repo_path / "Makefile"
         if makefile.exists():
             try:
@@ -243,7 +243,7 @@ class DockerSandbox:
                     return "make test"
             except Exception:
                 pass
-                
+
         package_json = repo_path / "package.json"
         if package_json.exists():
             try:
@@ -253,16 +253,16 @@ class DockerSandbox:
                     return "npm test"
             except Exception:
                 pass
-                
+
         if (repo_path / "pytest.ini").exists() or (repo_path / "tests").is_dir():
             return "pytest"
-            
+
         if (repo_path / "Cargo.toml").exists():
             return "cargo test"
-            
+
         if (repo_path / "go.mod").exists():
             return "go test ./..."
-            
+
         return fallback_cmd
 
     async def run_in_sandbox(
@@ -328,7 +328,7 @@ class DockerSandbox:
             raise FileNotFoundError(f"Sandbox repository path does not exist: {repo_dir}")
         if not repo_dir.is_dir():
             raise NotADirectoryError(f"Sandbox repository path is not a directory: {repo_dir}")
-            
+
         resolved_command = self._determine_test_command(repo_dir, fallback_cmd=base_command)
 
         logger.info(
@@ -356,9 +356,7 @@ class DockerSandbox:
         timed_out = False
         exit_code: int | None = None
 
-        import shutil
-        import tempfile
-        
+
         logger.info("Starting sandbox container %s for %s", container_name, repo_dir)
 
         try:
@@ -394,7 +392,7 @@ class DockerSandbox:
                             break
 
                         if loop.time() >= deadline:
-                            raise asyncio.TimeoutError()
+                            raise TimeoutError()
 
                         try:
                             await asyncio.to_thread(container.reload)
@@ -440,7 +438,7 @@ class DockerSandbox:
 
                 timed_out = False
 
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 timed_out = True
                 logger.warning(
                     "Sandbox container %s exceeded hard execution timeout (%ds); "
@@ -469,14 +467,11 @@ class DockerSandbox:
             if container is not None:
                 await self._force_remove_container(container)
                 await self._wait_for_container_removal(run_id)
-            if 'temp_dir_obj' in locals():
-                # tempfile cleanup can sometimes raise if files are in use, but usually safe.
-                # However, tempfile.TemporaryDirectory's cleanup may fail on Windows if files are read-only.
-                # We'll just call it and ignore exceptions or let it throw.
+            if 'temp_dir' in locals():
                 try:
-                    temp_dir_obj.cleanup()
+                    locals()['temp_dir'].cleanup()
                 except Exception as cleanup_exc:
-                    logger.debug("Failed to clean up temp dir %s: %s", temp_dir_obj.name, cleanup_exc)
+                    logger.debug("Failed to clean up temp dir %s: %s", locals()["temp_dir"].name, cleanup_exc)
 
     async def _start_container(
         self,

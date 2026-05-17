@@ -1,3 +1,4 @@
+
 """Contribution quality scorer.
 
 Evaluates generated contributions before submission
@@ -10,7 +11,8 @@ import logging
 import re
 from dataclasses import dataclass
 
-from farm_agent.core.models import Contribution, ContributionType
+from farm_agent.core.models import Contribution, ContributionType, VulnerabilityDossier
+from farm_agent.core.models import QAResult
 
 logger = logging.getLogger(__name__)
 
@@ -232,10 +234,10 @@ class QAHardcoreScorer:
 
     async def evaluate(
         self,
-        dossier: "VulnerabilityDossier",
-        contribution: "Contribution",
+        dossier: VulnerabilityDossier,
+        contribution: Contribution,
         repo_style_guide: str | None = None,
-    ) -> "QAResult":
+    ) -> QAResult:
         """Score a patch against its originating vulnerability dossier.
 
         Returns a QAResult with score (0.0-10.0), critiques, and approval status.

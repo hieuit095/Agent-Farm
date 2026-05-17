@@ -19,10 +19,11 @@ sys.modules["chromadb"] = MagicMock()
 sys.modules["numpy"] = MagicMock()
 sys.modules["git"] = MagicMock()
 
-from farm_agent.orchestrator.pipeline import ContribPipeline
 
 
 def test_get_max_concurrency_minimax_capped():
+    from farm_agent.orchestrator.pipeline import ContribPipeline
+
     config = MagicMock()
     config.pipeline.max_concurrent_repos = 10
     config.llm.provider = "minimax"
@@ -31,6 +32,8 @@ def test_get_max_concurrency_minimax_capped():
     assert pipeline._get_max_concurrency() == 5
 
 def test_get_max_concurrency_minimax_under_cap():
+    from farm_agent.orchestrator.pipeline import ContribPipeline
+
     config = MagicMock()
     config.pipeline.max_concurrent_repos = 3
     config.llm.provider = "minimax"
@@ -39,6 +42,8 @@ def test_get_max_concurrency_minimax_under_cap():
     assert pipeline._get_max_concurrency() == 3
 
 def test_get_max_concurrency_other_provider():
+    from farm_agent.orchestrator.pipeline import ContribPipeline
+
     config = MagicMock()
     config.pipeline.max_concurrent_repos = 10
     config.llm.provider = "openai"
