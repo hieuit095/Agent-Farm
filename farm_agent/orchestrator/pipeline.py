@@ -7,8 +7,10 @@ discover → analyze → generate → PR.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
+import re
 import subprocess
 import tempfile
 from dataclasses import dataclass, field
@@ -30,7 +32,6 @@ from farm_agent.core.models import (
     RepoContext,
     Repository,
     Severity,
-    VulnerabilityDossier,
 )
 from farm_agent.generator.engine import ContributionGenerator, GenerationResult
 from farm_agent.generator.scorer import QAHardcoreScorer
@@ -2328,7 +2329,9 @@ class ContribPipeline:
             # Parse JSON response
             try:
                 response_text = response.strip()
-                fence_match = re.search(r"```(?:json)?\s*(.*?)```", response_text, re.DOTALL | re.IGNORECASE)
+                fence_match = re.search(
+                    r"```(?:json)?\s*(.*?)```", response_text, re.DOTALL | re.IGNORECASE
+                )
                 if fence_match:
                     response_text = fence_match.group(1).strip()
                 brace_start = response_text.find("{")
@@ -2379,7 +2382,7 @@ class ContribPipeline:
 
             except (json.JSONDecodeError, ValueError, TypeError, AttributeError) as e:
                 # Finding is genuinely invalid — skip it, don't retry
-                logger.warning("Finding %s failed validation (parse error): %s", finding.title, e)
+                logger.warning("Finding %s failed val (parse error): %s", finding.title, e)
                 continue
 
         return validated
