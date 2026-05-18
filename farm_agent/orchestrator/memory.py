@@ -631,7 +631,8 @@ class Memory:
 
         try:
             await self._db.execute(
-                """INSERT OR REPLACE INTO knowledge_base (repo_name, entry_type, content, created_at)
+                """INSERT OR REPLACE INTO knowledge_base " \
+                "(repo_name, entry_type, content, created_at)
                    VALUES (?, 'qa_lesson', ?, ?)""",
                 (repo_name, content, datetime.now(UTC).isoformat()),
             )
@@ -656,7 +657,8 @@ class Memory:
             deleted = cursor.rowcount
             if deleted > 0:
                 logger.info(
-                    "Garbage Collection: purged %d stale knowledge base entries (older than %d days)",
+                    "Garbage Collection: purged %d stale knowledge base entries " \
+                    "(older than %d days)",
                     deleted,
                     days,
                 )
@@ -675,7 +677,8 @@ class Memory:
 
         try:
             cursor = await self._db.execute(
-                "SELECT COUNT(*) FROM api_usage_log WHERE provider = 'openrouter' AND date(timestamp, 'unixepoch') = date('now')",
+                "SELECT COUNT(*) FROM api_usage_log WHERE provider = 'openrouter' " \
+                "AND date(timestamp, 'unixepoch') = date('now')",
             )
             row = await cursor.fetchone()
             return row[0] if row else 0
@@ -722,7 +725,7 @@ class Memory:
         try:
             raw = json_path.read_text(encoding="utf-8")
             entries = _json.loads(raw)
-        except (json.JSONDecodeError, OSError) as exc:
+        except (_json.JSONDecodeError, OSError) as exc:
             logger.error("Failed to read target_repo.json for seeding: %s", exc)
             return 0
 
@@ -785,28 +788,36 @@ class Memory:
 
         if excluded_languages:
             placeholders = ",".join(["?"] * len(excluded_languages))
-            query = f"""UPDATE target_repos 
-               SET scanned_at = ? 
-               WHERE repo_url = (SELECT repo_url FROM target_repos WHERE LOWER(language) NOT IN ({placeholders}) ORDER BY COALESCE(scanned_at, 0) ASC, rowid ASC LIMIT 1) 
+            query = f"""UPDATE target_repos
+               SET scanned_at = ?
+               WHERE repo_url = (SELECT repo_url FROM target_repos " \
+               "WHERE LOWER(language) NOT IN ({placeholders}) " \
+               "ORDER BY COALESCE(scanned_at, 0) ASC, rowid ASC LIMIT 1)
                RETURNING *"""
             params = (now_ts, *[lang.lower() for lang in excluded_languages])
         else:
-            query = """UPDATE target_repos 
-               SET scanned_at = ? 
-               WHERE repo_url = (SELECT repo_url FROM target_repos ORDER BY COALESCE(scanned_at, 0) ASC, rowid ASC LIMIT 1) 
+            query = """UPDATE target_repos
+               SET scanned_at = ?
+               WHERE repo_url = (SELECT repo_url FROM target_repos " \
+               "ORDER BY COALESCE(scanned_at, 0) ASC, rowid ASC LIMIT 1)
                RETURNING *"""
             params = (now_ts,)
 
         cursor = await self._db.execute(query, params)
         row = await cursor.fetchone()
         await self._db.commit()
-        
+
         if row is None:
             return None
 
         cols = [d[0] for d in cursor.description]
         result = dict(zip(cols, row, strict=False))
-        logger.info(f"[TARGET ACQUIRED] Repo: {result.get('repo_url')} | Language: {result.get('language')} | Bounty: {result.get('bounty_amount')} | Diamond: {result.get('diamond_target')}")
+        logger.info(
+            f"[TARGET ACQUIRED] Repo: {result.get('repo_url')} | " \
+            f"Language: {result.get('language')} | " \
+            f"Bounty: {result.get('bounty_amount')} | " \
+            f"Diamond: {result.get('diamond_target')}"
+        )
         return result
 
     async def mark_target_status(
@@ -1044,7 +1055,8 @@ class Memory:
         if self._db is None:
             return None
         cursor = await self._db.execute(
-            "SELECT repo, style_summary, contributing_md, pr_template FROM repo_style_guides WHERE repo = ?",
+            "SELECT repo, style_summary, contributing_md, pr_template " \
+            "FROM repo_style_guides WHERE repo = ?",
             (repo,),
         )
         row = await cursor.fetchone()
