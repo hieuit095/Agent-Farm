@@ -1,4 +1,4 @@
-"""Tests for JsonTargetDiscovery, DatabaseTargetDiscovery, and crash-safe circular target rotation."""
+"""Tests for JsonTargetDiscovery, DatabaseTargetDiscovery, and crash-safe circular target rotation."""  # noqa: E501
 
 import json
 from datetime import UTC, datetime
