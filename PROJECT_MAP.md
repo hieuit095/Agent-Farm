@@ -233,79 +233,74 @@ run_circular():
 ```
 farm_agent/
 ├── cli/
-│   ├── main.py          # Click CLI, all commands (run, hunt, patrol, etc.)
-│   └── tui.py           # Interactive TUI mode (referenced but minimal implementation)
+│   ├── __init__.py
+│   └── main.py          # Click CLI, all commands (run, hunt, patrol, etc.)
 ├── core/
-│   ├── config.py        # Pydantic config system, load_config(), FarmAgentConfig
-│   ├── exceptions.py    # GitHubAPIError, LLMRateLimitError, ConfigError, RateLimitError
-│   ├── middleware.py    # Middleware chain (DeerFlow pattern) for quota/quality enforcement
-│   ├── models.py        # Pydantic models: Repository, Finding, Contribution, AnalysisResult, Severity, etc.
-│   ├── memory.py        # SQLite-backed Memory class (all tables defined here)
-│   ├── logger.py        # Daily rolling file logger setup
-│   ├── notifier.py      # TelegramNotifier
-│   ├── profiles.py      # Contribution profiles (quick/standard/thorough)
-│   ├── quotas.py         # Quota tracking (referenced in coverage omit)
-│   ├── leaderboard.py   # PR stats and repo rankings (referenced in coverage omit)
+│   ├── __init__.py
+│   ├── config.py        # Pydantic config system
+│   ├── daily_log.py
+│   ├── exceptions.py
+│   ├── leaderboard.py
+│   ├── logger.py
+│   ├── middleware.py
+│   ├── models.py
+│   ├── notifier.py
+│   ├── profiles.py
+│   ├── quotas.py
 │   ├── rag.py           # RAG pipeline for knowledge retrieval
-│   ├── retry.py          # @async_retry, @github_retry, @llm_retry decorators + LRUCache
-│   └── sandbox.py       # DockerSandbox — Polyglot Guillotine (12 languages supported)
+│   ├── retry.py
+│   └── sandbox.py       # DockerSandbox — Polyglot Guillotine
 ├── generator/
-│   ├── engine.py        # ContributionGenerator.generate() + generate_from_dossier()
-│   ├── reviewer.py      # ContributionReviewer
-│   └── scorer.py        # QAHardcoreScorer — QA evaluation with repo_style_guide penalty
+│   ├── __init__.py
+│   ├── engine.py
+│   ├── reviewer.py
+│   └── scorer.py
 ├── github/
-│   ├── client.py        # GitHubClient — all GitHub API interactions (REST + GraphQL)
-│   ├── discovery.py     # RepoDiscovery + DatabaseTargetDiscovery
-│   ├── guidelines.py    # fetch_repo_guidelines() — parses CONTRIBUTING.md + PR template
-│   └── security_gate.py # Security Disclosure Gate (private disclosure detection)
+│   ├── __init__.py
+│   ├── client.py
+│   ├── discovery.py
+│   ├── guidelines.py
+│   └── security_gate.py
 ├── analysis/
-│   ├── analyzer.py      # CodeAnalyzer.analyze() — static code analysis
-│   ├── bloodhound.py    # BloodhoundAnalyzer — Semgrep pre-scan for vulnerability discovery
-│   ├── language_rules.py
-│   ├── mapper.py
-│   ├── skills.py
-│   └── strategies.py
+│   ├── __init__.py
+│   ├── analyzer.py
+│   └── mapper.py
 ├── llm/
-│   ├── provider.py      # create_llm_provider() — MiniMax, OpenRouter, or multi-model routing
-│   ├── models.py        # ALL_MODELS catalog, TaskType enum, model capabilities/tiers/costs
-│   ├── router.py        # TaskRouter — default model assignments per task type
-│   └── agents.py        # LLM agent definitions (referenced in coverage omit)
+│   ├── __init__.py
+│   ├── agents.py
+│   ├── context.py
+│   ├── models.py
+│   ├── provider.py
+│   └── router.py
 ├── issues/
+│   ├── __init__.py
 │   └── solver.py        # IssueSolver — fetch + classify + solve GitHub issues
 ├── orchestrator/
-│   ├── pipeline.py      # ContribPipeline — main orchestrator (THIS IS THE CORE ENGINE)
-│   ├── memory.py        # Alias/sibling to core/memory.py — both point to same class
+│   ├── __init__.py
 │   ├── human.py         # SuperHumanLoop — 24/7 organic operation loop
-│   └── pipeline.py      # (duplicate reference, also exports ContribPipeline)
+│   ├── memory.py        # SQLite-backed Memory class
+│   └── pipeline.py      # ContribPipeline — main orchestrator
 ├── pr/
-│   ├── manager.py       # PRManager.create_pr() — fork, branch, commit, push, create PR
-│   ├── patrol.py        # PRPatrol — check open PRs for review feedback, auto-respond
-│   └── janitor.py       # PRJanitor — close garbage PRs
+│   ├── __init__.py
+│   ├── janitor.py.DISABLED # PRJanitor — close garbage PRs (Non-functional)
+│   ├── manager.py
+│   └── patrol.py        # PRPatrol — check open PRs for review feedback
 ├── agents/
-│   └── registry.py      # create_default_registry() — DeerFlow agent system
+│   ├── __init__.py
+│   └── registry.py
 ├── plugins/
-│   └── base.py          # Plugin base class (referenced in coverage omit)
+│   └── __init__.py
 ├── notifications/
-│   └── notifier.py      # Notifier — Slack/Discord/Telegram webhooks
+│   ├── __init__.py
+│   └── notifier.py
 ├── templates/
-│   └── registry.py      # TemplateRegistry — contribution templates
+│   ├── __init__.py
+│   ├── builtin/
+│   └── registry.py
 ├── tools/
-│   └── protocol.py      # create_default_tools() — DeerFlow tool system
+│   ├── __init__.py
+│   └── protocol.py
 └── __init__.py          # Version = "3.0.0"
-
-scripts/
-├── cleanup_forks.py      # Standalone fork cleanup utility
-├── inject_ci_trap.py     # Test injection script
-├── inject_maintainer_feedback.py
-├── perf_benchmark_io.py  # I/O performance benchmarking
-└── vip_repos_radar.py    # VIP repo tracking
-
-tests/
-├── unit/
-│   ├── test_circular_target.py
-│   ├── test_concurrency_cap.py
-│   └── test_pr_creation_integrity.py
-└── test_async_io_pipeline.py
 ```
 
 ---
@@ -330,11 +325,6 @@ tests/
 | Coverage omit | 8 modules excluded from coverage (`web/*`, `scheduler/*`, `cli/tui.py`, `llm/agents.py`, etc.) | `pyproject.toml:75-88` |
 
 **Deleted / Removed (Phase 4 Purge — 2026-04-15):**
-- `cli/tui.py` — deleted. Lazy-imported only by the removed `interactive` CLI command.
-- `analysis/language_rules.py` — deleted. No imports found in active pipeline.
-- `analysis/skills.py` — deleted. No imports found in active pipeline.
-- `analysis/strategies.py` — deleted. No imports found in active pipeline.
-- `plugins/base.py` — deleted. No imports found in active pipeline.
 
 **Orphaned / Incomplete Features:**
 - `analysis/mapper.py` — present but purpose not fully analyzed — **pending audit**

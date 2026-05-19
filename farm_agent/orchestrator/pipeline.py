@@ -7,8 +7,11 @@ discover → analyze → generate → PR.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
+import random
+import re
 import subprocess
 import tempfile
 from dataclasses import dataclass, field
@@ -30,7 +33,6 @@ from farm_agent.core.models import (
     RepoContext,
     Repository,
     Severity,
-    VulnerabilityDossier,
 )
 from farm_agent.generator.engine import ContributionGenerator, GenerationResult
 from farm_agent.generator.scorer import QAHardcoreScorer
@@ -783,7 +785,7 @@ class ContribPipeline:
 
             if not production_vulns:
                 logger.info(
-                    "All %d vulnerabilities were in non-production paths for %s — marking COMPLETED_NO_VULN",
+                    "All %d vulnerabilities were in non-production paths for %s — marking COMPLETED_NO_VULN",  # noqa: E501
                     len(dossier.vulnerabilities),
                     target.repo_url,
                 )
@@ -814,12 +816,14 @@ class ContribPipeline:
             # ── Build RepoContext with vulnerable file contents ───────────
             # Use GraphQL for repo tree (falls back to REST on any error)
             try:
-                file_tree = await self._github.fetch_repo_structure_graphql(
-                    repo.owner, repo.name
-                )
+                file_tree = await self._github.fetch_repo_structure_graphql(repo.owner, repo.name)
             except Exception as exc:
-                logger.info("GraphQL tree fetch failed for %s/%s, falling back to REST: %s",
-                             repo.owner, repo.name, exc)
+                logger.info(
+                    "GraphQL tree fetch failed for %s/%s, falling back to REST: %s",
+                    repo.owner,
+                    repo.name,
+                    exc,
+                )
                 file_tree = await self._github.get_file_tree(repo.owner, repo.name)
             relevant_files: dict[str, str] = {}
             for vuln in dossier.vulnerabilities:
@@ -840,7 +844,7 @@ class ContribPipeline:
             )
 
             # ── 3-Cycle DEV-QA Bounty Loop (FinOps Circuit Breaker) ────────────
-            MAX_DEV_QA_CYCLES = 3
+            max_dev_qa_cycles = 3
             qa_passed = False
             winning_contribution: Contribution | None = None
             failure_context = ""  # Accumulates sandbox/QA failure traces across cycles
@@ -860,16 +864,20 @@ class ContribPipeline:
             if not repo_style_guide_text and guidelines and guidelines.style_guide:
                 repo_style_guide_text = guidelines.style_guide.raw_summary
 
-            for cycle in range(MAX_DEV_QA_CYCLES):
+            for cycle in range(max_dev_qa_cycles):
                 logger.info(
                     "Starting DEV-QA Cycle %d/%d for %s",
-                    cycle + 1, MAX_DEV_QA_CYCLES, target.repo_url,
+                    cycle + 1,
+                    max_dev_qa_cycles,
+                    target.repo_url,
                 )
 
                 # 1. DEV generates patches (auto-injects QA Lessons + failure context)
                 try:
                     gen_result: GenerationResult = await self._generator.generate_from_dossier(
-                        dossier, context, github_client=self._github,
+                        dossier,
+                        context,
+                        github_client=self._github,
                         failure_context=failure_context,
                     )
                     contributions = gen_result.contributions
@@ -895,17 +903,19 @@ class ContribPipeline:
 
                 if not contributions:
                     logger.warning("No contributions generated in cycle %d", cycle + 1)
-                    failure_context += f"\n[CYCLE {cycle + 1} No valid code generated — anti-template interceptor may have triggered.]"
+                    failure_context += f"\n[CYCLE {cycle + 1} No valid code generated — anti-template interceptor may have triggered.]"  # noqa: E501
                     continue
 
                 # 2. QA evaluates the first (best) contribution
                 qa_result: QAResult = await scorer.evaluate(
-                    dossier, contributions[0],
+                    dossier,
+                    contributions[0],
                     repo_style_guide=repo_style_guide_text,
                 )
                 logger.info(
                     "QA Score: %.1f/10.0 — Approved: %s",
-                    qa_result.score, qa_result.approved,
+                    qa_result.score,
+                    qa_result.approved,
                 )
 
                 if qa_result.approved:
@@ -914,16 +924,15 @@ class ContribPipeline:
                     winning_contribution = contributions[0]
                     logger.info(
                         "QA PASSED on cycle %d with score %.1f",
-                        cycle + 1, qa_result.score,
+                        cycle + 1,
+                        qa_result.score,
                     )
                     break
                 else:
                     # 3. QA rejected — record critiques as lessons and inject into failure context
                     critique_text = "; ".join(qa_result.critiques)
                     for critique in qa_result.critiques:
-                        await self._memory.record_qa_lesson(
-                            repo.full_name, critique
-                        )
+                        await self._memory.record_qa_lesson(repo.full_name, critique)
                     failure_context += (
                         f"\n[CYCLE {cycle + 1} QA REJECTED — Score: {qa_result.score:.1f}/10.0]"
                         f"\nQA Critiques: {critique_text}"
@@ -964,7 +973,8 @@ class ContribPipeline:
                 logger.warning(
                     "Bailout: Complexity exceeded after %d DEV-QA cycles for %s. "
                     "Cutting losses to save tokens.",
-                    MAX_DEV_QA_CYCLES, target.repo_url,
+                    max_dev_qa_cycles,
+                    target.repo_url,
                 )
                 await discovery.mark_status(target.repo_url, "COMPLETED_TOO_COMPLEX")
 
@@ -1033,8 +1043,11 @@ class ContribPipeline:
 
         # Fetch repo guidelines (CONTRIBUTING.md, PR template)
         guidelines = await fetch_repo_guidelines(
-            self._github, repo.owner, repo.name,
-            memory=self._memory, llm=self._llm,
+            self._github,
+            repo.owner,
+            repo.name,
+            memory=self._memory,
+            llm=self._llm,
         )
         if guidelines.has_guidelines:
             logger.info(
@@ -1716,9 +1729,7 @@ class ContribPipeline:
                 result.errors.append(error)
                 if not dry_run and getattr(self, "_notifier", None):
                     await self._safe_send_notification(
-                        f"❌ **PR FAILED**\n"
-                        f"Target: {repo.full_name}\n"
-                        f"Error: {str(e)[:200]}"
+                        f"❌ **PR FAILED**\nTarget: {repo.full_name}\nError: {str(e)[:200]}"
                     )
 
         result.repos_analyzed = 1
@@ -1861,7 +1872,9 @@ class ContribPipeline:
             return result
 
         # Fetch repo guidelines
-        guidelines = await fetch_repo_guidelines(self._github, repo.owner, repo.name, memory=self._memory, llm=self._llm)
+        guidelines = await fetch_repo_guidelines(
+            self._github, repo.owner, repo.name, memory=self._memory, llm=self._llm
+        )
 
         # Build repo context with more files for deeper understanding
         file_tree = await self._github.get_file_tree(repo.owner, repo.name)
@@ -2053,15 +2066,13 @@ class ContribPipeline:
                     continue
             # ----------------------------------------------------------
 
-# Create PR immediately (no artificial delay)
+            # Create PR immediately (no artificial delay)
             try:
                 patch_length = sum(
                     len(c.new_content) for c in contribution.changes if c.new_content
                 )
                 base_coding_time = max(60, patch_length // 15)
-                logger.info(
-                    "Creating PR for issue #%d in %s...", issue.number, repo.full_name
-                )
+                logger.info("Creating PR for issue #%d in %s...", issue.number, repo.full_name)
                 async with self._human_typing_lock:
                     if not dry_run:
                         curr_prs = await self._memory.get_today_pr_count()
@@ -2074,9 +2085,7 @@ class ContribPipeline:
                             )
                             return result
 
-                    logger.info(
-                        "Creating PR for issue #%d in %s...", issue.number, repo.full_name
-                    )
+                    logger.info("Creating PR for issue #%d in %s...", issue.number, repo.full_name)
                 typing_time = int(patch_length / 3.75)
                 total_coding_delay = min(base_coding_time + typing_time, 3600)
 
@@ -2155,9 +2164,7 @@ class ContribPipeline:
                 result.errors.append(error)
                 if not dry_run and getattr(self, "_notifier", None):
                     await self._safe_send_notification(
-                        f"❌ **PR FAILED**\n"
-                        f"Target: {repo.full_name}\n"
-                        f"Error: {str(e)[:200]}"
+                        f"❌ **PR FAILED**\nTarget: {repo.full_name}\nError: {str(e)[:200]}"
                     )
 
         result.repos_analyzed = 1
@@ -2272,17 +2279,36 @@ class ContribPipeline:
                 f"- No clear path from user input to vulnerable sink → REJECT\n"
                 f"- Code relies on implicit behavior not present in snippet → REJECT\n\n"
                 f"### Response Format\n"
-                f"You MUST respond ONLY with valid JSON. No markdown, no explanation outside JSON.\n"
-                f'{{"devil_advocate_critique": "MANDATORY: Write 2 sentences explaining why this snippet is perfectly safe, '
+                f"You MUST respond ONLY with valid JSON. No markdown, no explanation outside JSON.\n"  # noqa: E501
+                f'{{"devil_advocate_critique": "MANDATORY: Write 2 sentences explaining why this snippet is perfectly safe, '  # noqa: E501
                 f'normal, or uses modern language defaults. Prove the scanner wrong.", '
                 f'"is_real_vulnerability": true/false, "confidence_score": 0-100, '
-                f'"rejection_reason": "reason if false", "data_flow_proof": "exact var names if true"}}'
+                f'"rejection_reason": "reason if false", "data_flow_proof": "exact var names if true"}}'  # noqa: E501
             )
 
             # TASK 3: Python pre-filter — skip non-code findings before LLM call
             finding_text = f"{finding.title} {finding.description} {finding.suggestion or ''}"
-            code_chars = {"{", "}", "(", ")", "=", ":=", "func", "def", "class",
-                          "[", "]", "<", ">", "+", "-", "*", "/", ";", "!"}
+            code_chars = {
+                "{",
+                "}",
+                "(",
+                ")",
+                "=",
+                ":=",
+                "func",
+                "def",
+                "class",
+                "[",
+                "]",
+                "<",
+                ">",
+                "+",
+                "-",
+                "*",
+                "/",
+                ";",
+                "!",
+            }
             if not any(ch in finding_text for ch in code_chars):
                 logger.info(
                     "Snippet dropped: Does not look like code — %s",
@@ -2297,26 +2323,26 @@ class ContribPipeline:
                         "You are a senior code reviewer validating automated findings. "
                         "Be skeptical — reject findings that are false positives.\n\n"
                         "CRITICAL RULES:\n"
-                        "1. NO ASSUMPTIONS: You MUST base your assessment ONLY on the provided code snippet. "
+                        "1. NO ASSUMPTIONS: You MUST base your assessment ONLY on the provided code snippet. "  # noqa: E501
                         "Do NOT assume, guess, or imagine functionality not visible. "
-                        "Do NOT use 'If [condition]' logic. If you have to say 'If', it is a False Positive.\n"
-                        "2. DATA FLOW REQUIREMENT: You must trace user-controlled input to the vulnerable sink. "
+                        "Do NOT use 'If [condition]' logic. If you have to say 'If', it is a False Positive.\n"  # noqa: E501
+                        "2. DATA FLOW REQUIREMENT: You must trace user-controlled input to the vulnerable sink. "  # noqa: E501
                         "If no clear exploitable data flow exists, mark as False Positive.\n"
-                        "3. GARBAGE SNIPPET REJECTION: If snippet is too short, is just a string literal, "
+                        "3. GARBAGE SNIPPET REJECTION: If snippet is too short, is just a string literal, "  # noqa: E501
                         "or lacks structural programming context, reject immediately.\n\n"
                         "KNOWN FALSE POSITIVES IMMUNITY LIST:\n"
-                        "- GO LANG: defer guarantees execution. defer mutex.Unlock() is safe and the OPPOSITE of a deadlock. NEVER flag it.\n"
-                        "- GO LANG: crypto/tls defaults to TLS 1.2+ in modern Go. Missing MinVersion is safe. NEVER flag it.\n"
-                        "- PYTHON: Standard urllib or requests usages WITHOUT explicit unsanitized user inputs in the URL are safe.\n"
-                        "- ALL: If the snippet is NOT valid programming code (e.g., just English text like 'TLS configuration missing'), DROP IT.\n\n"
-                        "DEVIL'S ADVOCATE: You MUST write 2 sentences in devil_advocate_critique explaining why this snippet is "
-                        "perfectly safe, normal, or uses modern language defaults. Prove the scanner wrong.\n\n"
+                        "- GO LANG: defer guarantees execution. defer mutex.Unlock() is safe and the OPPOSITE of a deadlock. NEVER flag it.\n"  # noqa: E501
+                        "- GO LANG: crypto/tls defaults to TLS 1.2+ in modern Go. Missing MinVersion is safe. NEVER flag it.\n"  # noqa: E501
+                        "- PYTHON: Standard urllib or requests usages WITHOUT explicit unsanitized user inputs in the URL are safe.\n"  # noqa: E501
+                        "- ALL: If the snippet is NOT valid programming code (e.g., just English text like 'TLS configuration missing'), DROP IT.\n\n"  # noqa: E501
+                        "DEVIL'S ADVOCATE: You MUST write 2 sentences in devil_advocate_critique explaining why this snippet is "  # noqa: E501
+                        "perfectly safe, normal, or uses modern language defaults. Prove the scanner wrong.\n\n"  # noqa: E501
                         "Respond ONLY with valid JSON matching this schema:\n"
                         '{"devil_advocate_critique": "string (MANDATORY)", '
                         '"is_real_vulnerability": boolean, '
                         '"confidence_score": integer (0-100), '
                         '"rejection_reason": "string (required if false)", '
-                        '"data_flow_proof": "string (required if true — cite exact variable names)"}'
+                        '"data_flow_proof": "string (required if true — cite exact variable names)"}'  # noqa: E501
                     ),
                     temperature=0.1,
                 )
@@ -2328,13 +2354,15 @@ class ContribPipeline:
             # Parse JSON response
             try:
                 response_text = response.strip()
-                fence_match = re.search(r"```(?:json)?\s*(.*?)```", response_text, re.DOTALL | re.IGNORECASE)
+                fence_match = re.search(
+                    r"```(?:json)?\s*(.*?)```", response_text, re.DOTALL | re.IGNORECASE
+                )
                 if fence_match:
                     response_text = fence_match.group(1).strip()
                 brace_start = response_text.find("{")
                 brace_end = response_text.rfind("}")
                 if brace_start != -1 and brace_end != -1 and brace_end > brace_start:
-                    response_text = response_text[brace_start:brace_end + 1]
+                    response_text = response_text[brace_start : brace_end + 1]
 
                 parsed = json.loads(response_text)
 
@@ -2348,11 +2376,21 @@ class ContribPipeline:
                 data_flow_proof = parsed.get("data_flow_proof", "")
 
                 # TASK 3: Auto-drop if data_flow_proof is lazy (hallucination indicator)
-                _hallucination_words = {" If ", " Assume ", " Might ", " Maybe ", " Possibly ", " Probably "}
-                if is_real and (len(data_flow_proof) < 20 or data_flow_proof.lower().count("if") > 2
-                        or any(w in data_flow_proof for w in _hallucination_words)):
+                _hallucination_words = {
+                    " If ",
+                    " Assume ",
+                    " Might ",
+                    " Maybe ",
+                    " Possibly ",
+                    " Probably ",
+                }
+                if is_real and (
+                    len(data_flow_proof) < 20
+                    or data_flow_proof.lower().count("if") > 2
+                    or any(w in data_flow_proof for w in _hallucination_words)
+                ):
                     logger.info(
-                        "❌ data_flow_proof too lazy (len=%d, contains If/Assume/Might) for %s — auto-rejected",
+                        "❌ data_flow_proof too lazy (len=%d, contains If/Assume/Might) for %s — auto-rejected",  # noqa: E501
                         len(data_flow_proof),
                         finding.title,
                     )
@@ -2365,7 +2403,9 @@ class ContribPipeline:
                         finding.title,
                         confidence,
                         rejection_reason,
-                        (devil_advocate[:60] + "...") if len(devil_advocate) > 60 else devil_advocate,
+                        (devil_advocate[:60] + "...")
+                        if len(devil_advocate) > 60
+                        else devil_advocate,
                     )
                     continue
 
@@ -2373,7 +2413,9 @@ class ContribPipeline:
                     "✅ Finding validated: %s — score=%d flow=%s",
                     finding.title,
                     confidence,
-                    (data_flow_proof[:60] + "...") if len(data_flow_proof) > 60 else data_flow_proof,
+                    (data_flow_proof[:60] + "...")
+                    if len(data_flow_proof) > 60
+                    else data_flow_proof,
                 )
                 validated.append(finding)
 
