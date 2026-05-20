@@ -4,7 +4,6 @@ import json
 from datetime import UTC, datetime
 
 import pytest
-from pydantic import BaseModel, Field
 
 from farm_agent.core.models import TargetRepoEntry
 from farm_agent.github.discovery import DatabaseTargetDiscovery, JsonTargetDiscovery
