@@ -14,7 +14,6 @@ import pytest
 from farm_agent.core.exceptions import GitHubAPIError, PRCreationError
 from farm_agent.core.models import Contribution, Finding, Repository
 from farm_agent.github.client import GitHubClient
-from farm_agent.pr.manager import PRManager
 
 
 @pytest.fixture

@@ -11,6 +11,8 @@ import logging
 import os
 import subprocess
 import tempfile
+import json
+import re
 from dataclasses import dataclass, field
 
 from farm_agent.agents.registry import create_default_registry
@@ -30,7 +32,6 @@ from farm_agent.core.models import (
     RepoContext,
     Repository,
     Severity,
-    VulnerabilityDossier,
 )
 from farm_agent.generator.engine import ContributionGenerator, GenerationResult
 from farm_agent.generator.scorer import QAHardcoreScorer
@@ -202,6 +203,9 @@ class ContribPipeline:
     """Main orchestrator for the contribution pipeline."""
 
     def __init__(self, config: FarmAgentConfig):
+        import random
+        import re
+        import json
         self.config = config
         self._github: GitHubClient | None = None
         self._llm = None
