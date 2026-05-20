@@ -7,12 +7,12 @@ discover → analyze → generate → PR.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
+import re
 import subprocess
 import tempfile
-import json
-import re
 from dataclasses import dataclass, field
 
 from farm_agent.agents.registry import create_default_registry
@@ -203,9 +203,6 @@ class ContribPipeline:
     """Main orchestrator for the contribution pipeline."""
 
     def __init__(self, config: FarmAgentConfig):
-        import random
-        import re
-        import json
         self.config = config
         self._github: GitHubClient | None = None
         self._llm = None
