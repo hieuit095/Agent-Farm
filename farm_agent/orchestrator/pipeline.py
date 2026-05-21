@@ -1,3 +1,4 @@
+
 """Main pipeline orchestrator.
 
 Coordinates the full contribution flow:
@@ -5,6 +6,8 @@ discover → analyze → generate → PR.
 """
 
 from __future__ import annotations
+import json
+import re
 
 import asyncio
 import logging
@@ -30,7 +33,6 @@ from farm_agent.core.models import (
     RepoContext,
     Repository,
     Severity,
-    VulnerabilityDossier,
 )
 from farm_agent.generator.engine import ContributionGenerator, GenerationResult
 from farm_agent.generator.scorer import QAHardcoreScorer
