@@ -70,10 +70,10 @@ def setup_logging(verbose: bool = False, config=None):
 def print_banner():
     banner = f"""[bold cyan]
      _                    _     _____
-    / \   __ _  ___ _ __ | |_  |  ___|_ _ _ __ _ __ ___
-   / _ \ / _` |/ _ \ '_ \| __| | |_ / _` | '__| '_ ` _ \\
-  / ___ \ (_| |  __/ | | | |_  |  _| (_| | |  | | | | | |
- /_/   \_\__, |\___|_| |_|\__| |_|  \__,_|_|  |_| |_| |_|
+    / \\   __ _  ___ _ __ | |_  |  ___|_ _ _ __ _ __ ___
+   / _ \\ / _` |/ _ \\ '_ \\| __| | |_ / _` | '__| '_ ` _ \\
+  / ___ \\ (_| |  __/ | | | |_  |  _| (_| | |  | | | | | |
+ /_/   \\_\\__, |\\___|_| |_|\\__| |_|  \\__,_|_|  |_| |_| |_|
          |___/
 
   [dim]Autonomous Agent Orchestration v{__version__}[/dim]
@@ -436,17 +436,19 @@ def superhuman(ctx, time_warp, dry_run, target_repo):
         import sys
         if sys.platform != "win32":
             for sig in (signal.SIGINT, signal.SIGTERM):
-                inner_loop.add_signal_handler(sig, lambda s=sig: _handle_signal(s, shutdown_hook, inner_loop))
+                inner_loop.add_signal_handler(
+                    sig, lambda s=sig: handle_sig(s, shutdown_hook, inner_loop)
+                )
 
-        def _handle_signal(sig, hook, l):
+        def handle_sig(sig, hook, loop_obj):
             console.print(f"[yellow]Received {sig.name} — initiating graceful shutdown...[/yellow]")
             loop.request_shutdown()  # Signal the terminator loop to drain gracefully
-            l.create_task(hook())  # Fire the cleanup hook (DB flush + close)
+            loop_obj.create_task(hook())  # Fire the cleanup hook (DB flush + close)
 
         try:
             await loop.run_daily_routine(time_warp=time_warp)
         except (KeyboardInterrupt, asyncio.CancelledError):
-            console.print("[yellow]\nKeyboardInterrupt received — initiating graceful shutdown...[/yellow]")
+            console.print("[yellow]\nKeyboardInterrupt — initiating graceful shutdown...[/yellow]")
         finally:
             await shutdown_hook()
 
@@ -965,7 +967,6 @@ def reset_db(ctx, yes):
         cur.execute("DELETE FROM run_log")
         cur.execute("DELETE FROM analyzed_repos")
         conn.commit()
-        affected = cur.rowcount
         conn.close()
 
         console.print("[green]✅ Reset complete.[/green]")

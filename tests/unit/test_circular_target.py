@@ -1,4 +1,4 @@
-"""Tests for JsonTargetDiscovery, DatabaseTargetDiscovery, and crash-safe circular target rotation."""
+"""Tests for JsonTargetDiscovery and DatabaseTargetDiscovery circular target rotation."""
 
 import json
 from datetime import UTC, datetime
@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 import pytest
 
 from farm_agent.core.models import TargetRepoEntry
-from farm_agent.github.discovery import JsonTargetDiscovery, DatabaseTargetDiscovery
+from farm_agent.github.discovery import DatabaseTargetDiscovery, JsonTargetDiscovery
 from farm_agent.orchestrator.memory import Memory
 
 
