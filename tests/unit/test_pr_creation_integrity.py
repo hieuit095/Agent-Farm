@@ -14,7 +14,6 @@ import pytest
 from farm_agent.core.exceptions import GitHubAPIError, PRCreationError
 from farm_agent.core.models import Contribution, Finding, Repository
 from farm_agent.github.client import GitHubClient
-from farm_agent.pr.manager import PRManager
 
 
 @pytest.fixture
@@ -149,7 +148,7 @@ class TestCreatePullRequest201Enforcement:
     @pytest.mark.asyncio
     async def test_payload_logged_before_send(self, github_client, mock_httpx_response, caplog):
         import logging
-        with caplog.at_level(logging.INFO):
+        with caplog.at_level(logging.DEBUG):
             github_client.get_repo_details = AsyncMock(
                 return_value=Repository(
                     owner="owner", name="repo", full_name="owner/repo",
@@ -176,7 +175,7 @@ class TestCreatePullRequest201Enforcement:
     @pytest.mark.asyncio
     async def test_response_logged_after_send(self, github_client, mock_httpx_response, caplog):
         import logging
-        with caplog.at_level(logging.INFO):
+        with caplog.at_level(logging.DEBUG):
             github_client.get_repo_details = AsyncMock(
                 return_value=Repository(
                     owner="owner", name="repo", full_name="owner/repo",
