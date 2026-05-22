@@ -139,11 +139,13 @@ async def get_vip_repos(client: httpx.AsyncClient, headers: dict, prs: list[dict
                 if repo_url.endswith(f"/{repo_name.split('/')[-1]}"):
                     pr_urls.append(pr.get("html_url", ""))
 
-            vip_repos.append({
-                "name": repo_name,
-                "stars": stars,
-                "pr_urls": pr_urls,
-            })
+            vip_repos.append(
+                {
+                    "name": repo_name,
+                    "stars": stars,
+                    "pr_urls": pr_urls,
+                }
+            )
             print(f"  [{i}/{total}] {repo_name}: {stars} stars")
 
         if i % 10 == 0:
