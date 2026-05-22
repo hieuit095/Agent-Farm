@@ -19,21 +19,59 @@ from collections.abc import Awaitable, Callable
 logger = logging.getLogger(__name__)
 
 # Extensions considered "code" files
-CODE_EXTENSIONS = frozenset({
-    ".py", ".js", ".ts", ".jsx", ".tsx",
-    ".go", ".rs",
-    ".java", ".rb", ".c", ".cpp", ".h", ".hpp",
-    ".cs", ".swift", ".kt",
-})
+CODE_EXTENSIONS = frozenset(
+    {
+        ".py",
+        ".js",
+        ".ts",
+        ".jsx",
+        ".tsx",
+        ".go",
+        ".rs",
+        ".java",
+        ".rb",
+        ".c",
+        ".cpp",
+        ".h",
+        ".hpp",
+        ".cs",
+        ".swift",
+        ".kt",
+    }
+)
 
 # Extensions explicitly skipped (non-code / config / docs)
-SKIP_EXTENSIONS = frozenset({
-    ".md", ".txt", ".rst", ".json", ".yaml", ".yml",
-    ".toml", ".cfg", ".ini", ".lock", ".csv", ".xml",
-    ".html", ".css", ".scss", ".svg", ".png", ".jpg",
-    ".gif", ".ico", ".woff", ".woff2", ".eot", ".ttf",
-    ".map", ".min.js", ".min.css",
-})
+SKIP_EXTENSIONS = frozenset(
+    {
+        ".md",
+        ".txt",
+        ".rst",
+        ".json",
+        ".yaml",
+        ".yml",
+        ".toml",
+        ".cfg",
+        ".ini",
+        ".lock",
+        ".csv",
+        ".xml",
+        ".html",
+        ".css",
+        ".scss",
+        ".svg",
+        ".png",
+        ".jpg",
+        ".gif",
+        ".ico",
+        ".woff",
+        ".woff2",
+        ".eot",
+        ".ttf",
+        ".map",
+        ".min.js",
+        ".min.css",
+    }
+)
 
 # Hard limits to protect the LLM context window
 MAX_FILES = 500
@@ -62,15 +100,15 @@ class RepoMapper:
         """
         # Filter to code files only
         code_files = [
-            f for f in file_tree
-            if getattr(f, "type", "") == "blob" and self._is_code_file(f.path)
+            f for f in file_tree if getattr(f, "type", "") == "blob" and self._is_code_file(f.path)
         ]
 
         # Enforce hard file limit
         if len(code_files) > MAX_FILES:
             logger.warning(
                 "RepoMapper: capping file scan from %d to %d files",
-                len(code_files), MAX_FILES,
+                len(code_files),
+                MAX_FILES,
             )
             code_files = code_files[:MAX_FILES]
 
@@ -365,7 +403,8 @@ class RepoMapper:
 
         logger.debug(
             "RepoMapper.generate_repo_skeleton: %d files, %d chars",
-            file_count, total_chars,
+            file_count,
+            total_chars,
         )
         return "\n\n".join(output_parts)
 
@@ -420,7 +459,9 @@ class RepoMapper:
 
         logger.debug(
             "resolve_file_dependencies(%s): imports=%s callers=%s",
-            target_path, imports, callers,
+            target_path,
+            imports,
+            callers,
         )
         return {"imports": imports, "callers": callers}
 
