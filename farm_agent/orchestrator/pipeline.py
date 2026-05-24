@@ -1,3 +1,4 @@
+
 """Main pipeline orchestrator.
 
 Coordinates the full contribution flow:
@@ -7,8 +8,11 @@ discover → analyze → generate → PR.
 from __future__ import annotations
 
 import asyncio
+import json as _json
 import logging
 import os
+import random as _random
+import re as _re
 import subprocess
 import tempfile
 from dataclasses import dataclass, field
@@ -30,10 +34,10 @@ from farm_agent.core.models import (
     RepoContext,
     Repository,
     Severity,
-    VulnerabilityDossier,
 )
 from farm_agent.generator.engine import ContributionGenerator, GenerationResult
 from farm_agent.generator.scorer import QAHardcoreScorer
+from farm_agent.core.models import QAResult
 from farm_agent.github.client import GitHubClient
 from farm_agent.github.discovery import DatabaseTargetDiscovery, RepoDiscovery
 from farm_agent.github.guidelines import fetch_repo_guidelines
@@ -2103,7 +2107,7 @@ class ContribPipeline:
                             return result
 
                         logger.info("⏳ Chuẩn bị push code... (Taking a deep breath)")
-                        await asyncio.sleep(random.randint(15, 45))
+                        await asyncio.sleep(_random.randint(15, 45))
 
                     logger.info(
                         "📤 Creating PR for issue #%d in %s...", issue.number, repo.full_name
@@ -2328,7 +2332,7 @@ class ContribPipeline:
             # Parse JSON response
             try:
                 response_text = response.strip()
-                fence_match = re.search(r"```(?:json)?\s*(.*?)```", response_text, re.DOTALL | re.IGNORECASE)
+                fence_match = _re.search(r"```(?:json)?\s*(.*?)```", response_text, _re.DOTALL | _re.IGNORECASE)
                 if fence_match:
                     response_text = fence_match.group(1).strip()
                 brace_start = response_text.find("{")
@@ -2336,7 +2340,7 @@ class ContribPipeline:
                 if brace_start != -1 and brace_end != -1 and brace_end > brace_start:
                     response_text = response_text[brace_start:brace_end + 1]
 
-                parsed = json.loads(response_text)
+                parsed = _json.loads(response_text)
 
                 devil_advocate = parsed.get("devil_advocate_critique", "")
                 is_real = parsed.get("is_real_vulnerability", False)
@@ -2377,7 +2381,7 @@ class ContribPipeline:
                 )
                 validated.append(finding)
 
-            except (json.JSONDecodeError, ValueError, TypeError, AttributeError) as e:
+            except (_json.JSONDecodeError, ValueError, TypeError, AttributeError) as e:
                 # Finding is genuinely invalid — skip it, don't retry
                 logger.warning("Finding %s failed validation (parse error): %s", finding.title, e)
                 continue

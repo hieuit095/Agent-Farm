@@ -426,10 +426,11 @@ class GitHubClient:
             f"/repos/{owner}/{repo}/git/trees/{branch}",
             params={"recursive": "1"},
         )
-        
+
         from pathlib import Path
+
         from farm_agent.core.models import TOKEN_BLACKLIST
-        
+
         tree = []
         for item in data.get("tree", []):
             path_parts = Path(item["path"]).parts
@@ -654,7 +655,7 @@ class GitHubClient:
             raise GitHubAPIError(error_msg, status_code=status_code)
 
         pr_number = response_data.get("number", "?")
-        pr_url = response_data.get("html_url", "")
+        response_data.get("html_url", "")
         logger.info("Created PR #%s on %s/%s: %s", pr_number, owner, repo, title)
         return response_data
 
@@ -782,7 +783,7 @@ class GitHubClient:
                         "fetch_user_merged_prs: GET /user returned no login, using provided '%s'",
                         username,
                     )
-        except Exception:
+        except Exception as exc:
             logger.warning(
                 "fetch_user_merged_prs: could not validate username via GET /user: %s — "
                 "using provided '%s'",
@@ -1084,7 +1085,7 @@ class GitHubClient:
                 check_run_id, exc.response.status_code,
             )
             return ""
-        except Exception:
+        except Exception as exc:
             logger.warning("Failed to download CI log for job %d: %s", check_run_id, exc)
             return ""
 
