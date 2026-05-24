@@ -37,6 +37,7 @@ from farm_agent.core.models import (
 )
 from farm_agent.generator.engine import ContributionGenerator, GenerationResult
 from farm_agent.generator.scorer import QAHardcoreScorer
+from farm_agent.core.models import QAResult
 from farm_agent.github.client import GitHubClient
 from farm_agent.github.discovery import DatabaseTargetDiscovery, RepoDiscovery
 from farm_agent.github.guidelines import fetch_repo_guidelines
