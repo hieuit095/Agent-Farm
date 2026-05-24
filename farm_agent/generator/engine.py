@@ -219,7 +219,7 @@ def _extract_core_payload(raw_text: str) -> str | None:
         pass
 
     # Rule 5: Last resort — return the stripped text and let caller handle.
-    return raw_text if raw_text.strip().startswith(("{")) else None
+    return raw_text if raw_text.strip().startswith("{") else None
 
 
 class ContributionGenerator:
@@ -2046,9 +2046,9 @@ class ContributionGenerator:
                             for i, c_line in enumerate(new_content.split("\n")):
                                 if first_search_line and first_search_line in c_line:
                                     closest_matches.append(f"line {i+1}: '{c_line.strip()}'")
-                            
+
                             match_info = ", ".join(closest_matches[:3]) if closest_matches else "none"
-                            
+
                             logger.warning(
                                 "Search text not found in %s (tried exact + fuzzy + indent-agnostic + aggressive). "
                                 "Search line 1: '%s'. Closest matches in file: %s",
