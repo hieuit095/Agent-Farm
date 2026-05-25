@@ -2102,7 +2102,7 @@ class ContribPipeline:
                             return result
 
                         logger.info("⏳ Chuẩn bị push code... (Taking a deep breath)")
-                        await asyncio.sleep(random.randint(15, 45))
+                        await asyncio.sleep(__import__("random").randint(15, 45))
 
                     logger.info(
                         "📤 Creating PR for issue #%d in %s...", issue.number, repo.full_name
@@ -2327,7 +2327,7 @@ class ContribPipeline:
             # Parse JSON response
             try:
                 response_text = response.strip()
-                fence_match = re.search(r"```(?:json)?\s*(.*?)```", response_text, re.DOTALL | re.IGNORECASE)
+                fence_match = __import__("re").search(r"```(?:json)?\s*(.*?)```", response_text, re.DOTALL | re.IGNORECASE)
                 if fence_match:
                     response_text = fence_match.group(1).strip()
                 brace_start = response_text.find("{")
@@ -2335,7 +2335,7 @@ class ContribPipeline:
                 if brace_start != -1 and brace_end != -1 and brace_end > brace_start:
                     response_text = response_text[brace_start:brace_end + 1]
 
-                parsed = json.loads(response_text)
+                parsed = __import__("json").loads(response_text)
 
                 devil_advocate = parsed.get("devil_advocate_critique", "")
                 is_real = parsed.get("is_real_vulnerability", False)
@@ -2376,7 +2376,7 @@ class ContribPipeline:
                 )
                 validated.append(finding)
 
-            except (json.JSONDecodeError, ValueError, TypeError, AttributeError) as e:
+            except (__import__("json").JSONDecodeError, ValueError, TypeError, AttributeError) as e:
                 # Finding is genuinely invalid — skip it, don't retry
                 logger.warning("Finding %s failed validation (parse error): %s", finding.title, e)
                 continue
