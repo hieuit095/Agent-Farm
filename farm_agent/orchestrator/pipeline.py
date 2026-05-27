@@ -30,7 +30,6 @@ from farm_agent.core.models import (
     RepoContext,
     Repository,
     Severity,
-    VulnerabilityDossier,
 )
 from farm_agent.generator.engine import ContributionGenerator, GenerationResult
 from farm_agent.generator.scorer import QAHardcoreScorer
@@ -783,7 +782,8 @@ class ContribPipeline:
 
             if not production_vulns:
                 logger.info(
-                    "All %d vulnerabilities were in non-production paths for %s — marking COMPLETED_NO_VULN",
+                    "All %d vulnerabilities were in non-production paths for %s "
+                    "— marking COMPLETED_NO_VULN",
                     len(dossier.vulnerabilities),
                     target.repo_url,
                 )
@@ -840,7 +840,7 @@ class ContribPipeline:
             )
 
             # ── 3-Cycle DEV-QA Bounty Loop (FinOps Circuit Breaker) ────────────
-            MAX_DEV_QA_CYCLES = 3
+            max_dev_qa_cycles = 3
             qa_passed = False
             winning_contribution: Contribution | None = None
             failure_context = ""  # Accumulates sandbox/QA failure traces across cycles
@@ -860,10 +860,10 @@ class ContribPipeline:
             if not repo_style_guide_text and guidelines and guidelines.style_guide:
                 repo_style_guide_text = guidelines.style_guide.raw_summary
 
-            for cycle in range(MAX_DEV_QA_CYCLES):
+            for cycle in range(max_dev_qa_cycles):
                 logger.info(
                     "Starting DEV-QA Cycle %d/%d for %s",
-                    cycle + 1, MAX_DEV_QA_CYCLES, target.repo_url,
+                    cycle + 1, max_dev_qa_cycles, target.repo_url,
                 )
 
                 # 1. DEV generates patches (auto-injects QA Lessons + failure context)
@@ -895,7 +895,10 @@ class ContribPipeline:
 
                 if not contributions:
                     logger.warning("No contributions generated in cycle %d", cycle + 1)
-                    failure_context += f"\n[CYCLE {cycle + 1} No valid code generated — anti-template interceptor may have triggered.]"
+                    failure_context += (
+                        f"\n[CYCLE {cycle + 1} No valid code generated "
+                        "— anti-template interceptor may have triggered.]"
+                    )
                     continue
 
                 # 2. QA evaluates the first (best) contribution
@@ -964,7 +967,7 @@ class ContribPipeline:
                 logger.warning(
                     "Bailout: Complexity exceeded after %d DEV-QA cycles for %s. "
                     "Cutting losses to save tokens.",
-                    MAX_DEV_QA_CYCLES, target.repo_url,
+                    max_dev_qa_cycles, target.repo_url,
                 )
                 await discovery.mark_status(target.repo_url, "COMPLETED_TOO_COMPLEX")
 
@@ -1861,7 +1864,9 @@ class ContribPipeline:
             return result
 
         # Fetch repo guidelines
-        guidelines = await fetch_repo_guidelines(self._github, repo.owner, repo.name, memory=self._memory, llm=self._llm)
+        guidelines = await fetch_repo_guidelines(
+            self._github, repo.owner, repo.name, memory=self._memory, llm=self._llm
+        )
 
         # Build repo context with more files for deeper understanding
         file_tree = await self._github.get_file_tree(repo.owner, repo.name)
@@ -2082,6 +2087,8 @@ class ContribPipeline:
 
                 # CRIT-04 FIX: Move long coding delay OUTSIDE the lock.
                 if not dry_run:
+                    import random
+
                     logger.info(
                         f"⏳ Bắt đầu code cho {repo.full_name}... "
                         f"(Simulating {total_coding_delay}s of heavy coding)"
@@ -2091,6 +2098,8 @@ class ContribPipeline:
                 # INSIDE THE LOCK: Sequential PR pushing only
                 async with self._human_typing_lock:
                     if not dry_run:
+                        import random
+
                         # P2-FIX: TOCTOU Quota defense inside lock.
                         curr_prs = await self._memory.get_today_pr_count()
                         if curr_prs >= self.config.github.max_prs_per_day:
@@ -2272,11 +2281,14 @@ class ContribPipeline:
                 f"- No clear path from user input to vulnerable sink → REJECT\n"
                 f"- Code relies on implicit behavior not present in snippet → REJECT\n\n"
                 f"### Response Format\n"
-                f"You MUST respond ONLY with valid JSON. No markdown, no explanation outside JSON.\n"
-                f'{{"devil_advocate_critique": "MANDATORY: Write 2 sentences explaining why this snippet is perfectly safe, '
+                f"You MUST respond ONLY with valid JSON. No markdown, no explanation outside "
+                f"JSON.\n"
+                f'{{"devil_advocate_critique": "MANDATORY: Write 2 sentences explaining '
+                f'why this snippet is perfectly safe, '
                 f'normal, or uses modern language defaults. Prove the scanner wrong.", '
                 f'"is_real_vulnerability": true/false, "confidence_score": 0-100, '
-                f'"rejection_reason": "reason if false", "data_flow_proof": "exact var names if true"}}'
+                f'"rejection_reason": "reason if false", '
+                f'"data_flow_proof": "exact var names if true"}}'
             )
 
             # TASK 3: Python pre-filter — skip non-code findings before LLM call
@@ -2297,26 +2309,34 @@ class ContribPipeline:
                         "You are a senior code reviewer validating automated findings. "
                         "Be skeptical — reject findings that are false positives.\n\n"
                         "CRITICAL RULES:\n"
-                        "1. NO ASSUMPTIONS: You MUST base your assessment ONLY on the provided code snippet. "
+                        "1. NO ASSUMPTIONS: You MUST base your assessment ONLY on the provided "
+                        "code snippet.\n"
                         "Do NOT assume, guess, or imagine functionality not visible. "
-                        "Do NOT use 'If [condition]' logic. If you have to say 'If', it is a False Positive.\n"
-                        "2. DATA FLOW REQUIREMENT: You must trace user-controlled input to the vulnerable sink. "
+                        "Do NOT use 'If [condition]' logic. If you have to say 'If', "
+                        "it is a False Positive.\n"
+                        "2. DATA FLOW REQUIREMENT: You must trace user-controlled input to the "
+                        "vulnerable sink.\n"
                         "If no clear exploitable data flow exists, mark as False Positive.\n"
-                        "3. GARBAGE SNIPPET REJECTION: If snippet is too short, is just a string literal, "
-                        "or lacks structural programming context, reject immediately.\n\n"
+                        "3. GARBAGE SNIPPET REJECTION: If snippet is too short, is just a string "
+                        "literal, or lacks structural programming context, reject immediately.\n\n"
                         "KNOWN FALSE POSITIVES IMMUNITY LIST:\n"
-                        "- GO LANG: defer guarantees execution. defer mutex.Unlock() is safe and the OPPOSITE of a deadlock. NEVER flag it.\n"
-                        "- GO LANG: crypto/tls defaults to TLS 1.2+ in modern Go. Missing MinVersion is safe. NEVER flag it.\n"
-                        "- PYTHON: Standard urllib or requests usages WITHOUT explicit unsanitized user inputs in the URL are safe.\n"
-                        "- ALL: If the snippet is NOT valid programming code (e.g., just English text like 'TLS configuration missing'), DROP IT.\n\n"
-                        "DEVIL'S ADVOCATE: You MUST write 2 sentences in devil_advocate_critique explaining why this snippet is "
-                        "perfectly safe, normal, or uses modern language defaults. Prove the scanner wrong.\n\n"
+                        "- GO LANG: defer guarantees execution. defer mutex.Unlock() is safe and "
+                        "the OPPOSITE of a deadlock. NEVER flag it.\n"
+                        "- GO LANG: crypto/tls defaults to TLS 1.2+ in modern Go. Missing "
+                        "MinVersion is safe. NEVER flag it.\n"
+                        "- PYTHON: Standard urllib or requests usages WITHOUT explicit "
+                        "unsanitized user inputs in the URL are safe.\n"
+                        "- ALL: If the snippet is NOT valid programming code, DROP IT.\n\n"
+                        "DEVIL'S ADVOCATE: You MUST write 2 sentences in devil_advocate_critique "
+                        "explaining why this snippet is perfectly safe, normal, or uses modern "
+                        "language defaults. Prove the scanner wrong.\n\n"
                         "Respond ONLY with valid JSON matching this schema:\n"
                         '{"devil_advocate_critique": "string (MANDATORY)", '
                         '"is_real_vulnerability": boolean, '
                         '"confidence_score": integer (0-100), '
                         '"rejection_reason": "string (required if false)", '
-                        '"data_flow_proof": "string (required if true — cite exact variable names)"}'
+                        '"data_flow_proof": "string (required if true — cite exact '
+                        'variable names)"}'
                     ),
                     temperature=0.1,
                 )
@@ -2326,9 +2346,14 @@ class ContribPipeline:
                 raise
 
             # Parse JSON response
+            import json
+            import re
+
             try:
                 response_text = response.strip()
-                fence_match = re.search(r"```(?:json)?\s*(.*?)```", response_text, re.DOTALL | re.IGNORECASE)
+                fence_match = re.search(
+                    r"```(?:json)?\s*(.*?)```", response_text, re.DOTALL | re.IGNORECASE
+                )
                 if fence_match:
                     response_text = fence_match.group(1).strip()
                 brace_start = response_text.find("{")
@@ -2348,11 +2373,14 @@ class ContribPipeline:
                 data_flow_proof = parsed.get("data_flow_proof", "")
 
                 # TASK 3: Auto-drop if data_flow_proof is lazy (hallucination indicator)
-                _hallucination_words = {" If ", " Assume ", " Might ", " Maybe ", " Possibly ", " Probably "}
+                _hallucination_words = {
+                    " If ", " Assume ", " Might ", " Maybe ", " Possibly ", " Probably "
+                }
                 if is_real and (len(data_flow_proof) < 20 or data_flow_proof.lower().count("if") > 2
                         or any(w in data_flow_proof for w in _hallucination_words)):
                     logger.info(
-                        "❌ data_flow_proof too lazy (len=%d, contains If/Assume/Might) for %s — auto-rejected",
+                        "❌ data_flow_proof too lazy (len=%d, contains If/Assume/Might) "
+                        "for %s — auto-rejected",
                         len(data_flow_proof),
                         finding.title,
                     )
@@ -2360,20 +2388,22 @@ class ContribPipeline:
 
                 # Gate: drop if not real OR confidence < 90
                 if not is_real or confidence < 90:
+                    da_trunc = devil_advocate[:40] + "..." if len(devil_advocate) > 40 else devil_advocate
                     logger.info(
                         "❌ Finding rejected: %s — score=%d reason=%s | devil_advocate=%s",
                         finding.title,
                         confidence,
                         rejection_reason,
-                        (devil_advocate[:60] + "...") if len(devil_advocate) > 60 else devil_advocate,
+                        da_trunc,
                     )
                     continue
 
+                df_trunc = data_flow_proof[:40] + "..." if len(data_flow_proof) > 40 else data_flow_proof
                 logger.info(
                     "✅ Finding validated: %s — score=%d flow=%s",
                     finding.title,
                     confidence,
-                    (data_flow_proof[:60] + "...") if len(data_flow_proof) > 60 else data_flow_proof,
+                    df_trunc,
                 )
                 validated.append(finding)
 
