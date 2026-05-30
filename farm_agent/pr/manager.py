@@ -248,16 +248,16 @@ class PRManager:
                 issue_number = await self._create_issue_for_finding(contribution, target_repo)
 
             # 4. Create PR body — Diplomat Protocol Task 3: LLM-powered template filling
-            from farm_agent.core.models import ContributionType as _CT2
+            from farm_agent.core.models import ContributionType as ct2
 
             _type_info = {
-                _CT2.SECURITY_FIX: ("🔒", "Reliability Improvement"),
-                _CT2.CODE_QUALITY: ("✨", "Code Quality"),
-                _CT2.README_FIX: ("📝", "Documentation"),
-                _CT2.UI_UX_FIX: ("🎨", "UI/UX Improvement"),
-                _CT2.PERFORMANCE_OPT: ("⚡", "Performance"),
-                _CT2.FEATURE_ADD: ("🚀", "New Feature"),
-                _CT2.REFACTOR: ("♻️", "Refactoring"),
+                ct2.SECURITY_FIX: ("🔒", "Reliability Improvement"),
+                ct2.CODE_QUALITY: ("✨", "Code Quality"),
+                ct2.README_FIX: ("📝", "Documentation"),
+                ct2.UI_UX_FIX: ("🎨", "UI/UX Improvement"),
+                ct2.PERFORMANCE_OPT: ("⚡", "Performance"),
+                ct2.FEATURE_ADD: ("🚀", "New Feature"),
+                ct2.REFACTOR: ("♻️", "Refactoring"),
             }
             pr_emoji, pr_label = _type_info.get(contribution.finding.type, ("🔧", "Fix"))
             pr_files_list = "\n".join(
