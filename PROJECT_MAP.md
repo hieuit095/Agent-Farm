@@ -32,104 +32,87 @@ Farm-Agent is an autonomous AI agent that discovers open-source GitHub repositor
 
 ```text
 farm_agent/
-├── agents/             # Agents orchestrating specific contribution types
-│   └── registry.py     # Agent registration and management
-├── analysis/           # Codebase analysis modules
-│   ├── analyzer.py     # CodeAnalyzer and BloodhoundAnalyzer implementations
-│   └── mapper.py       # Codebase mapping and context extraction
-├── cli/                # Command-Line Interface
-│   └── main.py         # Entry point for the `farm_agent` command
-├── core/               # Core utility modules
-│   ├── config.py       # Configuration loading and Pydantic models
+├── __init__.py
+├── agents/             # Registration/loading of specific agent logic
+│   └── registry.py
+├── analysis/           # Code scanners
+│   ├── analyzer.py     # CodeAnalyzer & BloodhoundAnalyzer logic
+│   └── mapper.py       # Context mapper
+├── cli/                # Terminal interface
+│   └── main.py         # Primary entry point (click group)
+├── core/               # System primitives
+│   ├── config.py       # Pydantic setup
 │   ├── exceptions.py   # Custom errors
-│   ├── logger.py       # Logging utilities
-│   ├── models.py       # Shared data models (Findings, Contributions, etc.)
-│   ├── rag.py          # Local RAG implementation with ChromaDB
-│   └── sandbox.py      # Docker execution sandbox environment
-├── generator/          # Patch generation logic
-│   ├── engine.py       # LLM generation engine for fixes and features
-│   ├── reviewer.py     # Reviews generated code
-│   └── scorer.py       # Scores generation confidence
-├── github/             # GitHub interactions
-│   ├── client.py       # Wrapper around GitHub REST API
-│   ├── discovery.py    # Search and discovery of repositories
-│   └── security_gate.py# Security Disclosure Gate scanning
+│   ├── logger.py       # Rich formatting
+│   ├── models.py       # Data structures
+│   ├── rag.py          # Vector embeddings via chromadb
+│   └── sandbox.py      # Docker compilation & tests
+├── generator/          # LLM Generation flow
+│   ├── engine.py       # GenerationEngine logic
+│   ├── reviewer.py     # Self-correction validation
+│   └── scorer.py       # Confidence scores
+├── github/             # External API interfaces
+│   ├── client.py       # wrapper for `httpx` and API logic
+│   ├── discovery.py    # `hunt` flow discovery
+│   └── security_gate.py# Bounty & sensitivity checks
 ├── issues/             # Target issues specific tasks
-│   └── solver.py       # IssueSolver for issue complexity estimation and analysis
-├── llm/                # LLM abstractions
-│   ├── context.py      # Context and prompt formatting
-│   ├── models.py       # Definitions for available models and tasks
-│   ├── provider.py     # Base provider and specific LLM implementations
-│   └── router.py       # Routes tasks to appropriate LLM models
-├── notifications/      # Webhook notifications
-│   └── notifier.py     # Discord, Slack, and Telegram notifications
-├── orchestrator/       # High-level pipeline management
-│   ├── human.py        # Super Human Mode (simulated delays, organic scheduling)
-│   ├── memory.py       # Persistent state management using SQLite
-│   └── pipeline.py     # Main `ContribPipeline` orchestrating the execution loop
-├── pr/                 # Pull Request management
-│   ├── manager.py      # Creation and formatting of PRs
-│   └── patrol.py       # `PRPatrol` monitoring and responding to comments
-├── templates/          # Prompt templates
-│   └── registry.py     # Registry for system prompts
-└── tools/              # Tool integrations
-    └── protocol.py     # Tool usage definitions
+│   └── solver.py       # Parses open github issues
+├── llm/                # Providers logic
+│   ├── context.py
+│   ├── models.py
+│   ├── provider.py
+│   └── router.py
+├── notifications/      # Alerting webhooks
+│   └── notifier.py
+├── orchestrator/       # Master Flow Control
+│   ├── human.py        # SuperHumanLoop (stochastic scheduling)
+│   ├── memory.py       # SQLite WAL database wrapper
+│   └── pipeline.py     # ContribPipeline (the main loop)
+├── pr/                 # PR handling
+│   ├── manager.py      # Branch, Commit, Open PR logic
+│   └── patrol.py       # PRPatrol (reads comments and replies)
+├── templates/          # Prompt strings
+│   └── registry.py
+└── tools/
+    └── protocol.py     # JSON tool definitions
 ```
 
 ## 3. Core Module Dependency Graph
 
 ```mermaid
 graph TD
-    CLI(cli.main) --> Pipeline(orchestrator.pipeline.ContribPipeline)
-    CLI --> SuperHuman(orchestrator.human.SuperHumanLoop)
+    CLI[farm_agent/cli/main.py] --> Pipeline[ContribPipeline]
+    CLI --> SuperHuman[SuperHumanLoop]
     SuperHuman --> Pipeline
 
-    Pipeline --> Discovery(github.discovery)
-    Pipeline --> SecurityGate(github.security_gate)
-    Pipeline --> Memory(orchestrator.memory.Memory)
-    Pipeline --> Analyzer(analysis.analyzer)
-    Pipeline --> Generator(generator.engine.GenerationEngine)
-    Pipeline --> Sandbox(core.sandbox.DockerSandbox)
-    Pipeline --> PRManager(pr.manager.PRManager)
+    Pipeline --> Discovery[github/discovery.py]
+    Pipeline --> SecGate[github/security_gate.py]
+    Pipeline --> Memory[orchestrator/memory.py]
+    Pipeline --> Analyzer[analysis/analyzer.py]
+    Pipeline --> Generator[generator/engine.py]
+    Pipeline --> Sandbox[core/sandbox.py]
+    Pipeline --> PRManager[pr/manager.py]
 
-    Analyzer --> LLM(llm.provider)
-    Generator --> LLM
-    Generator --> RAG(core.rag.RAGIndex)
+    Generator --> LLM[llm/provider.py]
+    Generator --> RAG[core/rag.py]
 
-    PRManager --> GitHub(github.client.GitHubClient)
-    Discovery --> GitHub
-    Patrol(pr.patrol.PRPatrol) --> GitHub
+    PRManager --> GitHubAPI[github/client.py]
+    Discovery --> GitHubAPI
+
+    Patrol[pr/patrol.py] --> GitHubAPI
     Patrol --> LLM
 ```
 
 ## 4. Core Execution Loops / Entry Points
 
-### Primary CLI Commands (from `main.py`)
+The primary entry point is the `farm_agent` CLI, resolving to functions in `farm_agent/cli/main.py`. The standard execution flow heavily depends on the **Pipeline**:
 
-| Command | Description |
-|---------|-------------|
-| `farm_agent run` | Auto-discover repos → analyze → generate → PR |
-| `farm_agent target <url>` | Target a specific repo |
-| `farm_agent hunt` | Aggressive multi-round discovery + contribution |
-| `farm_agent hunt-circular` | Round-robin from `target_repo.json` |
-| `farm_agent patrol` | Check open PRs for review feedback, auto-respond |
-| `farm_agent superhuman` | 24/7 organic loop mimicking human developer |
-| `farm_agent janitor` | Close garbage PRs (exploratory, low-impact) |
-| `farm_agent solve <url>` | Solve open issues in a specific repo |
-| `farm_agent analyze <url>` | Analyze only, no PR creation |
-| `farm_agent status` | Show PR status filter |
-| `farm_agent stats` | Show overall Farm-Agent statistics |
-| `farm_agent system-status` | Show memory, PRs, rate limits |
-
-### Pipeline Data Flow (The Standard Execution Flow)
-
-The primary execution loop follows these steps:
 **Discovery -> Gate -> Analysis -> Engine -> Sandbox -> PR**
 
 1.  **Discovery:** Searches GitHub based on config criteria (languages, stars, activity) using `github/discovery.py`.
-2.  **Gate:** Repositories pass through the `SecurityDisclosureGate` (`github/security_gate.py`) to prevent operations on sensitive or bounty projects. Checks against `Memory` to avoid duplicate work.
-3.  **Analysis:** Clones the repo and runs `analysis/analyzer.py` (including `CodeAnalyzer` and `BloodhoundAnalyzer`) to identify targets or `IssueSolver` for existing GitHub issues. Includes anti-farming gates to drop trivial/low-impact findings.
-4.  **Engine:** The `GenerationEngine` (`generator/engine.py`) uses LLMs to draft patches. It builds context utilizing local RAG (`core/rag.py`).
+2.  **Gate:** Repositories pass through the `SecurityDisclosureGate` (`github/security_gate.py`) to prevent operations on sensitive or bounty projects.
+3.  **Analysis:** Clones the repo and runs `analysis/analyzer.py` (including `CodeAnalyzer` and `BloodhoundAnalyzer`) to identify targets or `IssueSolver` for existing GitHub issues.
+4.  **Engine:** The `GenerationEngine` uses LLMs to draft patches. It builds context utilizing local RAG (`core/rag.py`).
 5.  **Sandbox:** The drafted patch is deployed into an ephemeral Docker container (`core/sandbox.py`) to execute language-specific tests and verify the code compiles/runs safely.
 6.  **PR:** If the sandbox validates the patch, `PRManager` (`pr/manager.py`) commits the code and pushes a Pull Request using `GitHubClient`. `Memory` records the success.
 

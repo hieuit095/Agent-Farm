@@ -104,6 +104,6 @@ farm_agent stats
 
 ## Contributing & License
 
-Contributions to Farm-Agent are welcome! Please ensure you test your changes locally using `make test` before submitting a PR.
+Contributions to Farm-Agent are welcome! Please ensure you test your changes locally using `pytest` or `make test` before submitting a PR.
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
