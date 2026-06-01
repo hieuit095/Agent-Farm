@@ -50,14 +50,15 @@ def auto_check_pr_template(body: str, contrib_type: ContributionType | None = No
     lines = body.split("\n")
     for i, line in enumerate(lines):
         stripped = line.strip().lower()
-        if stripped.startswith(("- [ ]", "* [ ]")):
-            if any(term in stripped for term in allowed_terms):
-                # Only check if it safely avoids danger terms
-                if not any(
-                    danger in stripped for danger in ["breaking", "release", "deploy", "migration"]
-                ):
-                    # Replace the first unmet checkbox
-                    lines[i] = line.replace("[ ]", "[x]", 1)
+        if (
+            stripped.startswith(("- [ ]", "* [ ]"))
+            and any(term in stripped for term in allowed_terms)
+            and not any(
+                danger in stripped for danger in ["breaking", "release", "deploy", "migration"]
+            )
+        ):
+            # Replace the first unmet checkbox
+            lines[i] = line.replace("[ ]", "[x]", 1)
     return "\n".join(lines)
 
 
@@ -269,16 +270,16 @@ class PRManager:
                 issue_number = await self._create_issue_for_finding(contribution, target_repo)
 
             # 4. Create PR body — Diplomat Protocol Task 3: LLM-powered template filling
-            from farm_agent.core.models import ContributionType as _CT2
+            from farm_agent.core.models import ContributionType
 
             _type_info = {
-                _CT2.SECURITY_FIX: ("🔒", "Reliability Improvement"),
-                _CT2.CODE_QUALITY: ("✨", "Code Quality"),
-                _CT2.README_FIX: ("📝", "Documentation"),
-                _CT2.UI_UX_FIX: ("🎨", "UI/UX Improvement"),
-                _CT2.PERFORMANCE_OPT: ("⚡", "Performance"),
-                _CT2.FEATURE_ADD: ("🚀", "New Feature"),
-                _CT2.REFACTOR: ("♻️", "Refactoring"),
+                ContributionType.SECURITY_FIX: ("🔒", "Reliability Improvement"),
+                ContributionType.CODE_QUALITY: ("✨", "Code Quality"),
+                ContributionType.README_FIX: ("📝", "Documentation"),
+                ContributionType.UI_UX_FIX: ("🎨", "UI/UX Improvement"),
+                ContributionType.PERFORMANCE_OPT: ("⚡", "Performance"),
+                ContributionType.FEATURE_ADD: ("🚀", "New Feature"),
+                ContributionType.REFACTOR: ("♻️", "Refactoring"),
             }
             pr_emoji, pr_label = _type_info.get(contribution.finding.type, ("🔧", "Fix"))
             pr_files_list = "\n".join(

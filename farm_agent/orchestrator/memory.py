@@ -379,8 +379,6 @@ class Memory:
         cols = [d[0] for d in cursor.description]
         return [dict(zip(cols, row, strict=False)) for row in rows]
 
-
-
     # ── CI Fix Attempts ───────────────────────────────────────────────────
 
     async def get_ci_fix_attempts(self, repo: str, pr_number: int) -> int:
@@ -720,9 +718,10 @@ class Memory:
             return 0
 
         try:
+            import json as _json
             raw = json_path.read_text(encoding="utf-8")
             entries = _json.loads(raw)
-        except (json.JSONDecodeError, OSError) as exc:
+        except (_json.JSONDecodeError, OSError) as exc:
             logger.error("Failed to read target_repo.json for seeding: %s", exc)
             return 0
 
@@ -781,19 +780,20 @@ class Memory:
             return None
 
         import time
+
         now_ts = time.time()
 
         if excluded_languages:
             placeholders = ",".join(["?"] * len(excluded_languages))
-            query = f"""UPDATE target_repos 
-               SET scanned_at = ? 
-               WHERE repo_url = (SELECT repo_url FROM target_repos WHERE LOWER(language) NOT IN ({placeholders}) ORDER BY COALESCE(scanned_at, 0) ASC, rowid ASC LIMIT 1) 
+            query = f"""UPDATE target_repos
+               SET scanned_at = ?
+               WHERE repo_url = (SELECT repo_url FROM target_repos WHERE LOWER(language) NOT IN ({placeholders}) ORDER BY COALESCE(scanned_at, 0) ASC, rowid ASC LIMIT 1)
                RETURNING *"""
             params = (now_ts, *[lang.lower() for lang in excluded_languages])
         else:
-            query = """UPDATE target_repos 
-               SET scanned_at = ? 
-               WHERE repo_url = (SELECT repo_url FROM target_repos ORDER BY COALESCE(scanned_at, 0) ASC, rowid ASC LIMIT 1) 
+            query = """UPDATE target_repos
+               SET scanned_at = ?
+               WHERE repo_url = (SELECT repo_url FROM target_repos ORDER BY COALESCE(scanned_at, 0) ASC, rowid ASC LIMIT 1)
                RETURNING *"""
             params = (now_ts,)
 
@@ -806,7 +806,9 @@ class Memory:
 
         cols = [d[0] for d in cursor.description]
         result = dict(zip(cols, row, strict=False))
-        logger.info(f"[TARGET ACQUIRED] Repo: {result.get('repo_url')} | Language: {result.get('language')} | Bounty: {result.get('bounty_amount')} | Diamond: {result.get('diamond_target')}")
+        logger.info(
+            f"[TARGET ACQUIRED] Repo: {result.get('repo_url')} | Language: {result.get('language')} | Bounty: {result.get('bounty_amount')} | Diamond: {result.get('diamond_target')}"
+        )
         return result
 
     async def mark_target_status(
@@ -1052,4 +1054,3 @@ class Memory:
             return None
         cols = [d[0] for d in cursor.description]
         return dict(zip(cols, row, strict=False))
-
