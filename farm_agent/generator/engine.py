@@ -409,14 +409,14 @@ class ContributionGenerator:
             # Patch-Correction Retry Loop: if the patcher fails to apply
             # any edits (LLM hallucinated the SEARCH block), re-prompt the
             # LLM with the file content and ask for a corrected patch.
-            MAX_PATCH_RETRIES = self._max_patch_retries
+            max_patch_retries = self._max_patch_retries
             changes = self._parse_changes(response, context)
             patch_attempt = 0
-            while not changes and patch_attempt < MAX_PATCH_RETRIES:
+            while not changes and patch_attempt < max_patch_retries:
                 patch_attempt += 1
                 logger.warning(
                     "Patch attempt %d/%d failed for %s — re-prompting LLM",
-                    patch_attempt, MAX_PATCH_RETRIES, finding.title,
+                    patch_attempt, max_patch_retries, finding.title,
                 )
                 # Build a correction prompt with the actual file content
                 file_content = context.relevant_files.get(finding.file_path, "")
@@ -813,10 +813,10 @@ class ContributionGenerator:
         )
 
         # ── 3-Cycle Anti-Template Retry Loop ──────────────────────────────
-        MAX_CYCLES = 3
+        max_cycles = 3
         retry_warning = ""
 
-        for cycle in range(MAX_CYCLES):
+        for cycle in range(max_cycles):
             current_prompt = user_prompt + retry_warning
 
             try:
@@ -844,7 +844,7 @@ class ContributionGenerator:
                     violations = _FORBIDDEN_PATTERNS.findall(response)[:5]
                     logger.warning(
                         "Lazy code detected (Cycle %d/%d). Violations: %s. Retrying...",
-                        cycle + 1, MAX_CYCLES, violations,
+                        cycle + 1, max_cycles, violations,
                     )
                     retry_warning = (
                         "\n\nSYSTEM WARNING: Your previous attempt was REJECTED because "
@@ -948,10 +948,10 @@ class ContributionGenerator:
         # ── Hard Abort ──────────────────────────────────────────────────
         logger.error(
             "Failed to generate strict code after %d attempts for %s:%d. Aborting.",
-            MAX_CYCLES, vuln.file, vuln.line,
+            max_cycles, vuln.file, vuln.line,
         )
         raise RuntimeError(
-            f"Failed to generate strict code after {MAX_CYCLES} attempts. "
+            f"Failed to generate strict code after {max_cycles} attempts. "
             f"Aborting patch generation for {vuln.file}:{vuln.line}."
         )
 
@@ -1775,12 +1775,12 @@ class ContributionGenerator:
 
                 # ── Discipline Protocol: Block scratchpad/note files ────────────
                 if is_new:
-                    _SCRATCHPAD_PATTERNS = (
+                    _scratchpad_patterns = (
                         "note", "explore", "exploration", "scratchpad",
                         "temp_", "tmp_", "draft", "wip_", "thought",
                     )
                     path_lower = path.lower()
-                    is_scratchpad = any(p in path_lower for p in _SCRATCHPAD_PATTERNS)
+                    is_scratchpad = any(p in path_lower for p in _scratchpad_patterns)
                     # Block .md/.txt placed in src/ or source/ directories
                     is_md_in_src = (
                         path_lower.startswith(("src/", "source/", "app/", "lib/"))
@@ -2023,12 +2023,12 @@ class ContributionGenerator:
                             # of hallucinated full-function rewrites.
                             search_line_count = len(search.split("\n"))
                             replace_line_count = len(replace.split("\n"))
-                            MAX_REPLACE_TO_SEARCH_RATIO = 100.0
-                            if search_line_count > 0 and (replace_line_count / search_line_count) > MAX_REPLACE_TO_SEARCH_RATIO:
+                            max_replace_to_search_ratio = 100.0
+                            if search_line_count > 0 and (replace_line_count / search_line_count) > max_replace_to_search_ratio:
                                 logger.info(
                                     "Diff Minimizer: replace/search ratio %.1f exceeds limit %.1f in %s",
                                     replace_line_count / search_line_count,
-                                    MAX_REPLACE_TO_SEARCH_RATIO,
+                                    max_replace_to_search_ratio,
                                     path,
                                 )
                             if replace_line_count > 50:

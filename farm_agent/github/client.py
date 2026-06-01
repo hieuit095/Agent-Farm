@@ -783,7 +783,7 @@ class GitHubClient:
                         "fetch_user_merged_prs: GET /user returned no login, using provided '%s'",
                         username,
                     )
-        except Exception:
+        except Exception as exc:
             logger.warning(
                 "fetch_user_merged_prs: could not validate username via GET /user: %s — "
                 "using provided '%s'",
@@ -1085,7 +1085,7 @@ class GitHubClient:
                 check_run_id, exc.response.status_code,
             )
             return ""
-        except Exception:
+        except Exception as exc:
             logger.warning("Failed to download CI log for job %d: %s", check_run_id, exc)
             return ""
 
@@ -1197,7 +1197,7 @@ class GitHubClient:
 
         payload = {
             "content": encoded,
-            "encoding": "base64" if encoding != "base64" else "base64",
+            "encoding": "base64",
         }
 
         data = await self._post(f"/repos/{owner}/{repo}/git/blobs", json=payload)
