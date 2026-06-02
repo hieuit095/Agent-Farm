@@ -66,10 +66,19 @@ Agent-Farm provides a robust, pre-configured Docker setup that mounts the Docker
    * *Note: The script will automatically pull the latest codebase, initialize your `.env` configuration file from `.env.example` if missing, build the Docker image, and launch the daemon in the background.*
 
 3. **Configure Settings:**
-   Open the newly created `.env` file and configure your API tokens:
+   Open the newly created `.env` file and configure your required environment variables:
    ```env
+   # Required
    GITHUB_TOKEN=your_github_pat_here
+   MINIMAX_API_KEY=your_minimax_api_key_here
+
+   # Optional
+   GITHUB_SECONDARY_TOKENS=comma_separated_tokens
    OPENROUTER_API_KEY=your_openrouter_key_here
+   TELEGRAM_BOT_TOKEN=your_telegram_bot_token
+   TELEGRAM_CHAT_ID=your_telegram_chat_id
+   SLACK_WEBHOOK_URL=your_slack_webhook
+   DISCORD_WEBHOOK_URL=your_discord_webhook
    ```
 
 4. **Attach to the Agent CLI:**
@@ -88,13 +97,19 @@ Agent-Farm provides a comprehensive suite of Click-based CLI utilities:
 farm_agent run
 
 # Target a specific repository directly
-farm_agent target <repo_url>
+farm_agent target <url>
+
+# Analyze a repository without creating contributions
+farm_agent analyze <url>
 
 # Solve open issues in a specific repository
-farm_agent solve <repo_url>
+farm_agent solve <url>
 
-# Run in Hunt Mode: agresively discover repos and solve issues/bugs
+# Run in Hunt Mode: aggressively discover repos and solve issues/bugs
 farm_agent hunt [--rounds N] [--mode analysis|issues|both]
+
+# Circular Target Loop: deterministic round-robin from target_repo.json
+farm_agent hunt-circular
 
 # Run the Relentless 24/7 Super Human loop (patrols PRs and hunts targets)
 farm_agent superhuman
@@ -102,11 +117,17 @@ farm_agent superhuman
 # Check open PRs for maintainer comments, answer queries, and push CI auto-fixes
 farm_agent patrol
 
-# Scan and close low-quality/garbage PRs submitted on GitHub
+# Scan and close low-quality/garbage PRs submitted on GitHub (Independent tool)
 farm_agent janitor
 
 # Clean up forks where all PRs are closed or merged
 farm_agent cleanup
+
+# Clear run logs and start with a fresh target pipeline queue
+farm_agent reset-db
+
+# Run garbage collection to purge stale knowledge base entries
+farm_agent gc --days 90
 
 # Query current PR queue, runtime statistics, and LLM allocations
 farm_agent status
@@ -114,14 +135,20 @@ farm_agent stats
 farm_agent models
 farm_agent leaderboard
 
+# Show current configuration
+farm_agent config
+
+# Display available formatting templates for PR descriptions
+farm_agent templates
+
 # Run with thorough, standard, or quick presets
 farm_agent profile <profile_name>
 
-# Clear run logs and start with a fresh target pipeline queue
-farm_agent reset-db
+# Send a test notification to configured channels
+farm_agent notify-test
 
-# Run garbage collection to purge stale knowledge base entries
-farm_agent gc --days 90
+# Show Farm-Agent system status — memory, PRs, rate limits
+farm_agent system-status
 ```
 
 ---
