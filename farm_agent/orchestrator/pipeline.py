@@ -186,6 +186,31 @@ def _titles_similar(title_a: str, title_b: str) -> bool:
     # (e.g., "fix race condition in auth" vs "fix race condition in db")
     return overlap / smaller > 0.8
 
+
+def _read_all_repo_files_sync(repo_path: str) -> dict[str, str]:
+    import os
+    from farm_agent.analysis.mapper import CODE_EXTENSIONS
+    file_contents = {}
+    if not os.path.exists(repo_path):
+        return file_contents
+    try:
+        for root, dirs, files in os.walk(repo_path):
+            dirs[:] = [d for d in dirs if not d.startswith(".")]
+            for file in files:
+                ext = os.path.splitext(file)[1].lower()
+                if ext in CODE_EXTENSIONS:
+                    full_path = os.path.join(root, file)
+                    rel_path = os.path.relpath(full_path, repo_path).replace("\\", "/")
+                    try:
+                        with open(full_path, "r", encoding="utf-8", errors="ignore") as f:
+                            file_contents[rel_path] = f.read()
+                    except Exception:
+                        pass
+    except Exception as e:
+        logger.warning("Error reading repository files from path %s: %s", repo_path, e)
+    return file_contents
+
+
 class AdaptiveConcurrencyManager:
     """CRIT-03 FIX: Dynamic concurrency controller with backoff on LLMRateLimitError.
 
@@ -276,7 +301,7 @@ class PipelineResult:
     errors: list[str] = field(default_factory=list)
 
 
-class ContribPipeline:
+class FarmAgentPipeline:
     """Main orchestrator for the contribution pipeline."""
 
     def __init__(self, config: FarmAgentConfig):
@@ -363,9 +388,16 @@ class ContribPipeline:
             memory=self._memory,
         )
 
-        # Generator — now with memory for repo_preferences
+        # Generator — now with memory for repo_preferences and dedicated v4-pro model
+        import copy
+        generator_cfg = copy.copy(self.config.llm)
+        generator_cfg.provider = "openrouter"
+        generator_cfg.model = "deepseek/deepseek-v4-pro"
+        self._generator_llm = create_llm_provider(generator_cfg)
+        self._generator_llm.memory = self._memory
+
         self._generator = ContributionGenerator(
-            llm=self._llm,
+            llm=self._generator_llm,
             config=self.config.contribution,
             memory=self._memory,
             pipeline_config=self.config.pipeline,
@@ -421,6 +453,13 @@ class ContribPipeline:
             await self._github.close()
         if self._llm:
             await self._llm.close()
+        if hasattr(self, "_generator") and self._generator:
+            await self._generator.close()
+        if hasattr(self, "_generator_llm") and self._generator_llm:
+            await self._generator_llm.close()
+        if hasattr(self, "_qa_provider") and self._qa_provider:
+            await self._qa_provider.close()
+            self._qa_provider = None
         if self._memory:
             await self._memory.close()
         # Close any notifier attached to sub-components
@@ -942,11 +981,12 @@ class ContribPipeline:
             failure_context = ""  # Accumulates sandbox/QA failure traces across cycles
 
             import copy
-            qa_cfg = copy.deepcopy(self.config.llm)
-            qa_cfg.model = "moonshotai/kimi-k2.6"
             from farm_agent.llm.provider import create_llm_provider
-            qa_provider = create_llm_provider(qa_cfg)
-            scorer = QAHardcoreScorer(llm=qa_provider)
+            qa_cfg = copy.deepcopy(self.config.llm)
+            qa_cfg.provider = "openrouter"
+            qa_cfg.model = "qwen/qwen3.7-max"
+            self._qa_provider = create_llm_provider(qa_cfg)
+            scorer = QAHardcoreScorer(llm=self._qa_provider)
 
             # ── Diplomat Protocol Task 2: Load repo style guide for QA penalty ──
             repo_style_guide_text = ""
@@ -1142,6 +1182,26 @@ class ContribPipeline:
         logger.info("=" * 60)
         logger.info("📦 Processing: %s", repo.full_name)
 
+        # Early Clone Initialization
+        repo_path = await self._clone_and_patch_repo(repo.clone_url, [], [])
+
+        # Run baseline native tests
+        baseline_exit_code = 0
+        baseline_test_status = "tests_missing"
+        if self._sandbox is not None:
+            logger.info("🧪 [Phase 4] Running baseline native test suite on unpatched repository...")
+            try:
+                baseline_tests = await self._sandbox.run_native_test_suite(repo_path, language=repo.language)
+                baseline_exit_code = baseline_tests.get("exit_code", 0)
+                baseline_test_status = baseline_tests.get("status", "tests_missing")
+                logger.info(
+                    "🧪 [Phase 4] Baseline native tests completed: status=%s, exit_code=%s",
+                    baseline_test_status,
+                    baseline_exit_code,
+                )
+            except Exception as exc:
+                logger.warning("🧪 [Phase 4] Baseline native test suite check failed (non-fatal): %s", exc)
+
         # Check AI policy — skip repos that ban AI-generated PRs
         if await self._check_ai_policy(repo):
             logger.warning(
@@ -1166,6 +1226,20 @@ class ContribPipeline:
             self._github, repo.owner, repo.name,
             memory=self._memory, llm=self._llm,
         )
+        
+        # Discover subsystem documentation files inside the cloned repository
+        await guidelines.discover_subsystem_docs(repo_path)
+
+        # Seed subsystem docs into RepoIndexer (ChromaDB)
+        if guidelines.subsystem_docs:
+            try:
+                from farm_agent.core.rag import RepoIndexer
+                indexer = RepoIndexer()
+                await asyncio.to_thread(indexer.index_repo, repo.full_name, guidelines.subsystem_docs)
+                logger.info("Indexed %d subsystem documentation files in ChromaDB", len(guidelines.subsystem_docs))
+            except Exception as e:
+                logger.warning("Failed to index subsystem docs in ChromaDB: %s", e)
+
         if guidelines.has_guidelines:
             logger.info(
                 "📋 Repo guidelines: commit=%s, %d template sections",
@@ -1216,6 +1290,24 @@ class ContribPipeline:
         self._set_task("analysis")
         analysis = await self._analyzer.analyze(repo)
         result.findings_total = len(analysis.findings)
+
+        # Construct dependency graph for findings
+        if analysis.findings:
+            try:
+                from farm_agent.analysis.mapper import RepoMapper
+                mapper = RepoMapper()
+                
+                # Read all repository files to construct the full dependency graph
+                file_contents = await asyncio.to_thread(_read_all_repo_files_sync, repo_path)
+                mapper.generate_repo_skeleton(file_contents)
+                
+                for finding in analysis.findings:
+                    if finding.file_path:
+                        deps = mapper.get_module_dependencies(finding.file_path)
+                        finding.metadata["module_dependencies"] = deps
+                logger.info("Successfully injected dependency graphs into %d findings", len(analysis.findings))
+            except Exception as e:
+                logger.warning("Failed to construct dependency graph: %s", e)
 
         await self._memory.record_analysis(
             repo.full_name,
@@ -1361,20 +1453,29 @@ class ContribPipeline:
             title_lower = finding.title.lower()
             desc_lower = finding.description.lower() if finding.description else ""
 
-            # ── Gate 1: Impact level — CRITICAL, HIGH, and MEDIUM survive ──────
-            # LOW, TRIVIAL are ALWAYS dropped. No exceptions.
-            # [FIX] Live-fire crucible: lowered threshold from CRITICAL/HIGH-only
-            # to also include MEDIUM to allow Route A PR creation for test repos.
-            if finding.impact_level in (
-                ImpactLevel.TRIVIAL,
-                ImpactLevel.LOW,
-            ):
-                logger.info(
-                    "🗑️ Dropped '%s' — impact_level=%s (only CRITICAL/HIGH/MEDIUM allowed)",
-                    finding.title,
-                    finding.impact_level.value,
-                )
-                continue
+            # ── Gate 1: Severity / Impact level filter ──────
+            # For security fixes (Route A), strictly require Severity.HIGH or Severity.CRITICAL.
+            if finding.type == ContributionType.SECURITY_FIX:
+                if finding.severity not in (Severity.CRITICAL, Severity.HIGH):
+                    logger.info(
+                        "🗑️ Dropped '%s' — severity=%s (only CRITICAL/HIGH allowed for security fixes)",
+                        finding.title,
+                        finding.severity.value,
+                    )
+                    continue
+            else:
+                # Non-security findings (Issue Proposals) retain the previous impact_level filter
+                if finding.impact_level in (
+                    ImpactLevel.TRIVIAL,
+                    ImpactLevel.LOW,
+                ):
+                    logger.info(
+                        "🗑️ Dropped '%s' — impact_level=%s (only CRITICAL/HIGH/MEDIUM allowed for non-security)",
+                        finding.title,
+                        finding.impact_level.value,
+                    )
+                    continue
+
 
             # ── Gate 2: ABSOLUTE DOCS BAN — README_FIX / DOCS_IMPROVE ──────
             # Zero-tolerance: documentation contributions are FORBIDDEN.
@@ -1655,6 +1756,61 @@ class ContribPipeline:
                 result.contributions_generated += 1
                 continue
 
+            # ── Phase 3: Dynamic Bug Verification Gate ─────────────────────
+            logger.info("🧪 [Phase 3] Generating PoC for: %s", finding.title)
+            try:
+                from farm_agent.generator.poc import PoCGenerator
+                from farm_agent.llm.provider import create_llm_provider
+                import copy
+                poc_cfg = copy.copy(self.config.llm)
+                poc_cfg.provider = "openrouter"
+                poc_cfg.model = "deepseek/deepseek-v4-pro"
+                poc_llm = create_llm_provider(poc_cfg)
+                try:
+                    poc_gen = PoCGenerator(poc_llm)
+                    target_file_content = relevant_files.get(finding.file_path, "")
+                    poc_filename, poc_content, run_command = await poc_gen.generate_poc(finding, target_file_content)
+
+                    if poc_filename and poc_content and run_command:
+                        logger.info("🧪 [Phase 3] Executing PoC validation script in sandbox...")
+                        sandbox_result = await self._sandbox.verify_vulnerability_with_poc(
+                            repo_path=repo_path,
+                            poc_filename=poc_filename,
+                            poc_content=poc_content,
+                            run_command=run_command,
+                        )
+                        
+                        logger.info("🧪 [Phase 3] Evaluating PoC validation outcome via LLM...")
+                        is_triggered, reason = await poc_gen.evaluate_poc_result(
+                            finding=finding,
+                            poc_content=poc_content,
+                            sandbox_output=sandbox_result,
+                        )
+                        
+                        if not is_triggered:
+                            logger.warning(
+                                "🚫 [Phase 3] Vulnerability verification FAILED (bug could not be triggered). "
+                                "Reason: %s. Dropping finding '%s' as False Positive.",
+                                reason,
+                                finding.title,
+                            )
+                            if self._memory:
+                                await self._memory.add_filter_lesson(
+                                    repo.full_name,
+                                    1,  # Layer 1 lesson classification
+                                    target_file_content,
+                                    f"PoC did not trigger bug. Reason: {reason}",
+                                )
+                            continue
+                        
+                        logger.info("✅ [Phase 3] Vulnerability verified successfully: %s. Proceeding to fix generation.", reason)
+                    else:
+                        logger.warning("⚠️ [Phase 3] PoC Generator did not return a valid script. Falling back to direct fix generation.")
+                finally:
+                    await poc_llm.close()
+            except Exception as e:
+                logger.warning("⚠️ [Phase 3] PoC verification gate encountered an error: %s. Falling back to direct fix generation.", e)
+
             logger.info("🛠️ Generating fix for: %s", finding.title)
             self._set_task("code_gen")
             contribution = await self._generator.generate(
@@ -1698,31 +1854,73 @@ class ContribPipeline:
                         max_retries,
                         contribution.title,
                     )
-                    sandbox_result = await self._sandbox.run_in_sandbox(
-                        repo_path=await self._clone_and_patch_repo(
-                            repo.clone_url,
-                            contribution.changes,
-                            contribution.tests_added,
-                        ),
-                        command=None,  # Auto-select via Polyglot Guillotine
+                    patched_repo_path = await self._clone_and_patch_repo(
+                        repo.clone_url,
+                        contribution.changes,
+                        contribution.tests_added,
                     )
 
-                    # Determine success
-                    if isinstance(sandbox_result, dict):
-                        is_success = sandbox_result.get("exit_code") == 0
-                        raw_stdout = sandbox_result.get("stdout", "")
-                        raw_stderr = sandbox_result.get("stderr", "")
-                    else:
-                        is_success = getattr(sandbox_result, "exit_code", -1) == 0
-                        raw_stdout = getattr(sandbox_result, "stdout", "")
-                        raw_stderr = getattr(sandbox_result, "stderr", "")
+                    is_success = True
+                    error_log = ""
 
-                    out_trunc = raw_stdout[:500] if raw_stdout else ""
-                    err_trunc = raw_stderr[-2000:] if raw_stderr else ""
-                    error_log = f"STDOUT:\n{out_trunc}\n\nSTDERR:\n{err_trunc}"
+                    # --- Pass 1: Efficacy Validation (PoC checks) ---
+                    if 'poc_filename' in locals() and poc_filename and poc_content and run_command:
+                        logger.info("🧪 [Phase 4: Efficacy] Executing PoC validation script on patched codebase...")
+                        poc_result = await self._sandbox.verify_vulnerability_with_poc(
+                            repo_path=patched_repo_path,
+                            poc_filename=poc_filename,
+                            poc_content=poc_content,
+                            run_command=run_command,
+                        )
+                        logger.info("🧪 [Phase 4: Efficacy] Evaluating PoC validation outcome via LLM...")
+                        is_triggered, reason = await poc_gen.evaluate_poc_result(
+                            finding=finding,
+                            poc_content=poc_content,
+                            sandbox_output=poc_result,
+                        )
+                        if is_triggered:
+                            logger.warning("🚫 [Phase 4: Efficacy] Patch FAILED efficacy validation (vulnerability still triggered!). Reason: %s", reason)
+                            is_success = False
+                            error_log = f"EFFICACY FAILURE: The vulnerability could still be triggered after applying the patch. Reason: {reason}\nPoC Stderr: {poc_result.get('stderr')}"
+                        else:
+                            logger.info("✅ [Phase 4: Efficacy] Patch PASSED efficacy validation.")
+
+                    # --- Pass 2: Regression Auditor (Native tests checks) ---
+                    if is_success:
+                        logger.info("🧪 [Phase 4: Regression] Running native test suite on patched codebase...")
+                        patched_tests = await self._sandbox.run_native_test_suite(patched_repo_path, language=repo.language)
+                        patched_exit_code = patched_tests.get("exit_code", 0)
+                        patched_status = patched_tests.get("status", "tests_missing")
+                        
+                        if baseline_exit_code == 0 and patched_exit_code != 0 and patched_status == "failed":
+                            logger.warning("🚫 [Phase 4: Regression] Patch FAILED native tests (regression detected!). Status: %s, Exit Code: %s", patched_status, patched_exit_code)
+                            is_success = False
+                            raw_stderr = patched_tests.get("stderr", "")
+                            raw_stdout = patched_tests.get("stdout", "")
+                            out_trunc = raw_stdout[:500] if raw_stdout else ""
+                            err_trunc = raw_stderr[-2000:] if raw_stderr else ""
+                            error_log = f"REGRESSION FAILURE: Native test suite failed after applying the patch (it passed in the baseline).\nSTDOUT:\n{out_trunc}\n\nSTDERR:\n{err_trunc}"
+                        elif patched_status == "tests_missing":
+                            logger.info("🧪 [Phase 4: Compile Check] No tests found. Running basic compilation/syntax check in sandbox...")
+                            compile_result = await self._sandbox.run_in_sandbox(
+                                repo_path=patched_repo_path,
+                                command=None,
+                            )
+                            if compile_result.get("exit_code") != 0:
+                                logger.warning("🚫 [Phase 4: Compile Check] Patch FAILED compilation/syntax check!")
+                                is_success = False
+                                raw_stderr = compile_result.get("stderr", "")
+                                raw_stdout = compile_result.get("stdout", "")
+                                out_trunc = raw_stdout[:500] if raw_stdout else ""
+                                err_trunc = raw_stderr[-2000:] if raw_stderr else ""
+                                error_log = f"COMPILATION FAILURE: Patch failed basic syntax/compilation check.\nSTDOUT:\n{out_trunc}\n\nSTDERR:\n{err_trunc}"
+                            else:
+                                logger.info("✅ [Phase 4: Compile Check] Patch PASSED compilation check.")
+                        else:
+                            logger.info("✅ [Phase 4: Regression] Patch PASSED native tests (status=%s, exit_code=%s).", patched_status, patched_exit_code)
 
                     if is_success:
-                        logger.info("✅ Sandbox validated — patch passes CI/tests.")
+                        logger.info("✅ Sandbox validated — patch passes Efficacy, Regression, and Compilation checks.")
                         break
 
                     logger.warning(
@@ -2587,10 +2785,10 @@ class ContribPipeline:
         import re
         
         try:
-            kimi_cfg = copy.copy(self.config.llm)
-            kimi_cfg.provider = "openrouter"
-            kimi_cfg.model = "moonshotai/kimi-k2.5"
-            kimi_provider = create_llm_provider(kimi_cfg)
+            appraiser_cfg = copy.copy(self.config.llm)
+            appraiser_cfg.provider = "openrouter"
+            appraiser_cfg.model = "qwen/qwen3.7-max"
+            appraiser_provider = create_llm_provider(appraiser_cfg)
         except Exception as e:
             logger.warning("Layer 1 instantiation failed: %s. Failing closed.", e)
             return False, f"Instantiation failed: {e}"
@@ -2611,8 +2809,8 @@ class ContribPipeline:
         )
 
         try:
-            response = await kimi_provider.complete(prompt, system=system_prompt, temperature=0.1)
-            await kimi_provider.close()
+            response = await appraiser_provider.complete(prompt, system=system_prompt, temperature=0.1)
+            await appraiser_provider.close()
             
             response_text = response.strip()
             fence_match = re.search(r"```(?:json)?\s*(.*?)```", response_text, re.DOTALL | re.IGNORECASE)
@@ -2628,7 +2826,7 @@ class ContribPipeline:
             critique = parsed.get("expert_critique", "No critique provided")
             
             if not is_genuine:
-                logger.warning("Dropped by Layer 1 Appraiser (Kimi): %s", critique)
+                logger.warning("Dropped by Layer 1 Appraiser (Qwen): %s", critique)
                 return False, critique
             return True, ""
             
@@ -2650,7 +2848,7 @@ class ContribPipeline:
         try:
             gem_cfg = copy.copy(self.config.llm)
             gem_cfg.provider = "openrouter"
-            gem_cfg.model = "google/gemini-3.1-pro-preview"
+            gem_cfg.model = "google/gemini-3.5-flash"
             gem_provider = create_llm_provider(gem_cfg)
         except Exception as e:
             logger.warning("Layer 2 instantiation failed: %s. Failing closed.", e)
@@ -2695,7 +2893,7 @@ class ContribPipeline:
             reason = parsed.get("rejection_reason", "No reason provided")
             
             if not approved:
-                logger.warning("Vetoed by Layer 2 Supreme Auditor (Gemini): %s", reason)
+                logger.warning("Vetoed by Layer 2 Supreme Auditor (Gemini 3.5 Flash): %s", reason)
                 return False, reason
             return True, ""
             
@@ -2897,6 +3095,15 @@ class ContribPipeline:
         if cache_key in self._clone_cache:
             clone_path = self._clone_cache[cache_key]
             logger.debug("Reusing cached clone at %s", clone_path)
+            # Revert any previous patch modifications to start with a clean baseline state!
+            try:
+                def _revert_local_changes() -> None:
+                    subprocess.run(["git", "reset", "--hard", "HEAD"], cwd=clone_path, capture_output=True, text=True, timeout=30)
+                    subprocess.run(["git", "clean", "-fd"], cwd=clone_path, capture_output=True, text=True, timeout=30)
+                await asyncio.to_thread(_revert_local_changes)
+                logger.info("Successfully reverted cached clone %s to baseline state", clone_path)
+            except Exception as e:
+                logger.warning("Failed to revert local changes in cached clone %s: %s", clone_path, e)
         else:
             # Create a unique temp directory for this clone
             base_temp = tempfile.gettempdir()

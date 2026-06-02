@@ -1026,7 +1026,7 @@ class BloodhoundAnalyzer:
             logger.debug("No OpenRouter API key configured — will use default LLM for Red Team audit")
             return None
 
-        red_team_model = getattr(self._config, "red_team_model", "cognitivecomputations/dolphin-mistral-24b-venice-edition:free")
+        red_team_model = getattr(self._config, "red_team_model", "deepseek/deepseek-v4-flash")
         rt_config = LLMConfig(
             provider="openrouter",
             model=red_team_model,

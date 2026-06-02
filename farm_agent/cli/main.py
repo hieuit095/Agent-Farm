@@ -130,9 +130,9 @@ def run(ctx, language, stars, max_prs, dry_run):
     console.print(f"   LLM: {config.llm.provider} ({config.llm.model})")
     console.print()
 
-    from farm_agent.orchestrator.pipeline import ContribPipeline
+    from farm_agent.orchestrator.pipeline import FarmAgentPipeline
 
-    pipeline = ContribPipeline(config)
+    pipeline = FarmAgentPipeline(config)
     result = asyncio.run(pipeline.run(dry_run=dry_run))
 
     # Print results
@@ -165,9 +165,9 @@ def target(ctx, url, types, dry_run):
     console.print(f"\n🎯 Targeting: {url} ({mode})")
     console.print(f"   LLM: {config.llm.provider} ({config.llm.model})\n")
 
-    from farm_agent.orchestrator.pipeline import ContribPipeline
+    from farm_agent.orchestrator.pipeline import FarmAgentPipeline
 
-    pipeline = ContribPipeline(config)
+    pipeline = FarmAgentPipeline(config)
     result = asyncio.run(pipeline.run_single(url, dry_run=dry_run))
     _print_result(result, dry_run)
 
@@ -221,9 +221,9 @@ def hunt(ctx, rounds, delay, language, mode, dry_run):
     console.print(f"   LLM: {config.llm.provider} ({config.llm.model})")
     console.print()
 
-    from farm_agent.orchestrator.pipeline import ContribPipeline
+    from farm_agent.orchestrator.pipeline import FarmAgentPipeline
 
-    pipeline = ContribPipeline(config)
+    pipeline = FarmAgentPipeline(config)
     result = asyncio.run(pipeline.hunt(rounds=rounds, delay_sec=delay, dry_run=dry_run, mode=mode))
     _print_result(result, dry_run)
 
@@ -272,9 +272,9 @@ def hunt_circular(ctx, json_path, mode, dry_run):
     console.print(f"   LLM: {config.llm.provider} ({config.llm.model})")
     console.print()
 
-    from farm_agent.orchestrator.pipeline import ContribPipeline
+    from farm_agent.orchestrator.pipeline import FarmAgentPipeline
 
-    pipeline = ContribPipeline(config)
+    pipeline = FarmAgentPipeline(config)
     result = asyncio.run(
         pipeline.run_circular(json_path=json_path, dry_run=dry_run, mode=mode)
     )
@@ -324,7 +324,11 @@ def patrol(ctx, dry_run, pr_number):
         memory = Memory(config.storage.resolved_db_path)
         await memory.init()
         github = GitHubClient(token=config.github.token)
-        llm = create_llm_provider(config.llm)
+        import copy
+        patrol_cfg = copy.copy(config.llm)
+        patrol_cfg.provider = "openrouter"
+        patrol_cfg.model = "google/gemini-3.5-flash"
+        llm = create_llm_provider(patrol_cfg)
 
         try:
             # Get all open PRs from memory
@@ -413,10 +417,10 @@ def superhuman(ctx, time_warp, dry_run, target_repo):
 
     from farm_agent.orchestrator.human import SuperHumanLoop
     from farm_agent.orchestrator.memory import Memory
-    from farm_agent.orchestrator.pipeline import ContribPipeline
+    from farm_agent.orchestrator.pipeline import FarmAgentPipeline
 
     async def _run():
-        pipeline = ContribPipeline(config)
+        pipeline = FarmAgentPipeline(config)
         memory = Memory(config.storage.resolved_db_path)
         await memory.init()
 
@@ -600,9 +604,9 @@ def analyze(ctx, url):
     console.print(f"\n🔬 Analyzing: {url}")
     console.print(f"   LLM: {config.llm.provider} ({config.llm.model})\n")
 
-    from farm_agent.orchestrator.pipeline import ContribPipeline
+    from farm_agent.orchestrator.pipeline import FarmAgentPipeline
 
-    pipeline = ContribPipeline(config)
+    pipeline = FarmAgentPipeline(config)
     result = asyncio.run(pipeline.analyze_only(url))
 
     if not result:
@@ -1036,10 +1040,10 @@ def vips(ctx, no_sync):
     async def _run():
         from farm_agent.orchestrator.human import SuperHumanLoop
         from farm_agent.orchestrator.memory import Memory
-        from farm_agent.orchestrator.pipeline import ContribPipeline
+        from farm_agent.orchestrator.pipeline import FarmAgentPipeline
 
         # Build minimal pipeline + memory for the sync
-        pipeline = ContribPipeline(config)
+        pipeline = FarmAgentPipeline(config)
         memory = Memory(config.storage.resolved_db_path)
         await memory.init()
 
@@ -1231,10 +1235,10 @@ def run_profile(ctx, name, dry_run, list_all):
         dry_run = True
 
     from farm_agent.orchestrator.pipeline import (
-        ContribPipeline,
+        FarmAgentPipeline,
     )
 
-    pipeline = ContribPipeline(config)
+    pipeline = FarmAgentPipeline(config)
     result = asyncio.run(pipeline.run(dry_run=dry_run))
     _print_result(result, dry_run)
 

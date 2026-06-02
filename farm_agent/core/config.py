@@ -53,7 +53,7 @@ class LLMConfig(BaseModel):
     """LLM provider configuration."""
 
     provider: Literal["openrouter"] = "openrouter"
-    model: str = "deepseek/deepseek-v3.2"
+    model: str = "deepseek/deepseek-v4-flash"
     api_key: str = ""
     temperature: float = 0.3
     max_tokens: int = 8192
@@ -61,7 +61,7 @@ class LLMConfig(BaseModel):
 
     # OpenRouter (Red Team engine for Bloodhound audits)
     openrouter_api_key: str = ""
-    red_team_model: str = "cognitivecomputations/dolphin-mistral-24b-venice-edition:free"
+    red_team_model: str = "deepseek/deepseek-v4-flash"
     max_snippet_chars: int = 15000
 
     @model_validator(mode="after")
@@ -70,8 +70,11 @@ class LLMConfig(BaseModel):
         if not self.openrouter_api_key:
             self.openrouter_api_key = os.environ.get("OPENROUTER_API_KEY", "")
 
+        if not self.api_key:
+            self.api_key = os.environ.get("OPENROUTER_API_KEY", "")
+
         if self.model == "gemini-2.5-flash":
-             self.model = "deepseek/deepseek-v3.2"
+             self.model = "deepseek/deepseek-v4-flash"
         return self
 
 
@@ -81,7 +84,7 @@ class AnalysisConfig(BaseModel):
     enabled_analyzers: list[str] = Field(
         default_factory=lambda: ["security", "code_quality", "docs", "ui_ux"]
     )
-    severity_threshold: Literal["low", "medium", "high", "critical"] = "medium"
+    severity_threshold: Literal["low", "medium", "high", "critical"] = "high"
     max_file_size_kb: int = 500
     skip_patterns: list[str] = Field(
         default_factory=lambda: ["*.min.js", "*.min.css", "vendor/*", "node_modules/*", "*.lock"]
@@ -103,7 +106,7 @@ class AnalysisConfig(BaseModel):
     )
 
     # Red Team engine (Bloodhound White-Hat audits via OpenRouter)
-    red_team_model: str = "cognitivecomputations/dolphin-mistral-24b-venice-edition:free"
+    red_team_model: str = "deepseek/deepseek-v4-flash"
     red_team_daily_limit: int = 1000
 
     # Semgrep radar

@@ -43,6 +43,9 @@ MAX_OUTPUT_CHARS = 100_000
 class RepoMapper:
     """Generates a structural skeleton map of a repository."""
 
+    def __init__(self):
+        self.file_contents: dict[str, str] = {}
+
     async def generate_map(
         self,
         file_tree: list,
@@ -76,6 +79,7 @@ class RepoMapper:
 
         output_parts: list[str] = []
         total_chars = 0
+        self.file_contents = {}
 
         for node in code_files:
             if total_chars >= MAX_OUTPUT_CHARS:
@@ -84,6 +88,7 @@ class RepoMapper:
 
             try:
                 content = await fetch_content(node.path)
+                self.file_contents[node.path] = content
             except Exception:
                 logger.debug("RepoMapper: could not fetch %s, skipping", node.path)
                 continue
@@ -339,6 +344,7 @@ class RepoMapper:
         Returns:
             Formatted skeleton string (same layout as ``generate_map``).
         """
+        self.file_contents = file_contents
         output_parts: list[str] = []
         total_chars = 0
         file_count = 0
@@ -525,6 +531,41 @@ class RepoMapper:
         for candidate in candidates:
             if candidate in all_file_contents:
                 return candidate
+
+        # Go support
+        if "/" in module and not module.startswith(".") and not module.startswith("/"):
+            parts = module.split("/")
+            for i in range(len(parts)):
+                subpath = "/".join(parts[i:])
+                go_candidates = [
+                    subpath,
+                    f"{subpath}.go",
+                    f"{subpath}/main.go",
+                ]
+                for c in go_candidates:
+                    for file_path in all_file_contents:
+                        if file_path.endswith(c):
+                            return file_path
+
+        # Rust support
+        if "::" in module or module == "crate":
+            module_clean = module.replace("crate::", "").replace("::", "/")
+            parts = module_clean.split("/")
+            module_clean_parent = "/".join(parts[:-1]) if len(parts) > 1 else ""
+            
+            rust_candidates = []
+            for m in [module_clean, module_clean_parent]:
+                if m:
+                    rust_candidates.extend([
+                        f"src/{m}.rs",
+                        f"src/{m}/mod.rs",
+                        f"{m}.rs",
+                        f"{m}/mod.rs",
+                    ])
+            for c in rust_candidates:
+                if c in all_file_contents:
+                    return c
+
         return None
 
     def _path_to_module_variants(self, path: str) -> list[str]:
@@ -579,3 +620,229 @@ class RepoMapper:
             if re.search(rf"""["'`]{re.escape(mv)}["'`]""", content):
                 return True
         return False
+
+    def get_module_dependencies(
+        self,
+        filepath: str,
+        file_contents: dict[str, str] = None,
+    ) -> dict[str, list[str]]:
+        """Construct a lightweight dependency graph for the target file.
+
+        Args:
+            filepath: Target file to trace dependencies for.
+            file_contents: Optional dictionary of file path -> content. If not provided,
+                          uses the instance's cached file_contents.
+
+        Returns:
+            A dictionary containing:
+            - "imports": files that the target file imports/depends on.
+            - "calls": files whose functions the target file calls.
+            - "dependents": other files in the repo that import or call this file.
+        """
+        import os
+        contents = file_contents if file_contents is not None else self.file_contents
+        if not contents or filepath not in contents:
+            return {"imports": [], "calls": [], "dependents": []}
+
+        content = contents[filepath]
+        ext = self._get_ext(filepath)
+
+        imports_set = set()
+        calls_set = set()
+
+        if ext == ".py":
+            imports_set, calls_set = self._extract_python_deps(content)
+        elif ext == ".go":
+            imports_set, calls_set = self._extract_go_deps(content)
+        elif ext == ".rs":
+            imports_set, calls_set = self._extract_rust_deps(content)
+        elif ext in (".js", ".ts", ".jsx", ".tsx"):
+            js_imports = self._extract_js_ts_imports(content)
+            imports_set = set(js_imports)
+            for match in re.finditer(r"\b([a-zA-Z_]\w*)\.[a-zA-Z_]\w*\(", content):
+                calls_set.add(match.group(1))
+
+        resolved_imports = []
+        resolved_calls = []
+
+        # 1. Resolve imports to file paths
+        for imp in imports_set:
+            res = self._resolve_module_to_path(imp, filepath, contents)
+            if res and res != filepath and res not in resolved_imports:
+                resolved_imports.append(res)
+
+        # 2. Resolve calls to file paths
+        for call in calls_set:
+            resolved_call_path = None
+            for imp in imports_set:
+                if imp.endswith("::" + call) or imp.endswith("." + call) or imp == call:
+                    resolved_call_path = self._resolve_module_to_path(imp, filepath, contents)
+                    if resolved_call_path:
+                        break
+            
+            if resolved_call_path:
+                if resolved_call_path != filepath and resolved_call_path not in resolved_calls:
+                    resolved_calls.append(resolved_call_path)
+                continue
+
+            for fpath in contents:
+                if fpath == filepath:
+                    continue
+                base = os.path.splitext(os.path.basename(fpath))[0]
+                if base.lower() == call.lower() and fpath not in resolved_calls:
+                    resolved_calls.append(fpath)
+                    break
+            else:
+                res = self._resolve_module_to_path(call, filepath, contents)
+                if res and res != filepath and res not in resolved_calls:
+                    resolved_calls.append(res)
+
+        # 3. Find dependents (files that import or call the target file)
+        dependents = []
+        target_basename = os.path.splitext(os.path.basename(filepath))[0]
+
+        for other_path, other_content in contents.items():
+            if other_path == filepath:
+                continue
+
+            other_ext = self._get_ext(other_path)
+            o_imports = set()
+            o_calls = set()
+
+            if other_ext == ".py":
+                o_imports, o_calls = self._extract_python_deps(other_content)
+            elif other_ext == ".go":
+                o_imports, o_calls = self._extract_go_deps(other_content)
+            elif other_ext == ".rs":
+                o_imports, o_calls = self._extract_rust_deps(other_content)
+            elif other_ext in (".js", ".ts", ".jsx", ".tsx"):
+                js_imports = self._extract_js_ts_imports(other_content)
+                o_imports = set(js_imports)
+                for match in re.finditer(r"\b([a-zA-Z_]\w*)\.[a-zA-Z_]\w*\(", other_content):
+                    o_calls.add(match.group(1))
+
+            o_resolved_imports = []
+            for imp in o_imports:
+                res = self._resolve_module_to_path(imp, other_path, contents)
+                if res:
+                    o_resolved_imports.append(res)
+
+            is_dep = filepath in o_resolved_imports
+
+            if not is_dep:
+                for call in o_calls:
+                    if call.lower() == target_basename.lower():
+                        is_dep = True
+                        break
+                    for imp in o_imports:
+                        if imp.endswith("::" + call) or imp.endswith("." + call) or imp == call:
+                            if self._resolve_module_to_path(imp, other_path, contents) == filepath:
+                                is_dep = True
+                                break
+                    if is_dep:
+                        break
+
+            if is_dep and other_path not in dependents:
+                dependents.append(other_path)
+
+        return {
+            "imports": sorted(resolved_imports)[:10],
+            "calls": sorted(resolved_calls)[:10],
+            "dependents": sorted(dependents)[:10]
+        }
+
+    def _extract_python_deps(self, content: str) -> tuple[set[str], set[str]]:
+        """Extract imported modules and called modules from Python content via AST."""
+        imports = set()
+        calls = set()
+        try:
+            tree = ast.parse(content)
+        except Exception:
+            return self._extract_python_deps_regex(content)
+
+        from_import_map = {}
+
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    imports.add(alias.name)
+            elif isinstance(node, ast.ImportFrom):
+                if node.module:
+                    imports.add(node.module)
+                    for alias in node.names:
+                        from_import_map[alias.name] = node.module
+            elif isinstance(node, ast.Call):
+                if isinstance(node.func, ast.Attribute):
+                    if isinstance(node.func.value, ast.Name):
+                        caller_name = node.func.value.id
+                        if caller_name in from_import_map:
+                            calls.add(from_import_map[caller_name])
+                        else:
+                            calls.add(caller_name)
+                elif isinstance(node.func, ast.Name):
+                    if node.func.id in from_import_map:
+                        calls.add(from_import_map[node.func.id])
+
+        return imports, calls
+
+    def _extract_python_deps_regex(self, content: str) -> tuple[set[str], set[str]]:
+        """Fallback regex parser for Python dependencies."""
+        imports = set()
+        calls = set()
+        for match in self._PY_IMPORT_REGEX.finditer(content):
+            mod = match.group(1) or ""
+            if not mod:
+                for part in (match.group(2) or "").split(","):
+                    m = part.strip().split()[0] if part.strip() else ""
+                    if m:
+                        imports.add(m)
+            else:
+                imports.add(mod)
+
+        for match in re.finditer(r"\b([a-zA-Z_]\w*)\.[a-zA-Z_]\w*\(", content):
+            calls.add(match.group(1))
+
+        return imports, calls
+
+    def _extract_go_deps(self, content: str) -> tuple[set[str], set[str]]:
+        """Extract package imports and calls from Go source code."""
+        imports = set()
+        calls = set()
+
+        for match in re.finditer(r'import\s+"([^"]+)"', content):
+            imports.add(match.group(1))
+
+        multi_line_import = re.search(r'import\s*\((.*?)\)', content, re.DOTALL)
+        if multi_line_import:
+            for line in multi_line_import.group(1).split("\n"):
+                line = line.strip()
+                if line and not line.startswith("//"):
+                    m = re.search(r'"([^"]+)"', line)
+                    if m:
+                        imports.add(m.group(1))
+
+        for match in re.finditer(r"\b([a-zA-Z_]\w*)\.[A-Z]\w*\(", content):
+            calls.add(match.group(1))
+
+        return imports, calls
+
+    def _extract_rust_deps(self, content: str) -> tuple[set[str], set[str]]:
+        """Extract module imports and calls from Rust source code."""
+        imports = set()
+        calls = set()
+
+        for match in re.finditer(r'(?:pub\s+)?use\s+([\w:]+)', content):
+            path = match.group(1)
+            imports.add(path)
+
+        for match in re.finditer(r'(?:pub\s+)?use\s+([\w:]+)::\{([^}]+)\}', content):
+            base_path = match.group(1)
+            for item in match.group(2).split(","):
+                item = item.strip()
+                if item:
+                    imports.add(f"{base_path}::{item}")
+
+        for match in re.finditer(r"\b([a-zA-Z_]\w*)::[a-zA-Z_]\w*\(", content):
+            calls.add(match.group(1))
+
+        return imports, calls

@@ -1,6 +1,6 @@
 {
   "version": "1.0.0",
-  "lastScanned": 1776225081698,
+  "lastScanned": 1776820396124,
   "projectRoot": "c:\\Users\\USER\\Documents\\GitHub\\Agent-Farm",
   "techStack": {
     "languages": [
@@ -49,7 +49,6 @@
     "isMonorepo": false,
     "workspaces": [],
     "mainDirectories": [
-      "docs",
       "scripts",
       "tests"
     ],
@@ -60,55 +59,29 @@
   },
   "customNotes": [],
   "directoryMap": {
-    "daily_log": {
-      "path": "daily_log",
-      "purpose": null,
-      "fileCount": 0,
-      "lastAccessed": 1776225081674,
-      "keyFiles": []
-    },
     "data": {
       "path": "data",
       "purpose": "Data files",
-      "fileCount": 3,
-      "lastAccessed": 1776225081677,
+      "fileCount": 1,
+      "lastAccessed": 1776820396076,
       "keyFiles": [
-        "memory.db",
-        "memory.db-shm",
-        "memory.db-wal"
-      ]
-    },
-    "docs": {
-      "path": "docs",
-      "purpose": "Documentation",
-      "fileCount": 2,
-      "lastAccessed": 1776225081677,
-      "keyFiles": [
-        "ARCHITECTURE.md",
-        "HUONG_DAN_SU_DUNG.md"
+        "memory.db"
       ]
     },
     "farm_agent": {
       "path": "farm_agent",
       "purpose": null,
       "fileCount": 1,
-      "lastAccessed": 1776225081678,
+      "lastAccessed": 1776820396077,
       "keyFiles": [
         "__init__.py"
       ]
-    },
-    "logs": {
-      "path": "logs",
-      "purpose": null,
-      "fileCount": 0,
-      "lastAccessed": 1776225081678,
-      "keyFiles": []
     },
     "scripts": {
       "path": "scripts",
       "purpose": "Build/utility scripts",
       "fileCount": 5,
-      "lastAccessed": 1776225081678,
+      "lastAccessed": 1776820396077,
       "keyFiles": [
         "cleanup_forks.py",
         "inject_ci_trap.py",
@@ -120,15 +93,17 @@
     "secret_findings": {
       "path": "secret_findings",
       "purpose": null,
-      "fileCount": 0,
-      "lastAccessed": 1776225081679,
-      "keyFiles": []
+      "fileCount": 1,
+      "lastAccessed": 1776820396077,
+      "keyFiles": [
+        "mock_repo.json"
+      ]
     },
     "sg-extract": {
       "path": "sg-extract",
       "purpose": null,
       "fileCount": 2,
-      "lastAccessed": 1776225081679,
+      "lastAccessed": 1776820396078,
       "keyFiles": [
         "ast-grep",
         "sg"
@@ -137,10 +112,22 @@
     "tests": {
       "path": "tests",
       "purpose": "Test files",
-      "fileCount": 1,
-      "lastAccessed": 1776225081679,
+      "fileCount": 4,
+      "lastAccessed": 1776820396079,
       "keyFiles": [
-        "test_async_io_pipeline.py"
+        "simulate_e2e_pipeline.py",
+        "test_async_io_pipeline.py",
+        "test_model_routing.py",
+        "test_omni_e2e_pipeline.py"
+      ]
+    },
+    "__pycache__": {
+      "path": "__pycache__",
+      "purpose": null,
+      "fileCount": 1,
+      "lastAccessed": 1776820396079,
+      "keyFiles": [
+        "test_debug.cpython-314.pyc"
       ]
     }
   },

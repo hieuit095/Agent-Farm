@@ -22,22 +22,22 @@ PROFILE_DIRS = [
 ]
 
 
-class ContribProfile(BaseModel):
+class ContributionProfile(BaseModel):
     """A named contribution profile."""
 
     name: str
     description: str = ""
     analyzers: list[str] = Field(default_factory=list)
     contribution_types: list[str] = Field(default_factory=list)
-    severity_threshold: str = "medium"
+    severity_threshold: str = "high"
     max_prs_per_day: int = 10
     max_repos_per_run: int = 5
     dry_run: bool = False
 
 
 # Built-in profiles
-BUILTIN_PROFILES: dict[str, ContribProfile] = {
-    "security-focused": ContribProfile(
+BUILTIN_PROFILES: dict[str, ContributionProfile] = {
+    "security-focused": ContributionProfile(
         name="security-focused",
         description=("Focus on security vulnerabilities and fixes"),
         analyzers=["security"],
@@ -48,7 +48,7 @@ BUILTIN_PROFILES: dict[str, ContribProfile] = {
         severity_threshold="high",
         max_prs_per_day=5,
     ),
-    "docs-focused": ContribProfile(
+    "docs-focused": ContributionProfile(
         name="docs-focused",
         description=("Focus on documentation improvements"),
         analyzers=["docs"],
@@ -58,7 +58,7 @@ BUILTIN_PROFILES: dict[str, ContribProfile] = {
         severity_threshold="low",
         max_prs_per_day=10,
     ),
-    "full-scan": ContribProfile(
+    "full-scan": ContributionProfile(
         name="full-scan",
         description="Run all analyzers with low threshold",
         analyzers=[
@@ -79,7 +79,7 @@ BUILTIN_PROFILES: dict[str, ContribProfile] = {
         severity_threshold="low",
         max_repos_per_run=10,
     ),
-    "gentle": ContribProfile(
+    "gentle": ContributionProfile(
         name="gentle",
         description=("Low-impact mode: small fixes, dry run by default"),
         analyzers=["docs", "code_quality"],
@@ -95,7 +95,7 @@ BUILTIN_PROFILES: dict[str, ContribProfile] = {
 }
 
 
-def get_profile(name: str) -> ContribProfile | None:
+def get_profile(name: str) -> ContributionProfile | None:
     """Get a profile by name (built-in or custom)."""
     # Check built-in first
     if name in BUILTIN_PROFILES:
@@ -109,7 +109,7 @@ def get_profile(name: str) -> ContribProfile | None:
     return None
 
 
-def list_profiles() -> list[ContribProfile]:
+def list_profiles() -> list[ContributionProfile]:
     """List all available profiles (built-in + custom)."""
     profiles = dict(BUILTIN_PROFILES)
 
@@ -130,7 +130,7 @@ def list_profiles() -> list[ContribProfile]:
 
 def apply_profile(
     config_data: dict[str, Any],
-    profile: ContribProfile,
+    profile: ContributionProfile,
 ) -> dict[str, Any]:
     """Apply a profile's settings to config data."""
     if profile.analyzers:
@@ -143,9 +143,9 @@ def apply_profile(
     return config_data
 
 
-def _load_profile(path: Path) -> ContribProfile | None:
+def _load_profile(path: Path) -> ContributionProfile | None:
     """Load a profile from a YAML file."""
     raw = yaml.safe_load(path.read_text(encoding="utf-8"))
     if not raw or not isinstance(raw, dict):
         return None
-    return ContribProfile(**raw)
+    return ContributionProfile(**raw)

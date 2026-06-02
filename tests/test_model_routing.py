@@ -31,7 +31,7 @@ import pytest
 # ── Stub out heavy optional dependencies before any farm_agent import ──────────
 _STUB_MODULES = [
     "yaml", "pydantic", "pydantic.model_validator", "pydantic_settings",
-    "httpx", "aiohttp", "aiosqlite", "docker", "apscheduler", "chromadb",
+    "httpx", "aiohttp", "aiosqlite", "docker", "docker.errors", "docker.models.containers", "apscheduler", "chromadb",
     "numpy", "git", "semgrep", "openai", "anthropic",
     "google", "google.genai",
     "apscheduler.schedulers", "apscheduler.schedulers.asyncio",
@@ -41,11 +41,11 @@ for _mod in _STUB_MODULES:
         sys.modules[_mod] = MagicMock()
 
 # ── Model string constants (the ground truth) ─────────────────────────────────
-MODEL_PRIMARY   = "deepseek/deepseek-v3.2"
-MODEL_RED_TEAM  = "cognitivecomputations/dolphin-mistral-24b-venice-edition:free"
-MODEL_LAYER1    = "moonshotai/kimi-k2.5"
-MODEL_QA_SCORER = "moonshotai/kimi-k2.6"
-MODEL_LAYER2    = "google/gemini-3.1-pro-preview"
+MODEL_PRIMARY   = "deepseek/deepseek-v4-flash"
+MODEL_RED_TEAM  = "deepseek/deepseek-v4-flash"
+MODEL_LAYER1    = "qwen/qwen3.7-max"
+MODEL_QA_SCORER = "qwen/qwen3.7-max"
+MODEL_LAYER2    = "google/gemini-3.5-flash"
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -151,7 +151,7 @@ class RoutingTrap:
 
 def _build_patches(trap: RoutingTrap, cfg: MagicMock, fake_dossier, fake_gen_result):
     """Return a list of (target, kwargs) tuples that ExitStack will apply."""
-    from farm_agent.core.models import Repository
+    from farm_agent.core.models import Repository, FileNode
 
     fake_repo = Repository(
         owner="testorg", name="testrepo",
@@ -171,14 +171,16 @@ def _build_patches(trap: RoutingTrap, cfg: MagicMock, fake_dossier, fake_gen_res
         ("farm_agent.orchestrator.pipeline.create_llm_provider",  {"side_effect": trap._factory}),
         # GitHub
         ("farm_agent.github.client.GitHubClient.__init__",       {"return_value": None}),
+        ("farm_agent.github.client.GitHubClient.close",          {"new_callable": AsyncMock}),
         ("farm_agent.github.client.GitHubClient.get_repo_details",
          {"new_callable": AsyncMock, "return_value": fake_repo}),
         ("farm_agent.github.client.GitHubClient.fetch_repo_structure_graphql",
-         {"new_callable": AsyncMock, "return_value": ["src/auth.py"]}),
+         {"new_callable": AsyncMock, "return_value": [FileNode(path="src/auth.py", type="blob")]}),
         ("farm_agent.github.client.GitHubClient.get_file_content",
          {"new_callable": AsyncMock, "return_value": "# auth code"}),
         # Memory
         ("farm_agent.orchestrator.memory.Memory.__init__",       {"return_value": None}),
+        ("farm_agent.orchestrator.memory.Memory.close",          {"new_callable": AsyncMock}),
         ("farm_agent.orchestrator.memory.Memory.init",            {"new_callable": AsyncMock}),
         ("farm_agent.orchestrator.memory.Memory.get_today_pr_count",
          {"new_callable": AsyncMock, "return_value": 0}),
@@ -205,10 +207,10 @@ def _build_patches(trap: RoutingTrap, cfg: MagicMock, fake_dossier, fake_gen_res
         ("farm_agent.generator.engine.ContributionGenerator.generate_from_dossier",
          {"new_callable": AsyncMock, "return_value": fake_gen_result}),
         # Layer 1
-        ("farm_agent.orchestrator.pipeline.ContribPipeline._layer1_expert_appraisal",
+        ("farm_agent.orchestrator.pipeline.FarmAgentPipeline._layer1_expert_appraisal",
          {"new_callable": AsyncMock, "return_value": (True, "")}),
         # Layer 2
-        ("farm_agent.orchestrator.pipeline.ContribPipeline._layer2_supreme_audit",
+        ("farm_agent.orchestrator.pipeline.FarmAgentPipeline._layer2_supreme_audit",
          {"new_callable": AsyncMock, "return_value": (True, "")}),
         # Security gate
         ("farm_agent.orchestrator.pipeline.run_security_gate",
@@ -227,6 +229,7 @@ def _build_patches(trap: RoutingTrap, cfg: MagicMock, fake_dossier, fake_gen_res
          {"new_callable": AsyncMock}),
         # Notifier
         ("farm_agent.core.notifier.TelegramNotifier.__init__", {"return_value": None}),
+        ("farm_agent.core.notifier.TelegramNotifier.close",    {"new_callable": AsyncMock}),
     ]
 
 
@@ -239,11 +242,12 @@ async def test_run_circular_model_routing():
     asserts every phase routes to its designated model string.
     """
     from farm_agent.core.models import (
-        VulnerabilityDossier, VulnerabilityFinding,
-        Contribution, FileChange, GenerationResult,
+        VulnerabilityDossier, Vulnerability,
+        Contribution, FileChange, Finding, ContributionType, Severity, ImpactLevel,
     )
+    from farm_agent.generator.engine import GenerationResult
 
-    fake_vuln = VulnerabilityFinding(
+    fake_vuln = Vulnerability(
         file="src/auth.py",
         line=42,
         snippet="password = request.args.get('password')",
@@ -268,18 +272,26 @@ async def test_run_circular_model_routing():
         original_content="cursor.execute(f'SELECT * FROM users WHERE password = {password}')",
         new_content="cursor.execute('SELECT * FROM users WHERE password = ?', (pw,))",
     )
+    fake_finding = Finding(
+        type=ContributionType.SECURITY_FIX,
+        severity=Severity.HIGH,
+        title="SQL Injection",
+        description="SQL Injection in auth.py",
+        file_path="src/auth.py",
+        impact_level=ImpactLevel.HIGH,
+    )
     fake_contribution = Contribution(
-        finding=None,
+        finding=fake_finding,
         changes=[fake_file_change],
         commit_message="fix(auth): use parameterized SQL query to prevent injection",
-        pr_title="fix: parameterized SQL to prevent injection in auth.py",
-        pr_body="SQL injection vulnerability fixed.",
+        title="fix: parameterized SQL to prevent injection in auth.py",
+        description="SQL injection vulnerability fixed.",
         branch_name="fix/sql-injection-auth",
-        contribution_type=None,
+        contribution_type=ContributionType.SECURITY_FIX,
     )
     fake_gen_result = GenerationResult(
         contributions=[fake_contribution],
-        all_false_positives=False,
+        false_positive_count=0,
     )
 
     trap = RoutingTrap(primary_model=MODEL_PRIMARY)
@@ -291,9 +303,9 @@ async def test_run_circular_model_routing():
         for target, kwargs in patch_defs:
             stack.enter_context(patch(target, **kwargs))
 
-        from farm_agent.orchestrator.pipeline import ContribPipeline
+        from farm_agent.orchestrator.pipeline import FarmAgentPipeline
 
-        pipeline = ContribPipeline(cfg)
+        pipeline = FarmAgentPipeline(cfg)
 
         # Wire primary provider
         primary_provider = trap._factory(cfg.llm)

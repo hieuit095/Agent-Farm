@@ -12,7 +12,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +46,7 @@ class CodeChunk:
     chunk_index: int
     total_chunks: int
     doc_id: str  # unique ID for ChromaDB
+    metadata: dict[str, str] = field(default_factory=dict)
 
 
 def _should_index_file(path: str) -> bool:
@@ -112,6 +113,84 @@ def chunk_file(content: str, file_path: str, chunk_size: int = DEFAULT_CHUNK_SIZ
 
         chunk_index += 1
         start += stride
+
+    return chunks
+
+
+def chunk_markdown(content: str, file_path: str) -> list[CodeChunk]:
+    """Semantic chunking utility for markdown files.
+
+    Splits content by Markdown Headers (H1, H2, H3).
+    Attaches header information to the chunks.
+    """
+    if not content or not content.strip():
+        return []
+
+    # Get folder path
+    folder_path = "/".join(file_path.split("/")[:-1])
+
+    # Find headers (H1, H2, H3)
+    header_pattern = re.compile(r'^(#{1,3})\s+(.+)$', re.MULTILINE)
+    matches = list(header_pattern.finditer(content))
+
+    if not matches:
+        # Fallback to sliding window chunking if no headers exist
+        return chunk_file(content, file_path)
+
+    chunks: list[CodeChunk] = []
+    
+    # Helper to clean header title (strip trailing spaces, symbols)
+    def clean_title(title: str) -> str:
+        return title.strip().rstrip("#").strip()
+
+    total_chunks = len(matches)
+    # Check if there is preamble content before the first header
+    preamble_end = matches[0].start()
+    preamble_content = content[:preamble_end].strip()
+    if preamble_content:
+        total_chunks += 1
+        doc_id = _make_doc_id(file_path, 0)
+        chunks.append(
+            CodeChunk(
+                content=preamble_content,
+                file_path=file_path,
+                chunk_index=0,
+                total_chunks=total_chunks,
+                doc_id=doc_id,
+                metadata={
+                    "folder_path": folder_path,
+                    "header_title": "Preamble",
+                }
+            )
+        )
+
+    for i, match in enumerate(matches):
+        header_title = clean_title(match.group(2))
+        start_pos = match.start()
+        
+        # End position is the start of the next header, or end of file
+        end_pos = matches[i + 1].start() if i + 1 < len(matches) else len(content)
+        chunk_text = content[start_pos:end_pos].strip()
+
+        chunk_idx = len(chunks)
+        doc_id = _make_doc_id(file_path, chunk_idx)
+        chunks.append(
+            CodeChunk(
+                content=chunk_text,
+                file_path=file_path,
+                chunk_index=chunk_idx,
+                total_chunks=total_chunks,
+                doc_id=doc_id,
+                metadata={
+                    "folder_path": folder_path,
+                    "header_title": header_title,
+                }
+            )
+        )
+
+    # Update total_chunks count for all chunks to be correct
+    for c in chunks:
+        c.total_chunks = len(chunks)
 
     return chunks
 
@@ -215,8 +294,8 @@ class RepoIndexer:
                 metadata={"hnsw:space": "cosine"},
             )
             logger.info("ChromaDB persistent collection '%s' initialized at %s", self._repo_name, self.PERSISTENT_PATH)
-        except ImportError:
-            logger.warning("ChromaDB not installed — using regex fallback for cross-file search")
+        except (ImportError, Exception) as e:
+            logger.warning("ChromaDB not installed or failed to initialize (%s) — using regex fallback for cross-file search", e)
             self._chroma = None
             self._collection = None
 
@@ -248,7 +327,10 @@ class RepoIndexer:
                 logger.debug("RAG: skipping oversized file %s (%d bytes)", fpath, len(content))
                 continue
 
-            file_chunks = chunk_file(content, fpath, self._chunk_size, self._overlap)
+            if fpath.lower().endswith(".md"):
+                file_chunks = chunk_markdown(content, fpath)
+            else:
+                file_chunks = chunk_file(content, fpath, self._chunk_size, self._overlap)
             chunks.extend(file_chunks)
             self._indexed_files.add(fpath)
 
@@ -262,7 +344,16 @@ class RepoIndexer:
 
         # Add to ChromaDB
         ids = [c.doc_id for c in chunks]
-        metadatas = [{"file_path": c.file_path, "chunk_index": c.chunk_index, "total": c.total_chunks} for c in chunks]
+        metadatas = []
+        for c in chunks:
+            meta = {
+                "file_path": c.file_path,
+                "chunk_index": c.chunk_index,
+                "total": c.total_chunks,
+            }
+            if hasattr(c, "metadata") and c.metadata:
+                meta.update(c.metadata)
+            metadatas.append(meta)
         self._collection.add(
             ids=ids,
             documents=texts,

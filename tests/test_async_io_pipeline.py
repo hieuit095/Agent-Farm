@@ -5,7 +5,7 @@ import unittest
 from unittest.mock import MagicMock, patch
 
 from farm_agent.core.models import FileChange
-from farm_agent.orchestrator.pipeline import ContribPipeline
+from farm_agent.orchestrator.pipeline import FarmAgentPipeline
 
 
 class TestAsyncIOPipeline(unittest.IsolatedAsyncioTestCase):
@@ -13,7 +13,7 @@ class TestAsyncIOPipeline(unittest.IsolatedAsyncioTestCase):
         self.config = MagicMock()
         self.config.notifications.telegram_token = None
         self.config.notifications.telegram_chat_id = None
-        self.pipeline = ContribPipeline(self.config)
+        self.pipeline = FarmAgentPipeline(self.config)
 
     @patch("farm_agent.orchestrator.pipeline.asyncio.to_thread")
     @patch("farm_agent.orchestrator.pipeline.os.path.join")

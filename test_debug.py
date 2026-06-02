@@ -9,14 +9,14 @@ logging.basicConfig(level=logging.DEBUG, handlers=[logging.StreamHandler(sys.std
 async def run_test():
     from unittest.mock import AsyncMock, patch, MagicMock
     from farm_agent.core.config import FarmAgentConfig
-    from farm_agent.orchestrator.pipeline import ContribPipeline
+    from farm_agent.orchestrator.pipeline import FarmAgentPipeline
     from farm_agent.core.models import Repository, Finding, ContributionType, Severity, ImpactLevel, PRResult, Contribution, FileChange, AnalysisResult
 
     print("Step 1: Setup")
     repo = Repository(owner="owner", name="mock-repo", full_name="owner/mock-repo", description="A mock repo")
     
     config = FarmAgentConfig()
-    pipeline = ContribPipeline(config)
+    pipeline = FarmAgentPipeline(config)
     pipeline._human_typing_lock = asyncio.Lock()
     
     pipeline._pr_manager = AsyncMock()
@@ -69,7 +69,7 @@ async def run_test():
     
     with patch("farm_agent.llm.provider.create_llm_provider") as mock_create_llm:
         with patch("farm_agent.orchestrator.pipeline.fetch_repo_guidelines") as mock_guidelines:
-            with patch.object(ContribPipeline, "_clone_and_patch_repo") as mock_clone:
+            with patch.object(FarmAgentPipeline, "_clone_and_patch_repo") as mock_clone:
                 with patch("farm_agent.orchestrator.pipeline.run_security_gate") as mock_sec_gate:
                     mock_create_llm.side_effect = [layer1_llm, layer2_llm]
                     mock_guidelines.return_value.has_guidelines = False

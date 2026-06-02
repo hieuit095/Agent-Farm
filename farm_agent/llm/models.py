@@ -98,6 +98,49 @@ DEEPSEEK_V32 = ModelSpec(
     description="Primary Generator Model via OpenRouter",
 )
 
+DEEPSEEK_V4_FLASH = ModelSpec(
+    name="deepseek/deepseek-v4-flash",
+    display_name="DeepSeek V4 Flash",
+    tier=ModelTier.FLASH,
+    context_window=1000000,
+    max_output=16384,
+    input_cost=0.07,
+    output_cost=0.14,
+    coding=85,
+    analysis=85,
+    reasoning=80,
+    speed=95,
+    multimodal=0,
+    best_for=[
+        TaskType.QUICK_FIX,
+        TaskType.DOCS,
+        TaskType.BULK,
+    ],
+    description="High volume, cheap, fast model via OpenRouter",
+)
+
+DEEPSEEK_V4_PRO = ModelSpec(
+    name="deepseek/deepseek-v4-pro",
+    display_name="DeepSeek V4 Pro",
+    tier=ModelTier.PRO,
+    context_window=1000000,
+    max_output=16384,
+    input_cost=0.14,
+    output_cost=0.28,
+    coding=98,
+    analysis=95,
+    reasoning=96,
+    speed=80,
+    multimodal=0,
+    best_for=[
+        TaskType.CODE_GEN,
+        TaskType.ANALYSIS,
+        TaskType.REVIEW,
+        TaskType.PLANNING,
+    ],
+    description="Deep reasoning, complex coding flagship model via OpenRouter",
+)
+
 # ── Filter Models (Defense-in-Depth) ──────────────────
 
 KIMI_K2_APPRAISER = ModelSpec(
@@ -118,14 +161,36 @@ GEMINI_31_AUDITOR = ModelSpec(
     description="Layer 2 Supreme Auditor"
 )
 
+QWEN_37_MAX = ModelSpec(
+    name="qwen/qwen3.7-max",
+    display_name="Qwen 3.7 Max",
+    tier=ModelTier.PRO,
+    context_window=200_000,
+    max_output=16_384,
+    description="Hardcore strict QA, Adversarial Review"
+)
+
+GEMINI_35_FLASH = ModelSpec(
+    name="google/gemini-3.5-flash",
+    display_name="Gemini 3.5 Flash",
+    tier=ModelTier.FLASH,
+    context_window=1_000_000,
+    max_output=16_384,
+    description="Massive context, CI logs, diplomatic communication"
+)
+
 
 # ── Registry ──────────────────────────────────────────
 
 
 ALL_MODELS: list[ModelSpec] = [
     DEEPSEEK_V32,
+    DEEPSEEK_V4_FLASH,
+    DEEPSEEK_V4_PRO,
     KIMI_K2_APPRAISER,
     GEMINI_31_AUDITOR,
+    QWEN_37_MAX,
+    GEMINI_35_FLASH,
 ]
 
 MODELS_BY_NAME: dict[str, ModelSpec] = {m.name: m for m in ALL_MODELS}

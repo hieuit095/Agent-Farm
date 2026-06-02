@@ -10,7 +10,8 @@ import logging
 from dataclasses import dataclass
 
 from farm_agent.llm.models import (
-    DEEPSEEK_V32,
+    DEEPSEEK_V4_FLASH,
+    DEEPSEEK_V4_PRO,
     ModelSpec,
     TaskType,
 )
@@ -42,7 +43,7 @@ class TaskRouter:
     def __init__(
         self,
         strategy: str = CostStrategy.BALANCED,
-        default_model: str = "deepseek/deepseek-v3.2",
+        default_model: str = "deepseek/deepseek-v4-flash",
     ):
         self._strategy = strategy
         self._default = default_model
@@ -63,17 +64,17 @@ class TaskRouter:
         heavy_tasks = {TaskType.ANALYSIS, TaskType.CODE_GEN, TaskType.PLANNING}
 
         if task_type in light_tasks and complexity <= 3 and self._strategy != CostStrategy.PERFORMANCE:
-            model = DEEPSEEK_V32
+            model = DEEPSEEK_V4_FLASH
             reason = f"Light task ({task_type.value}, complexity={complexity}) routed to default."
         elif task_type in heavy_tasks and complexity >= 7:
-            model = DEEPSEEK_V32
+            model = DEEPSEEK_V4_PRO
             reason = f"Heavy task ({task_type.value}, complexity={complexity}) routed to flagship model."
         elif token_estimate > 100_000:
-            model = DEEPSEEK_V32
+            model = DEEPSEEK_V4_PRO
             reason = f"Large context ({token_estimate} tokens) routed to flagship model."
         else:
             best = get_models_for_task(task_type)
-            model = best[0] if best else DEEPSEEK_V32
+            model = best[0] if best else DEEPSEEK_V4_FLASH
             reason = f"Task ({task_type.value}) routed by best-fit score."
 
         if self._strategy == CostStrategy.ECONOMY and model.tier == ModelTier.PRO:
@@ -89,20 +90,20 @@ class TaskRouter:
             model=model,
             task_type=task_type,
             reason=reason,
-            fallback=DEEPSEEK_V32,
+            fallback=DEEPSEEK_V4_FLASH,
         )
 
     def get_default_assignments(self) -> dict[str, str]:
         """Get default model assignment for each task type."""
         return {
-            TaskType.ANALYSIS: DEEPSEEK_V32.name,
-            TaskType.CODE_GEN: DEEPSEEK_V32.name,
-            TaskType.REVIEW: DEEPSEEK_V32.name,
-            TaskType.PLANNING: DEEPSEEK_V32.name,
-            TaskType.DOCS: DEEPSEEK_V32.name,
-            TaskType.QUICK_FIX: DEEPSEEK_V32.name,
-            TaskType.BULK: DEEPSEEK_V32.name,
-            TaskType.MULTIMODAL: DEEPSEEK_V32.name,
+            TaskType.ANALYSIS: DEEPSEEK_V4_FLASH.name,
+            TaskType.CODE_GEN: DEEPSEEK_V4_FLASH.name,
+            TaskType.REVIEW: DEEPSEEK_V4_FLASH.name,
+            TaskType.PLANNING: DEEPSEEK_V4_FLASH.name,
+            TaskType.DOCS: DEEPSEEK_V4_FLASH.name,
+            TaskType.QUICK_FIX: DEEPSEEK_V4_FLASH.name,
+            TaskType.BULK: DEEPSEEK_V4_FLASH.name,
+            TaskType.MULTIMODAL: DEEPSEEK_V4_FLASH.name,
         }
 
     @property

@@ -232,15 +232,23 @@ class SuperHumanLoop:
             logger.info("[TERMINATOR] Found %d PR(s) to patrol.", len(pr_records))
 
             github = self._pipeline._github
-            llm = self._pipeline._llm
+            import copy
+            from farm_agent.llm.provider import create_llm_provider
+            patrol_cfg = copy.copy(self._pipeline.config.llm)
+            patrol_cfg.provider = "openrouter"
+            patrol_cfg.model = "google/gemini-3.5-flash"
+            patrol_llm = create_llm_provider(patrol_cfg)
 
-            patrol_engine = PRPatrol(
-                github=github, llm=llm, memory=self._memory, notifier=self._notifier
-            )
-            result = await patrol_engine.patrol(
-                pr_records,
-                dry_run=self._dry_run,
-            )
+            try:
+                patrol_engine = PRPatrol(
+                    github=github, llm=patrol_llm, memory=self._memory, notifier=self._notifier
+                )
+                result = await patrol_engine.patrol(
+                    pr_records,
+                    dry_run=self._dry_run,
+                )
+            finally:
+                await patrol_llm.close()
 
             for merged in result.prs_merged:
                 repo_name = merged["repo"]

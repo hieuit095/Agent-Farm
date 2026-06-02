@@ -130,6 +130,7 @@ class Finding(BaseModel):
     suggestion: str | None = None
     confidence: float = 0.8  # 0.0 - 1.0
     impact_level: ImpactLevel = ImpactLevel.TRIVIAL
+    metadata: dict = Field(default_factory=dict)
 
     @property
     def priority_score(self) -> float:

@@ -1,7 +1,0 @@
-{
-  "tool_name": "Bash",
-  "tool_input_preview": "{\"command\":\"echo \\\"=== FULL LOG SUMMARY ===\\\" && echo \\\"Repo scans completed:\\\" && cat \\\"C:\\\\Users\\\\USER\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\c--Users-USER-Documents-GitHub-Agent-Farm\\\\6ec9dd75-b2ed-43d7-81...",
-  "error": "Exit code 1\n=== FULL LOG SUMMARY ===\nRepo scans completed:\n                    INFO     [TARGET ACQUIRED] Repo:                            \n[04/16/26 03:45:02] INFO     Semgrep found 7 matches for                        \n                    INFO     Clean sweep, no vulns for                          \n                    INFO     [TARGET ACQUIRED] Repo:                            \n[04/16/26 03:45:27] INFO     Semgrep found 6 matches for                        \n                    INFO     Clean s...",
-  "timestamp": "2026-04-16T03:53:48.185Z",
-  "retry_count": 1
-}

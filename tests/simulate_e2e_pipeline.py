@@ -13,7 +13,7 @@ from farm_agent.core.models import (
     Repository, Finding, Contribution, ImpactLevel, ContributionType,
     Severity, FileChange, PRResult
 )
-from farm_agent.orchestrator.pipeline import ContribPipeline
+from farm_agent.orchestrator.pipeline import FarmAgentPipeline
 from farm_agent.analysis.analyzer import AnalysisResult
 
 @pytest.fixture
@@ -26,7 +26,7 @@ def config():
 
 @pytest.fixture
 async def pipeline(config):
-    p = ContribPipeline(config)
+    p = FarmAgentPipeline(config)
     p._human_typing_lock = AsyncMock()
     
     # Mock external boundaries
@@ -103,7 +103,7 @@ class MockLLMProvider:
 @patch("farm_agent.llm.provider.create_llm_provider")
 @patch("farm_agent.orchestrator.pipeline.fetch_repo_guidelines")
 @patch("farm_agent.orchestrator.pipeline.run_security_gate")
-@patch.object(ContribPipeline, "_clone_and_patch_repo")
+@patch.object(FarmAgentPipeline, "_clone_and_patch_repo")
 async def test_happy_path(mock_clone, mock_sec_gate, mock_guidelines, mock_create_llm, pipeline, repo):
     """TEST 1: The Happy Path (Complete Success)"""
     mock_guidelines.return_value.has_guidelines = False
@@ -189,7 +189,7 @@ async def test_happy_path(mock_clone, mock_sec_gate, mock_guidelines, mock_creat
 @pytest.mark.asyncio
 @patch("farm_agent.llm.provider.create_llm_provider")
 @patch("farm_agent.orchestrator.pipeline.fetch_repo_guidelines")
-@patch.object(ContribPipeline, "_clone_and_patch_repo")
+@patch.object(FarmAgentPipeline, "_clone_and_patch_repo")
 async def test_snippet_sanity_trap(mock_clone, mock_guidelines, mock_create_llm, pipeline, repo):
     """TEST 2: The Snippet Sanity Trap ("requires login" string)"""
     finding = Finding(
@@ -222,7 +222,7 @@ async def test_snippet_sanity_trap(mock_clone, mock_guidelines, mock_create_llm,
 @pytest.mark.asyncio
 @patch("farm_agent.llm.provider.create_llm_provider")
 @patch("farm_agent.orchestrator.pipeline.fetch_repo_guidelines")
-@patch.object(ContribPipeline, "_clone_and_patch_repo")
+@patch.object(FarmAgentPipeline, "_clone_and_patch_repo")
 async def test_kimi_rejection(mock_clone, mock_guidelines, mock_create_llm, pipeline, repo):
     """TEST 3: The Kimi Rejection (Layer 1)"""
     mock_guidelines.return_value.has_guidelines = False
@@ -272,7 +272,7 @@ async def test_kimi_rejection(mock_clone, mock_guidelines, mock_create_llm, pipe
 @pytest.mark.asyncio
 @patch("farm_agent.llm.provider.create_llm_provider")
 @patch("farm_agent.orchestrator.pipeline.fetch_repo_guidelines")
-@patch.object(ContribPipeline, "_clone_and_patch_repo")
+@patch.object(FarmAgentPipeline, "_clone_and_patch_repo")
 async def test_gemini_rejection_lazy_code(mock_clone, mock_guidelines, mock_create_llm, pipeline, repo):
     """TEST 4: The Gemini Rejection (Layer 2) / Lazy Code"""
     mock_guidelines.return_value.has_guidelines = False

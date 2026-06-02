@@ -64,6 +64,14 @@ Carefully examine the patch for ALL of the following:
 7. STYLE VIOLATIONS — does it violate the repository's coding conventions?
 8. INCORRECT SCOPE — does it modify unrelated code, or miss related files
    that should be changed together?
+9. BLAST RADIUS / DEPENDENCY REGRESSIONS — If downstream dependent modules are specified,
+   verify if the patch modifies return types, function signatures, or public state in a
+   way that would break those downstream modules. If a signature/state change occurs
+   without corresponding updates to dependents, you MUST REJECT it.
+10. REAL-WORLD VALUE PROPOSITION — Even if a bug is technically classified as HIGH, evaluate
+    its actual impact. If the vulnerability exists in dead code, deprecated modules, or
+    requires an impossibly complex prerequisite to exploit, it provides zero real-world value to fix.
+    You MUST REJECT the patch and mark it as 'Theoretical/No Impact' to prevent garbage PRs.
 
 MANDATORY API VERIFICATION PROCESS:
 For each changed file, you MUST cross-check every function call and method
@@ -131,6 +139,9 @@ OUTPUT STRICT JSON — no markdown, no explanation outside the JSON:
             file_blocks.append(block)
 
         finding = contribution.finding
+        deps = finding.metadata.get("module_dependencies", {}) if finding.metadata else {}
+        dependents = deps.get("dependents", [])
+
         prompt = f"""## CONTEXT
 
 **PR Title**: {contribution.title}
@@ -138,7 +149,11 @@ OUTPUT STRICT JSON — no markdown, no explanation outside the JSON:
 **Finding Description**: {finding.description}
 **Expected Fix**: {finding.suggestion or '(not provided)'}
 **Primary File**: {finding.file_path}
+"""
+        if dependents:
+            prompt += f"**Downstream Dependent Modules (Blast Radius)**: {dependents}\n"
 
+        prompt += """
 ## CHANGED FILES
 
 """

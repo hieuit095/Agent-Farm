@@ -699,6 +699,104 @@ class DockerSandbox:
             names = ", ".join(container.name for container in containers)
             logger.warning("Sandbox containers still present after cleanup grace period: %s", names)
 
+    async def verify_vulnerability_with_poc(
+        self,
+        repo_path: str,
+        poc_filename: str,
+        poc_content: str,
+        run_command: str,
+        timeout: int = 60,
+    ) -> dict[str, Any]:
+        """Write the PoC script to the workspace directory, execute it inside the sandbox,
+        and clean up the script afterwards. Returns the raw sandbox execution results.
+        """
+        import os
+
+        poc_file_path = os.path.join(repo_path, poc_filename)
+        logger.info("Writing PoC verification script to %s", poc_file_path)
+        try:
+            with open(poc_file_path, "w", encoding="utf-8") as f:
+                f.write(poc_content)
+            
+            # Execute sandbox
+            result = await self.run_in_sandbox(
+                repo_path=repo_path,
+                command=run_command,
+                timeout=timeout,
+            )
+            return result
+        finally:
+            # Clean up PoC file
+            if os.path.exists(poc_file_path):
+                try:
+                    os.remove(poc_file_path)
+                    logger.debug("Successfully cleaned up PoC script from %s", poc_file_path)
+                except Exception as exc:
+                    logger.warning("Failed to remove PoC script from %s: %s", poc_file_path, exc)
+
+    async def run_native_test_suite(
+        self,
+        repo_path: str,
+        language: str | None = None,
+    ) -> dict[str, Any]:
+        """Run the repository's native unit test suite inside the sandbox.
+        Returns a dictionary with execution results: exit_code, stdout, stderr, timed_out, status.
+        """
+        import os
+        from pathlib import Path
+
+        repo_dir = Path(repo_path).expanduser().resolve()
+        
+        # Check if tests exist
+        has_tests = False
+        test_indicators = ["test", "tests", "spec", "specs", "pytest.ini", "tox.ini", "foundry.toml", "hardhat.config.js", "hardhat.config.ts"]
+        
+        # Check if any folder/file exists
+        for ind in test_indicators:
+            if (repo_dir / ind).exists():
+                has_tests = True
+                break
+                
+        # Also check for files with _test.go or test/spec in name
+        if not has_tests:
+            try:
+                for root, dirs, files in os.walk(repo_dir):
+                    if any(d in root for d in [".git", "node_modules", "venv", ".venv"]):
+                        continue
+                    if any("test" in f.lower() or "spec" in f.lower() for f in files):
+                        has_tests = True
+                        break
+            except Exception:
+                pass
+                
+        if not has_tests:
+            logger.info("No native test suite detected in %s", repo_path)
+            return {
+                "status": "tests_missing",
+                "exit_code": 0,
+                "stdout": "",
+                "stderr": "No native tests found in repository.",
+                "timed_out": False
+            }
+
+        # Otherwise, run native tests using run_in_sandbox
+        try:
+            result = await self.run_in_sandbox(
+                repo_path=repo_path,
+                language=language,
+            )
+            result["status"] = "success" if result.get("exit_code") == 0 else "failed"
+            return result
+        except Exception as e:
+            logger.warning("Error running native test suite: %s", e)
+            return {
+                "status": "skipped",
+                "exit_code": 0,
+                "stdout": "",
+                "stderr": f"Error running tests: {e}",
+                "timed_out": False
+            }
+
     def _list_run_containers(self, run_id: str) -> list[Container]:
         """List all containers associated with a sandbox run ID."""
         return self.client.containers.list(

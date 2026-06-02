@@ -39,8 +39,8 @@ class NewModel(BaseModel):
     optional_field: int | None = None
 
 # 5. Custom exceptions
-from farm_agent.core.exceptions import ContribAIError
-raise ContribAIError("descriptive message", details={"key": "val"})
+from farm_agent.core.exceptions import FarmAgentError
+raise FarmAgentError("descriptive message", details={"key": "val"})
 ```
 
 ## Git Workflow

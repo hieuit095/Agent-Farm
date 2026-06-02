@@ -10,7 +10,9 @@ The Diplomat Protocol enhances this module with:
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import os
 import re
 from dataclasses import dataclass, field
 
@@ -93,9 +95,56 @@ class RepoGuidelines:
     # Diplomat Protocol: LLM-summarized style guide (Task 2)
     style_guide: RepoStyleGuide | None = None
 
+    # Subsystem documentation discovered (Phase 1)
+    subsystem_docs: dict[str, str] = field(default_factory=dict)
+
     @property
     def has_guidelines(self) -> bool:
         return bool(self.contributing_md or self.pr_template)
+
+    async def discover_subsystem_docs(self, repo_path: str) -> dict[str, str]:
+        """Recursively discover and read documentation files from docs/, architecture/, wiki/ and root README.md."""
+        docs = await asyncio.to_thread(_discover_docs_sync, repo_path)
+        self.subsystem_docs = docs
+        return docs
+
+
+def _discover_docs_sync(repo_path: str) -> dict[str, str]:
+    docs = {}
+    
+    # 1. Read root README.md
+    for name in ["README.md", "readme.md", "README.txt", "README.rst"]:
+        readme_path = os.path.join(repo_path, name)
+        if os.path.isfile(readme_path):
+            try:
+                with open(readme_path, "r", encoding="utf-8", errors="ignore") as f:
+                    docs[name] = f.read()
+                break
+            except Exception as e:
+                logger.debug("Failed to read root readme %s: %s", readme_path, e)
+
+    # 2. Check directories docs/, architecture/, wiki/
+    target_dirs = ["docs", "architecture", "wiki"]
+    if os.path.exists(repo_path):
+        try:
+            for root_item in os.listdir(repo_path):
+                full_root_item = os.path.join(repo_path, root_item)
+                if os.path.isdir(full_root_item) and root_item.lower() in target_dirs:
+                    for root, dirs, files in os.walk(full_root_item):
+                        for file in files:
+                            ext = os.path.splitext(file)[1].lower()
+                            if ext in [".md", ".txt", ".rst"]:
+                                full_path = os.path.join(root, file)
+                                rel_path = os.path.relpath(full_path, repo_path)
+                                try:
+                                    with open(full_path, "r", encoding="utf-8", errors="ignore") as f:
+                                        docs[rel_path.replace("\\", "/")] = f.read()
+                                except Exception as e:
+                                    logger.debug("Failed to read doc file %s: %s", full_path, e)
+        except Exception as e:
+            logger.warning("Error walking repository path %s for docs: %s", repo_path, e)
+            
+    return docs
 
 
 async def fetch_repo_guidelines(
