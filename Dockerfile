@@ -24,8 +24,8 @@ RUN pip install --no-cache-dir build && \
 FROM python:3.11-slim
 
 LABEL maintainer="Farm-Agent Team"
-LABEL description="Farm-Agent v3.0.0 — Autonomous Bounty-Hunting Security Researcher"
-LABEL version="3.0.0"
+LABEL description="Farm-Agent v4.0.0 — Autonomous Bounty-Hunting Security Researcher"
+LABEL version="4.0.0"
 
 # ── System dependencies ────────────────────────────────────────────────────
 # git   — required by GitPython for shallow clones (Bloodhound pipeline)
