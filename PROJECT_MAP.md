@@ -62,9 +62,39 @@ The CLI is Click-based and located in [main.py](file:///c:/Users/USER/Documents/
 
 ---
 
-## 3. Core Execution Pipelines
 
-### 3A. Standard Pipeline — `_process_repo()` ([pipeline.py:1172](file:///c:/Users/USER/Documents/GitHub/Agent-Farm/farm_agent/orchestrator/pipeline.py#L1172))
+## 3. Core Module Dependency Graph
+
+```mermaid
+graph TD
+    CLI[CLI: main.py] --> Orch[Orchestrator: pipeline.py]
+    CLI --> Human[SuperHumanLoop: human.py]
+    CLI --> Patrol[PR Patrol: patrol.py]
+
+    Orch --> GHClient[GitHub Client: client.py]
+    Orch --> RAG[RAG Engine: rag.py]
+    Orch --> Mapper[RepoMapper: mapper.py]
+    Orch --> Analyzer[CodeAnalyzer: analyzer.py]
+
+    Analyzer --> RedTeam[Bloodhound/Semgrep]
+
+    Orch --> Generator[Generator: engine.py]
+    Generator --> POC[PoCGenerator: poc.py]
+    Generator --> Sandbox[DockerSandbox: sandbox.py]
+
+    Orch --> Memory[(SQLite DB: memory.py)]
+    Orch --> Chroma[(ChromaDB: rag.py)]
+
+    Orch --> PRMan[PRManager: manager.py]
+
+    Patrol --> GHClient
+    Patrol --> Sandbox
+```
+
+
+## 4. Core Execution Pipelines
+
+### 4A. Standard Pipeline — `_process_repo()` ([pipeline.py:1172](file:///c:/Users/USER/Documents/GitHub/Agent-Farm/farm_agent/orchestrator/pipeline.py#L1172))
 
 Processes a single repository through the full contribution pipeline:
 
@@ -159,9 +189,8 @@ _process_repo(repo)
   └─ PRManager.create_pr()                              # pipeline.py:2017
 ```
 
----
 
-### 3B. Circular target pipeline — `run_circular()` ([pipeline.py:834](file:///c:/Users/USER/Documents/GitHub/Agent-Farm/farm_agent/orchestrator/pipeline.py#L834))
+### 4B. Circular target pipeline — `run_circular()` ([pipeline.py:834](file:///c:/Users/USER/Documents/GitHub/Agent-Farm/farm_agent/orchestrator/pipeline.py#L834))
 
 Circular target pipeline loop extracting target repos from the local SQLite queue:
 
@@ -207,7 +236,7 @@ run_circular()
 
 ---
 
-## 4. Adaptive Concurrency & Throttling
+## 5. Adaptive Concurrency & Throttling
 
 To prevent LLM rate limit exhaustion (HTTP 429 thundering herd) during parallel executions, the system utilizes the `AdaptiveConcurrencyManager` ([pipeline.py:214](file:///c:/Users/USER/Documents/GitHub/Agent-Farm/farm_agent/orchestrator/pipeline.py#L214)):
 
@@ -219,7 +248,7 @@ To prevent LLM rate limit exhaustion (HTTP 429 thundering herd) during parallel 
 
 ---
 
-## 5. PR Patrol Daemon & CI Auto-Fix Loop
+## 6. PR Patrol Daemon & CI Auto-Fix Loop
 
 The `PRPatrol` module ([patrol.py:152](file:///c:/Users/USER/Documents/GitHub/Agent-Farm/farm_agent/pr/patrol.py#L152)) runs continuously to manage active contributions:
 
@@ -241,7 +270,7 @@ The `PRPatrol` module ([patrol.py:152](file:///c:/Users/USER/Documents/GitHub/Ag
 
 ---
 
-## 6. Omniscient Context Engine & Subsystems
+## 7. Omniscient Context Engine & Subsystems
 
 Version 4.0.0 upgrades the system's codebase understanding from superficial file scans to deep documentation and linkage maps:
 
@@ -260,7 +289,7 @@ Version 4.0.0 upgrades the system's codebase understanding from superficial file
 
 ---
 
-## 7. SQLite Schema & Persistence
+## 8. SQLite Schema & Persistence
 
 Database file resides in `data/memory.db` and operates in **WAL (Write-Ahead Logging)** mode. Composite indices prevent full table scans.
 
@@ -300,7 +329,7 @@ Database file resides in `data/memory.db` and operates in **WAL (Write-Ahead Log
 
 ---
 
-## 8. Directory & Module Architecture
+## 9. Directory & Module Architecture
 
 ```
 .                                       # Workspace Root (v4.0.0)
@@ -375,7 +404,7 @@ Database file resides in `data/memory.db` and operates in **WAL (Write-Ahead Log
 
 ---
 
-## 9. Error Handling & Fallback Matrix
+## 10. Error Handling & Fallback Matrix
 
 | Scenario | Behavior |
 |----------|----------|

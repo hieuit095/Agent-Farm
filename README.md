@@ -15,15 +15,10 @@ Agent-Farm is an autonomous AI agent ecosystem designed to crawl GitHub, pinpoin
 
 ---
 
-## 🔥 Key Features (v4.0.0 Upgrades)
+## 🔥 Key Features
 
 ### 🧠 Omniscient Context Engine
 Upgraded codebase intelligence using Retrieval-Augmented Generation (RAG) powered by ChromaDB. It recursively discovers internal documentation (`.md`, `.txt`, `.rst`), semantically chunks docs by headers, and indexes them to seed local knowledge. Concurrently, it builds AST-based call graphs (for Python, Rust, Go, TypeScript) to inject precise module dependency links ("imports", "calls", "dependents") directly into the prompt context.
-
-### 🛡️ Zero-Garbage PR Gatekeepers
-Zero tolerance for typo-fixes, formatting tweaks, or documentation-only PRs (README/doc contributions are strictly banned). Implements a two-layer filter system:
-* **Gate 1: EXPERT APPRAISAL (Qwen-3.7-Max):** Renders strict verdicts on findings to filter out false positives and theoretical edge cases.
-* **Gate 2: REAL-WORLD VALUE CHECK:** Vetoes patches targeting dead or deprecated code blocks to avoid sending low-effort spam to maintainers.
 
 ### 🧪 Dynamic Bug Verification (PoC Execution)
 Before writing a fix, the agent generates a self-contained Proof-of-Concept (PoC) script using `deepseek-v4-pro` to dynamically trigger the vulnerability inside a locked-down container sandbox. If the PoC fails to trigger the bug, the finding is immediately classified as a False Positive and dropped.
@@ -44,6 +39,7 @@ Agent-Farm provides a robust, pre-configured Docker setup that mounts the Docker
 * **Git** installed on the host machine.
 * A GitHub Personal Access Token (PAT) with `repo` scope.
 * An OpenRouter API Key configured with credits.
+* Python 3.11 or later.
 
 ### 1-Click Launch
 
@@ -70,6 +66,8 @@ Agent-Farm provides a robust, pre-configured Docker setup that mounts the Docker
    ```env
    GITHUB_TOKEN=your_github_pat_here
    OPENROUTER_API_KEY=your_openrouter_key_here
+   # Optional: secondary tokens for GET request rotation
+   GITHUB_SECONDARY_TOKENS=token1,token2
    ```
 
 4. **Attach to the Agent CLI:**
@@ -81,7 +79,7 @@ Agent-Farm provides a robust, pre-configured Docker setup that mounts the Docker
 
 ## ⚙️ CLI Command Reference
 
-Agent-Farm provides a comprehensive suite of Click-based CLI utilities:
+Agent-Farm provides a comprehensive suite of Click-based CLI utilities.
 
 ```bash
 # Start the full automated discovery, analysis, and contribution pipeline
@@ -93,8 +91,11 @@ farm_agent target <repo_url>
 # Solve open issues in a specific repository
 farm_agent solve <repo_url>
 
-# Run in Hunt Mode: agresively discover repos and solve issues/bugs
+# Run in Hunt Mode: aggressively discover repos and solve issues/bugs
 farm_agent hunt [--rounds N] [--mode analysis|issues|both]
+
+# Run the Circular target loop over queue deterministically
+farm_agent hunt-circular
 
 # Run the Relentless 24/7 Super Human loop (patrols PRs and hunts targets)
 farm_agent superhuman
@@ -113,6 +114,16 @@ farm_agent status
 farm_agent stats
 farm_agent models
 farm_agent leaderboard
+farm_agent system-status
+
+# View current loaded runtime settings
+farm_agent config
+
+# Monitor and synchronize VIP repository radar list
+farm_agent vips
+
+# Display formatting templates for PR descriptions
+farm_agent templates
 
 # Run with thorough, standard, or quick presets
 farm_agent profile <profile_name>
@@ -122,6 +133,9 @@ farm_agent reset-db
 
 # Run garbage collection to purge stale knowledge base entries
 farm_agent gc --days 90
+
+# Test notifications to Telegram/Slack/Discord
+farm_agent notify-test
 ```
 
 ---
