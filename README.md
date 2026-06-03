@@ -20,11 +20,6 @@ Agent-Farm is an autonomous AI agent ecosystem designed to crawl GitHub, pinpoin
 ### 🧠 Omniscient Context Engine
 Upgraded codebase intelligence using Retrieval-Augmented Generation (RAG) powered by ChromaDB. It recursively discovers internal documentation (`.md`, `.txt`, `.rst`), semantically chunks docs by headers, and indexes them to seed local knowledge. Concurrently, it builds AST-based call graphs (for Python, Rust, Go, TypeScript) to inject precise module dependency links ("imports", "calls", "dependents") directly into the prompt context.
 
-### 🛡️ Zero-Garbage PR Gatekeepers
-Zero tolerance for typo-fixes, formatting tweaks, or documentation-only PRs (README/doc contributions are strictly banned). Implements a two-layer filter system:
-* **Gate 1: EXPERT APPRAISAL (Qwen-3.7-Max):** Renders strict verdicts on findings to filter out false positives and theoretical edge cases.
-* **Gate 2: REAL-WORLD VALUE CHECK:** Vetoes patches targeting dead or deprecated code blocks to avoid sending low-effort spam to maintainers.
-
 ### 🧪 Dynamic Bug Verification (PoC Execution)
 Before writing a fix, the agent generates a self-contained Proof-of-Concept (PoC) script using `deepseek-v4-pro` to dynamically trigger the vulnerability inside a locked-down container sandbox. If the PoC fails to trigger the bug, the finding is immediately classified as a False Positive and dropped.
 
@@ -44,6 +39,7 @@ Agent-Farm provides a robust, pre-configured Docker setup that mounts the Docker
 * **Git** installed on the host machine.
 * A GitHub Personal Access Token (PAT) with `repo` scope.
 * An OpenRouter API Key configured with credits.
+* Python 3.11 or later.
 
 ### 1-Click Launch
 
@@ -70,6 +66,8 @@ Agent-Farm provides a robust, pre-configured Docker setup that mounts the Docker
    ```env
    GITHUB_TOKEN=your_github_pat_here
    OPENROUTER_API_KEY=your_openrouter_key_here
+   # Optional: secondary tokens for GET request rotation
+   GITHUB_SECONDARY_TOKENS=token1,token2
    ```
 
 4. **Attach to the Agent CLI:**
@@ -113,6 +111,7 @@ farm_agent status
 farm_agent stats
 farm_agent models
 farm_agent leaderboard
+farm_agent system-status
 
 # Run with thorough, standard, or quick presets
 farm_agent profile <profile_name>
