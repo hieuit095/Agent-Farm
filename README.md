@@ -15,7 +15,7 @@ Agent-Farm is an autonomous AI agent ecosystem designed to crawl GitHub, pinpoin
 
 ---
 
-## 🔥 Key Features
+## 🔥 Key Features (v4.0.0 Upgrades)
 
 ### 🧠 Omniscient Context Engine
 Upgraded codebase intelligence using Retrieval-Augmented Generation (RAG) powered by ChromaDB. It recursively discovers internal documentation (`.md`, `.txt`, `.rst`), semantically chunks docs by headers, and indexes them to seed local knowledge. Concurrently, it builds AST-based call graphs (for Python, Rust, Go, TypeScript) to inject precise module dependency links ("imports", "calls", "dependents") directly into the prompt context.
@@ -79,7 +79,7 @@ Agent-Farm provides a robust, pre-configured Docker setup that mounts the Docker
 
 ## ⚙️ CLI Command Reference
 
-Agent-Farm provides a comprehensive suite of Click-based CLI utilities.
+Agent-Farm provides a comprehensive suite of Click-based CLI utilities:
 
 ```bash
 # Start the full automated discovery, analysis, and contribution pipeline
@@ -91,11 +91,8 @@ farm_agent target <repo_url>
 # Solve open issues in a specific repository
 farm_agent solve <repo_url>
 
-# Run in Hunt Mode: aggressively discover repos and solve issues/bugs
+# Run in Hunt Mode: agresively discover repos and solve issues/bugs
 farm_agent hunt [--rounds N] [--mode analysis|issues|both]
-
-# Run the Circular target loop over queue deterministically
-farm_agent hunt-circular
 
 # Run the Relentless 24/7 Super Human loop (patrols PRs and hunts targets)
 farm_agent superhuman
@@ -116,15 +113,6 @@ farm_agent models
 farm_agent leaderboard
 farm_agent system-status
 
-# View current loaded runtime settings
-farm_agent config
-
-# Monitor and synchronize VIP repository radar list
-farm_agent vips
-
-# Display formatting templates for PR descriptions
-farm_agent templates
-
 # Run with thorough, standard, or quick presets
 farm_agent profile <profile_name>
 
@@ -133,9 +121,6 @@ farm_agent reset-db
 
 # Run garbage collection to purge stale knowledge base entries
 farm_agent gc --days 90
-
-# Test notifications to Telegram/Slack/Discord
-farm_agent notify-test
 ```
 
 ---

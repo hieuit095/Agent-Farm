@@ -189,7 +189,6 @@ _process_repo(repo)
   └─ PRManager.create_pr()                              # pipeline.py:2017
 ```
 
-
 ### 4B. Circular target pipeline — `run_circular()` ([pipeline.py:834](file:///c:/Users/USER/Documents/GitHub/Agent-Farm/farm_agent/orchestrator/pipeline.py#L834))
 
 Circular target pipeline loop extracting target repos from the local SQLite queue:
@@ -233,8 +232,6 @@ run_circular()
        └─ [PHASE 7] PRManager.create_pr()               # pipeline.py:1115
             └─ Submits PR. On success status marked PR_SUBMITTED.
 ```
-
----
 
 ## 5. Adaptive Concurrency & Throttling
 
