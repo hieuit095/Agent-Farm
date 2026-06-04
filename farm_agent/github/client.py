@@ -426,10 +426,11 @@ class GitHubClient:
             f"/repos/{owner}/{repo}/git/trees/{branch}",
             params={"recursive": "1"},
         )
-        
+
         from pathlib import Path
+
         from farm_agent.core.models import TOKEN_BLACKLIST
-        
+
         tree = []
         for item in data.get("tree", []):
             path_parts = Path(item["path"]).parts
@@ -654,7 +655,7 @@ class GitHubClient:
             raise GitHubAPIError(error_msg, status_code=status_code)
 
         pr_number = response_data.get("number", "?")
-        pr_url = response_data.get("html_url", "")
+        response_data.get("html_url", "")
         logger.info("Created PR #%s on %s/%s: %s", pr_number, owner, repo, title)
         return response_data
 
