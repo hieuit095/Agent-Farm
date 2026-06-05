@@ -3140,10 +3140,9 @@ class FarmAgentPipeline:
 
         # PERF-OPT: Process file patches using to_thread to avoid blocking event loop
         # and gather them for potential parallel I/O speedup.
-        patch_tasks = [
-            asyncio.to_thread(self._apply_patch_sync, clone_path, change) for change in all_changes
-        ]
-        await asyncio.gather(*patch_tasks)
+        patch_tasks = [asyncio.to_thread(self._apply_patch_sync, clone_path, change) for change in all_changes]
+        if patch_tasks:
+            await asyncio.gather(*patch_tasks)
 
         return clone_path
 
