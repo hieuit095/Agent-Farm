@@ -10,7 +10,8 @@ from farm_agent.orchestrator.pipeline import FarmAgentPipeline
 
 class TestAsyncIOPipeline(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
-        self.config = MagicMock()
+        from farm_agent.core.config import FarmAgentConfig
+        self.config = FarmAgentConfig()
         self.config.notifications.telegram_token = None
         self.config.notifications.telegram_chat_id = None
         self.pipeline = FarmAgentPipeline(self.config)
