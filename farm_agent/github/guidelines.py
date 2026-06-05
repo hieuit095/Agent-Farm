@@ -111,13 +111,13 @@ class RepoGuidelines:
 
 def _discover_docs_sync(repo_path: str) -> dict[str, str]:
     docs = {}
-    
+
     # 1. Read root README.md
     for name in ["README.md", "readme.md", "README.txt", "README.rst"]:
         readme_path = os.path.join(repo_path, name)
         if os.path.isfile(readme_path):
             try:
-                with open(readme_path, "r", encoding="utf-8", errors="ignore") as f:
+                with open(readme_path, encoding="utf-8", errors="ignore") as f:
                     docs[name] = f.read()
                 break
             except Exception as e:
@@ -137,13 +137,13 @@ def _discover_docs_sync(repo_path: str) -> dict[str, str]:
                                 full_path = os.path.join(root, file)
                                 rel_path = os.path.relpath(full_path, repo_path)
                                 try:
-                                    with open(full_path, "r", encoding="utf-8", errors="ignore") as f:
+                                    with open(full_path, encoding="utf-8", errors="ignore") as f:
                                         docs[rel_path.replace("\\", "/")] = f.read()
                                 except Exception as e:
                                     logger.debug("Failed to read doc file %s: %s", full_path, e)
         except Exception as e:
             logger.warning("Error walking repository path %s for docs: %s", repo_path, e)
-            
+
     return docs
 
 

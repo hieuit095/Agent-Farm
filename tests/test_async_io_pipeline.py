@@ -1,8 +1,9 @@
 
 import asyncio
 import os
+from farm_agent.core.config import FarmAgentConfig
 import unittest
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from farm_agent.core.models import FileChange
 from farm_agent.orchestrator.pipeline import FarmAgentPipeline
@@ -10,7 +11,9 @@ from farm_agent.orchestrator.pipeline import FarmAgentPipeline
 
 class TestAsyncIOPipeline(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
-        self.config = MagicMock()
+        from farm_agent.core.config import FarmAgentConfig
+        self.config = FarmAgentConfig()
+        self.config.pipeline.max_concurrent_repos = 5
         self.config.notifications.telegram_token = None
         self.config.notifications.telegram_chat_id = None
         self.pipeline = FarmAgentPipeline(self.config)
@@ -23,10 +26,10 @@ class TestAsyncIOPipeline(unittest.IsolatedAsyncioTestCase):
         mock_join.return_value = "/tmp/clone"
 
         # Mocking the clone behavior
-        async def mock_to_thread_func(func, *args, **kwargs):
+        def mock_to_thread_func(func, *args, **kwargs):
             if func == os.makedirs:
                 return None
-            return await asyncio.to_thread(func, *args, **kwargs)
+            return asyncio.create_task(asyncio.to_thread(func, *args, **kwargs))
 
         mock_to_thread.side_effect = mock_to_thread_func
 
