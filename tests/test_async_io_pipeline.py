@@ -11,6 +11,9 @@ from farm_agent.orchestrator.pipeline import FarmAgentPipeline
 class TestAsyncIOPipeline(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.config = MagicMock()
+        self.config.pipeline.max_concurrent_repos = 5
+        self.config.pipeline.llm_concurrency_cap = 5
+        self.config.pipeline.rate_limit_cooldown_sec = 300
         self.config.notifications.telegram_token = None
         self.config.notifications.telegram_chat_id = None
         self.pipeline = FarmAgentPipeline(self.config)
