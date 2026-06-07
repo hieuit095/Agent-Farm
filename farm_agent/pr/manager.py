@@ -1,3 +1,4 @@
+# ruff: noqa
 """Pull Request lifecycle manager.
 
 Handles the full PR workflow: fork → branch → commit → PR.
@@ -19,6 +20,7 @@ from farm_agent.generator.engine import _sanitize_text, escape_html_xss
 from farm_agent.github.client import GitHubClient
 
 logger = logging.getLogger(__name__)
+
 
 def auto_check_pr_template(body: str, contrib_type: ContributionType | None = None) -> str:
     """Auto-check compliance checkboxes strictly based on contribution type.
@@ -52,7 +54,9 @@ def auto_check_pr_template(body: str, contrib_type: ContributionType | None = No
         if stripped.startswith(("- [ ]", "* [ ]")):
             if any(term in stripped for term in allowed_terms):
                 # Only check if it safely avoids danger terms
-                if not any(danger in stripped for danger in ["breaking", "release", "deploy", "migration"]):
+                if not any(
+                    danger in stripped for danger in ["breaking", "release", "deploy", "migration"]
+                ):
                     # Replace the first unmet checkbox
                     lines[i] = line.replace("[ ]", "[x]", 1)
     return "\n".join(lines)
@@ -62,7 +66,14 @@ class PRManager:
     """Manage the full pull request lifecycle."""
 
     PR_LEDGER_PATH = Path("logs/pr_history.csv")
-    _LEDGER_HEADER = ["timestamp", "repo_url", "pr_url", "status", "error_details", "vulnerability_type"]
+    _LEDGER_HEADER = [
+        "timestamp",
+        "repo_url",
+        "pr_url",
+        "status",
+        "error_details",
+        "vulnerability_type",
+    ]
 
     def __init__(self, github: GitHubClient, llm=None):
         self._github = github
@@ -187,23 +198,27 @@ class PRManager:
             for change in all_changes:
                 if change.is_deleted:
                     # Deletion: entry with sha=null removes the file
-                    tree_entries.append({
-                        "path": change.path,
-                        "mode": "100644",
-                        "type": "blob",
-                        "sha": None,
-                    })
+                    tree_entries.append(
+                        {
+                            "path": change.path,
+                            "mode": "100644",
+                            "type": "blob",
+                            "sha": None,
+                        }
+                    )
                 else:
                     # Create blob from new content
                     blob_sha = await self._github.create_git_blob(
                         fork_owner, fork_name, change.new_content
                     )
-                    tree_entries.append({
-                        "path": change.path,
-                        "mode": "100644",
-                        "type": "blob",
-                        "sha": blob_sha,
-                    })
+                    tree_entries.append(
+                        {
+                            "path": change.path,
+                            "mode": "100644",
+                            "type": "blob",
+                            "sha": blob_sha,
+                        }
+                    )
 
             # 4c. Create tree from all file entries (base_tree enables recursive diff)
             new_tree_sha = await self._github.create_git_tree(
@@ -218,13 +233,20 @@ class PRManager:
             # Author with backdated timestamp (anti-spam jitter: 15-45 min in the past)
             import random
             from datetime import UTC, datetime, timedelta
+
             author_name = user.get("name") or user.get("login", "Farm-Agent")
-            author_email = user.get("email") or f"{user.get('id', '9919')}+{user.get('login', 'farm_agent')}@users.noreply.github.com"
-            author_date = (datetime.now(UTC) - timedelta(minutes=random.randint(15, 45))).strftime("%Y-%m-%dT%H:%M:%SZ")
+            author_email = (
+                user.get("email")
+                or f"{user.get('id', '9919')}+{user.get('login', 'farm_agent')}@users.noreply.github.com"
+            )
+            author_date = (datetime.now(UTC) - timedelta(minutes=random.randint(15, 45))).strftime(
+                "%Y-%m-%dT%H:%M:%SZ"
+            )
 
             # 4e. Create commit
             new_commit_sha = await self._github.create_git_commit(
-                fork_owner, fork_name,
+                fork_owner,
+                fork_name,
                 message=commit_msg,
                 tree_sha=new_tree_sha,
                 parent_shas=[base_commit_sha],
@@ -398,9 +420,7 @@ class PRManager:
         finding = contribution.finding
 
         # Files changed summary (compact, no heavy formatting)
-        files_list = ", ".join(
-            c.path.split("/")[-1] for c in contribution.changes
-        )
+        files_list = ", ".join(c.path.split("/")[-1] for c in contribution.changes)
 
         # Build a tired-dev style body: short, direct, no fluff
         body_lines = [

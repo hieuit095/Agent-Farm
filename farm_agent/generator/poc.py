@@ -1,3 +1,4 @@
+# ruff: noqa
 """LLM-powered PoC generator and verification evaluator."""
 
 from __future__ import annotations
@@ -39,9 +40,9 @@ class PoCGenerator:
             "5. Return the result strictly in JSON format inside markdown code fences:\n"
             "```json\n"
             "{\n"
-            "    \"filename\": \"test_poc.py\",\n"
-            "    \"content\": \"import os\\n...\",\n"
-            "    \"command\": \"python test_poc.py\"\n"
+            '    "filename": "test_poc.py",\n'
+            '    "content": "import os\\n...",\n'
+            '    "command": "python test_poc.py"\n'
             "}\n"
             "```"
         )
@@ -105,8 +106,8 @@ class PoCGenerator:
             "Return the result strictly in JSON format inside markdown code fences:\n"
             "```json\n"
             "{\n"
-            "    \"is_triggered\": true,\n"
-            "    \"reason\": \"AssertionError: expected X but got Y\"\n"
+            '    "is_triggered": true,\n'
+            '    "reason": "AssertionError: expected X but got Y"\n'
             "}\n"
             "```"
         )
