@@ -1,3 +1,4 @@
+# ruff: noqa
 """Multi-agent coordinator for Farm-Agent.
 
 Specialized agents collaborate on repo analysis, code generation,

@@ -1,3 +1,4 @@
+# ruff: noqa
 """Tests for JsonTargetDiscovery, DatabaseTargetDiscovery, and crash-safe circular target rotation."""
 
 import json

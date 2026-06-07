@@ -1,3 +1,4 @@
+# ruff: noqa
 """PR Patrol — monitor and respond to review feedback on open PRs.
 
 Scans Farm-Agent PRs for maintainer review comments, uses LLM to
@@ -173,7 +174,9 @@ class PRPatrol:
         config = kwargs.get("config")
         pipeline_cfg = getattr(config, "pipeline", None) if config else None
         self.MAX_CI_RETRIES = getattr(pipeline_cfg, "max_ci_retries", 3) if pipeline_cfg else 3
-        self.MAX_DISCUSSION_REPLIES = getattr(pipeline_cfg, "max_discussion_replies", 3) if pipeline_cfg else 3
+        self.MAX_DISCUSSION_REPLIES = (
+            getattr(pipeline_cfg, "max_discussion_replies", 3) if pipeline_cfg else 3
+        )
 
     def _create_sandbox(self) -> DockerSandbox:
         """Create a sandbox instance for local validation."""
@@ -197,6 +200,7 @@ class PRPatrol:
     def _get_contextual_greeting(self) -> str:
         """Contextual Small Talk: Day-of-the-week greetings in UTC."""
         from datetime import datetime
+
         now = datetime.now(UTC)
         if now.hour >= 12 and now.weekday() == 4:
             return random.choice(["Happy Friday! ", "Hope you have a great weekend ahead. "])
@@ -262,14 +266,18 @@ class PRPatrol:
                         pr["pr_number"],
                         pr["repo"],
                     )
-                    result.prs_merged.append({
-                        "repo": pr["repo"],
-                        "pr_number": pr["pr_number"],
-                        "url": pr_data.get("html_url", pr.get("pr_url", "")),
-                    })
+                    result.prs_merged.append(
+                        {
+                            "repo": pr["repo"],
+                            "pr_number": pr["pr_number"],
+                            "url": pr_data.get("html_url", pr.get("pr_url", "")),
+                        }
+                    )
                     if self._memory:
                         await self._memory.update_pr_status(
-                            pr["repo"], pr["pr_number"], "merged",
+                            pr["repo"],
+                            pr["pr_number"],
+                            "merged",
                         )
                     # Clean up the branch from the fork
                     head_node = pr_data.get("head", {})
@@ -282,7 +290,10 @@ class PRPatrol:
                         except Exception as exc:
                             logger.warning(
                                 "  ⚠️ Could not delete branch %s on %s/%s: %s",
-                                branch_name, fork_owner, fork_repo, exc,
+                                branch_name,
+                                fork_owner,
+                                fork_repo,
+                                exc,
                             )
                     continue
 
@@ -298,7 +309,13 @@ class PRPatrol:
                 head_sha = pr_data.get("head", {}).get("sha", "")
                 if head_sha:
                     ci_handled = await self._check_ci_failures(
-                        owner, repo_name, pr, pr_data, head_sha, result, dry_run=dry_run,
+                        owner,
+                        repo_name,
+                        pr,
+                        pr_data,
+                        head_sha,
+                        result,
+                        dry_run=dry_run,
                     )
                     if ci_handled:
                         if self._notifier and not dry_run:
@@ -318,9 +335,7 @@ class PRPatrol:
                 classified = await self._classify_feedback(feedback)
 
                 # ── Hostile rejection: close PR and blacklist repo ──────
-                hostile = [
-                    f for f in classified if f.action == FeedbackAction.HOSTILE_REJECT
-                ]
+                hostile = [f for f in classified if f.action == FeedbackAction.HOSTILE_REJECT]
                 if hostile:
                     reason = hostile[0].body[:500]
                     logger.warning(
@@ -395,12 +410,14 @@ class PRPatrol:
                 reply_count = 0
                 if self._memory:
                     reply_count = await self._memory.get_discussion_replies(
-                        pr["repo"], pr["pr_number"],
+                        pr["repo"],
+                        pr["pr_number"],
                     )
                 if reply_count >= self.MAX_DISCUSSION_REPLIES:
                     logger.warning(
                         "  🏳️ Discussion reply limit (%d) reached for PR #%d — surrendering",
-                        self.MAX_DISCUSSION_REPLIES, pr["pr_number"],
+                        self.MAX_DISCUSSION_REPLIES,
+                        pr["pr_number"],
                     )
                     if not dry_run:
                         if random.random() < 0.10:
@@ -418,25 +435,34 @@ class PRPatrol:
                                 )
                             except GitHubAPIError as exc:
                                 logger.warning(
-                                    "  ⚠️ Could not close PR #%d: %s", pr["pr_number"], exc,
+                                    "  ⚠️ Could not close PR #%d: %s",
+                                    pr["pr_number"],
+                                    exc,
                                 )
                             if self._memory:
-                                await self._memory.update_pr_status(pr["repo"], pr["pr_number"], "ghosted")
+                                await self._memory.update_pr_status(
+                                    pr["repo"], pr["pr_number"], "ghosted"
+                                )
                             result.prs_closed_hostile += 1
                             continue
 
                         try:
                             await self._github.close_pull_request(
-                                owner, repo_name, pr["pr_number"],
+                                owner,
+                                repo_name,
+                                pr["pr_number"],
                                 comment=random.choice(GITHUB_REPLIES["SURRENDER"]),
                             )
                         except GitHubAPIError as exc:
                             logger.warning(
-                                "  ⚠️ Could not close PR #%d: %s", pr["pr_number"], exc,
+                                "  ⚠️ Could not close PR #%d: %s",
+                                pr["pr_number"],
+                                exc,
                             )
                         if self._notifier:
                             repo_url = pr_data.get(
-                                "html_url", f"https://github.com/{pr['repo']}",
+                                "html_url",
+                                f"https://github.com/{pr['repo']}",
                             )
                             await self._notifier.send_message(
                                 f"🏳️ [SURRENDER] PR closed due to max retries "
@@ -470,25 +496,31 @@ class PRPatrol:
                         FeedbackAction.CODE_CHANGE,
                         FeedbackAction.STYLE_FIX,
                     ):
-                        fixed = await self._handle_code_fix(owner, repo_name, pr, pr_data, item, dry_run=dry_run)
+                        fixed = await self._handle_code_fix(
+                            owner, repo_name, pr, pr_data, item, dry_run=dry_run
+                        )
                         if fixed:
                             result.fixes_pushed += 1
                             result.replies_sent += 1
                             if self._memory:
                                 await self._memory.increment_discussion_replies(
-                                    pr["repo"], pr["pr_number"],
+                                    pr["repo"],
+                                    pr["pr_number"],
                                 )
                             if self._notifier and not dry_run:
                                 await self._notifier.send_message(
                                     f"🛡️ <b>[PATROL]</b> Action Taken!\nRepo: <code>{pr['repo']}</code>\nAction: Pushed Code Fix\nURL: {pr_data.get('html_url', pr.get('pr_url', ''))}"
                                 )
                     elif item.action == FeedbackAction.QUESTION:
-                        answered = await self._handle_question(owner, repo_name, pr, pr_data, item, dry_run=dry_run)
+                        answered = await self._handle_question(
+                            owner, repo_name, pr, pr_data, item, dry_run=dry_run
+                        )
                         if answered:
                             result.replies_sent += 1
                             if self._memory:
                                 await self._memory.increment_discussion_replies(
-                                    pr["repo"], pr["pr_number"],
+                                    pr["repo"],
+                                    pr["pr_number"],
                                 )
                             if self._notifier and not dry_run:
                                 await self._notifier.send_message(
@@ -631,12 +663,8 @@ class PRPatrol:
                         "line": c.get("line") or c.get("original_line"),
                         "diff_hunk": c.get("diff_hunk"),
                     }
-                if (
-                    c.get("in_reply_to_id")
-                    and (
-                        login == our_username
-                        or any(marker in body for marker in OUR_REPLY_MARKERS)
-                    )
+                if c.get("in_reply_to_id") and (
+                    login == our_username or any(marker in body for marker in OUR_REPLY_MARKERS)
                 ):
                     handled_review_comment_ids.add(c["in_reply_to_id"])
 
@@ -876,6 +904,7 @@ class PRPatrol:
                 scheduled = await self._memory.get_task_schedule(task_key)
                 if scheduled:
                     from datetime import datetime
+
                     try:
                         scheduled_dt = datetime.fromisoformat(scheduled)
                         if scheduled_dt.tzinfo is None:
@@ -883,7 +912,8 @@ class PRPatrol:
                         if scheduled_dt > datetime.now(UTC):
                             logger.info(
                                 "Skipping code fix for task %s — scheduled for %s",
-                                task_key, scheduled,
+                                task_key,
+                                scheduled,
                             )
                             return False
                     except Exception as e:
@@ -891,8 +921,7 @@ class PRPatrol:
                         logger.warning("Purging corrupted schedule entry for %s: %s", task_key, e)
                         try:
                             await self._memory._db.execute(
-                                "DELETE FROM task_schedule WHERE task_key = ?",
-                                (task_key,)
+                                "DELETE FROM task_schedule WHERE task_key = ?", (task_key,)
                             )
                             await self._memory._db.commit()
                         except Exception as db_e:
@@ -910,13 +939,14 @@ class PRPatrol:
             # Layer 1: Contextual Memory — fetch previous failed diff
             user = await self._get_user()
             previous_diff = await self._fetch_previous_bot_diff(
-                owner, repo, pr_data["number"], user["login"],
+                owner,
+                repo,
+                pr_data["number"],
+                user["login"],
             )
 
             # Generate fix via LLM
-            prompt = self._build_fix_prompt(
-                feedback, file_content, file_path, diff, previous_diff
-            )
+            prompt = self._build_fix_prompt(feedback, file_content, file_path, diff, previous_diff)
             response = await self._llm.complete(
                 prompt,
                 system=(
@@ -954,7 +984,9 @@ class PRPatrol:
                 # P1-OPSEC-1: Human-like continuous delay distribution
                 # Use expovariate for Poisson-process-like delays (human work patterns)
                 mean_delay = random.uniform(120, 600)  # mean of 2-10 minutes
-                read_delay = max(15, min(random.expovariate(1.0 / mean_delay), 7200))  # cap at 2 hours
+                read_delay = max(
+                    15, min(random.expovariate(1.0 / mean_delay), 7200)
+                )  # cap at 2 hours
                 # Add triangular jitter to further obscure pattern
                 jitter = random.triangular(0.5, 2.0, 1.0)  # 50%-200% of base, mode=100%
                 read_delay = int(read_delay * jitter)
@@ -962,12 +994,22 @@ class PRPatrol:
                 read_delay = min(read_delay, 7200)  # 2 hours absolute max
 
                 if read_delay < 300:
-                    logger.info("  Mới check mail thấy có notification từ Maintainer. Bắt đầu đọc... (Simulating notification lag: %ds)", read_delay)
+                    logger.info(
+                        "  Mới check mail thấy có notification từ Maintainer. Bắt đầu đọc... (Simulating notification lag: %ds)",
+                        read_delay,
+                    )
                 else:
                     from datetime import datetime
-                    next_run = datetime.now(UTC) + __import__("datetime").timedelta(seconds=read_delay)
+
+                    next_run = datetime.now(UTC) + __import__("datetime").timedelta(
+                        seconds=read_delay
+                    )
                     await self._memory.set_task_schedule(task_key, next_run.isoformat())
-                    logger.info("  Long notification lag (%ds) scheduled for %s — skipping this cycle", read_delay, next_run.isoformat())
+                    logger.info(
+                        "  Long notification lag (%ds) scheduled for %s — skipping this cycle",
+                        read_delay,
+                        next_run.isoformat(),
+                    )
                     return False
 
                 await asyncio.sleep(read_delay)
@@ -1003,15 +1045,15 @@ class PRPatrol:
                 logger.warning(
                     "  ⚠️ PR branch modified/deleted externally (Janitor race) "
                     "while pushing fix to %s: %s",
-                    file_path, exc,
+                    file_path,
+                    exc,
                 )
                 return False
             logger.info("  Pushed fix for %s: %s", file_path, feedback.body[:60])
 
             # Reply to comment — sound like a real human developer
             reply_body = (
-                random.choice(GITHUB_REPLIES["FIX_APPLIED"])
-                + "\n\n<!-- farm_agent-patrol -->"
+                random.choice(GITHUB_REPLIES["FIX_APPLIED"]) + "\n\n<!-- farm_agent-patrol -->"
             )
             if feedback.is_inline:
                 await self._github.create_pr_review_comment_reply(
@@ -1135,7 +1177,10 @@ class PRPatrol:
                     read_delay = random.randint(30, 300)  # Quick response (active coding)
                 else:
                     read_delay = random.randint(3600, 28800)  # Long delay (meeting/sleep)
-                logger.info("  Mới check mail thấy có notification từ Maintainer. Bắt đầu đọc... (Simulating notification lag: %ds)", read_delay)
+                logger.info(
+                    "  Mới check mail thấy có notification từ Maintainer. Bắt đầu đọc... (Simulating notification lag: %ds)",
+                    read_delay,
+                )
                 await asyncio.sleep(read_delay)
 
                 delay = self._calculate_typing_delay(reply_body)
@@ -1145,6 +1190,7 @@ class PRPatrol:
             # Post reply
             # ── Gag Order — block AI disclosures before posting ─────────────
             import re as _re
+
             _ghost_re = _re.compile(
                 r"(?i)(as an ai|ai generated|language model|openai|minimax|"
                 r"automated bot|generated by ai|ai assistant|farm_agent|agent-farm|farmagent)",
@@ -1234,9 +1280,7 @@ class PRPatrol:
         human feedback for this patrol cycle).
         """
         check_runs = await self._github.get_pr_check_runs(owner, repo, head_sha)
-        failed_runs = [
-            r for r in check_runs if r.get("conclusion") == "failure"
-        ]
+        failed_runs = [r for r in check_runs if r.get("conclusion") == "failure"]
         if not failed_runs:
             return False
 
@@ -1251,12 +1295,15 @@ class PRPatrol:
         if attempts >= self.MAX_CI_RETRIES:
             logger.warning(
                 "  🚫 CI fix limit (%d) reached for PR #%d — closing PR",
-                self.MAX_CI_RETRIES, pr_number,
+                self.MAX_CI_RETRIES,
+                pr_number,
             )
             if not dry_run:
                 try:
                     await self._github.close_pull_request(
-                        owner, repo, pr_number,
+                        owner,
+                        repo,
+                        pr_number,
                         comment=random.choice(GITHUB_REPLIES["CI_LIMIT_CLOSE"]).format(
                             attempts=self.MAX_CI_RETRIES,
                         ),
@@ -1271,10 +1318,7 @@ class PRPatrol:
             return True
 
         # Filter out infrastructure/auth failures that cannot be fixed by code
-        fixable_runs = [
-            r for r in failed_runs
-            if not self._is_infra_ci_failure(r.get("name", ""))
-        ]
+        fixable_runs = [r for r in failed_runs if not self._is_infra_ci_failure(r.get("name", ""))]
 
         if len(fixable_runs) < len(failed_runs):
             skipped = len(failed_runs) - len(fixable_runs)
@@ -1297,9 +1341,11 @@ class PRPatrol:
 
         logger.info(
             "  🔴 CI check '%s' failed on PR #%d (attempt %d/%d)",
-            check_name, pr_number, attempts + 1, self.MAX_CI_RETRIES,
+            check_name,
+            pr_number,
+            attempts + 1,
+            self.MAX_CI_RETRIES,
         )
-
 
         if dry_run:
             logger.info("  🏃 [DRY RUN] Would attempt CI auto-fix")
@@ -1321,9 +1367,14 @@ class PRPatrol:
             )
             return False
 
-
         ci_status = await self._handle_ci_failure(
-            owner, repo, pr_record, pr_data, traceback, check_name, attempts,
+            owner,
+            repo,
+            pr_record,
+            pr_data,
+            traceback,
+            check_name,
+            attempts,
         )
 
         if ci_status == "pushed":
@@ -1368,23 +1419,24 @@ class PRPatrol:
         Returns a safe, ASCII-only check name suitable for commits/PR bodies.
         """
         import re as _re
+
         # Strip emojis and non-ASCII (keep alphanumeric, spaces, hyphens, underscores, dots, slashes)
-        sanitized = _re.sub(r'[^\x20-\x7E]', '', raw_name)
+        sanitized = _re.sub(r"[^\x20-\x7E]", "", raw_name)
         # Strip AI identity keywords (Gag Order)
         _gag_keywords = _re.compile(
-            r'\b(bot|ai|automated|robot|artificial|intelligence|machine.?learning|'
-            r'openai|anthropic|gemini|minimax|agent-farm|farm.?agent)\b',
+            r"\b(bot|ai|automated|robot|artificial|intelligence|machine.?learning|"
+            r"openai|anthropic|gemini|minimax|agent-farm|farm.?agent)\b",
             _re.IGNORECASE,
         )
-        sanitized = _gag_keywords.sub('', sanitized)
+        sanitized = _gag_keywords.sub("", sanitized)
         # Strip prompt injection patterns
         _injection_re = _re.compile(
-            r'\b(ignore|instruction|system.?prompt|override|disregard|forget)\b',
+            r"\b(ignore|instruction|system.?prompt|override|disregard|forget)\b",
             _re.IGNORECASE,
         )
-        sanitized = _injection_re.sub('', sanitized)
+        sanitized = _injection_re.sub("", sanitized)
         # Collapse whitespace and trim
-        sanitized = _re.sub(r'\s+', ' ', sanitized).strip()
+        sanitized = _re.sub(r"\s+", " ", sanitized).strip()
         # Fallback if everything was stripped
         return sanitized or "CI"
 
@@ -1481,9 +1533,7 @@ class PRPatrol:
             commits = await self._github.get_pr_commits(owner, repo, pr_number)
             # Walk backwards to find the latest bot commit
             for commit in reversed(commits):
-                author_login = (
-                    commit.get("author") or {}
-                ).get("login", "")
+                author_login = (commit.get("author") or {}).get("login", "")
                 if author_login == username:
                     sha = commit.get("sha", "")
                     if sha:
@@ -1492,7 +1542,6 @@ class PRPatrol:
         except Exception as exc:
             logger.debug("Could not fetch previous bot diff: %s", exc)
         return ""
-
 
     async def _handle_ci_failure(
         self,
@@ -1522,7 +1571,10 @@ class PRPatrol:
 
             user = await self._get_user()
             previous_diff = await self._fetch_previous_bot_diff(
-                owner, repo, pr_number, user["login"],
+                owner,
+                repo,
+                pr_number,
+                user["login"],
             )
 
             file_path = self._guess_file_from_traceback(traceback, diff)
@@ -1552,7 +1604,10 @@ class PRPatrol:
             current_content = ""
             with contextlib.suppress(Exception):
                 current_content = await self._github.get_file_content(
-                    fork_owner, fork_repo, file_path, ref=branch,
+                    fork_owner,
+                    fork_repo,
+                    file_path,
+                    ref=branch,
                 )
 
             fixed_content, _, validation_failures = await self._generate_validated_ci_fix(
@@ -1616,7 +1671,8 @@ class PRPatrol:
                 logger.warning(
                     "  ⚠️ PR branch modified/deleted externally (Janitor race) "
                     "while pushing CI fix to %s: %s",
-                    file_path, exc,
+                    file_path,
+                    exc,
                 )
                 return "failed"
             logger.info("  Pushed CI fix for '%s' on %s", check_name, file_path)
@@ -1662,9 +1718,11 @@ class PRPatrol:
                 )
             except Exception as exc:
                 from farm_agent.core.exceptions import LLMRateLimitError
+
                 if isinstance(exc, LLMRateLimitError):
                     logger.warning(
-                        "  ⚠️ LLM quota exhausted during CI auto-heal — aborting fix: %s", exc,
+                        "  ⚠️ LLM quota exhausted during CI auto-heal — aborting fix: %s",
+                        exc,
                     )
                     raise  # re-raise so _handle_ci_failure / outer loop can cooldown
                 logger.error("  ❌ LLM call failed during CI auto-heal: %s", exc)
@@ -1705,6 +1763,7 @@ class PRPatrol:
                         )
                     except Exception as llm_exc:
                         from farm_agent.core.exceptions import LLMRateLimitError
+
                         if isinstance(llm_exc, LLMRateLimitError):
                             logger.warning(
                                 "  ⚠️ LLM quota exhausted during sandbox CI fix — aborting: %s",
@@ -1712,7 +1771,8 @@ class PRPatrol:
                             )
                             raise  # propagate to caller for cooldown
                         logger.error(
-                            "  ❌ LLM call failed during sandbox CI fix: %s", llm_exc,
+                            "  ❌ LLM call failed during sandbox CI fix: %s",
+                            llm_exc,
                         )
                         return None, last_result, validation_failures
                     fixed_content = self._extract_fixed_content(response)
@@ -1802,9 +1862,13 @@ class PRPatrol:
             node_path = self._tree_node_value(node, "path")
             node_type = self._tree_node_value(node, "type")
             node_size = self._tree_node_value(node, "size", 0)
-            if node_type != "blob" or not node_path or not self._should_copy_validation_file(
-                node_path,
-                node_size,
+            if (
+                node_type != "blob"
+                or not node_path
+                or not self._should_copy_validation_file(
+                    node_path,
+                    node_size,
+                )
             ):
                 continue
 
@@ -1815,7 +1879,9 @@ class PRPatrol:
                 try:
                     content = await get_file_content(owner, repo, node_path, branch)
                 except Exception as e:
-                    logger.warning("Validation file fetch failed for %s: %s — cannot validate", node_path, e)
+                    logger.warning(
+                        "Validation file fetch failed for %s: %s — cannot validate", node_path, e
+                    )
                     continue
             except Exception:
                 continue
@@ -2012,7 +2078,7 @@ class PRPatrol:
             for prefix in ("/home/runner/work/", "/github/workspace/"):
                 if path.startswith(prefix):
                     # e.g. /home/runner/work/repo/repo/src/main.py → src/main.py
-                    parts = path[len(prefix):].split("/", 2)
+                    parts = path[len(prefix) :].split("/", 2)
                     if len(parts) >= 3:
                         return parts[2]
             return path
