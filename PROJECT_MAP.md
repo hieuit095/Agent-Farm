@@ -152,7 +152,7 @@ Version 4.0.0 upgrades the system's codebase understanding from superficial file
 │   │   └── security_gate.py            # Identifies private security disclosure files
 │   │
 │   ├── issues/
-│   │   └── solver.py                   # IssueSolver (solves issues, multi-file deep planner)
+│   │   └── solver.py                   # Analyzes & plans bug fixes
 │   │
 │   ├── llm/
 │   │   ├── agents.py                   # LLM agent prompts and routing models
@@ -162,13 +162,13 @@ Version 4.0.0 upgrades the system's codebase understanding from superficial file
 │   │   └── router.py                   # Task router mapping
 │   │
 │   ├── orchestrator/
-│   │   ├── memory.py                   # Persistence memory sqlite connection interface
-│   │   ├── pipeline.py                 # Pipeline (Standard & Circular pipelines implementation)
-│   │   └── human.py                    # SuperHumanLoop relentless daily scheduler
+│   │   ├── human.py                    # The 24/7 SuperHuman daemon
+│   │   ├── memory.py                   # Persistent SQLite interface
+│   │   └── pipeline.py                 # Primary sequential and circular flows
 │   │
 │   ├── pr/
 │   │   ├── manager.py                  # Pull Request manager (forking, branches, commits)
-│   │   ├── patrol.py                   # PR Patrol (reviews comments, fixes CI errors)
+│   │   ├── patrol.py                   # Log parser and AI auto-repair loop
 │   │   └── janitor.py                  # PR Janitor (sweeps and destroys garbage PRs)
 │   │
 │   ├── agents/
