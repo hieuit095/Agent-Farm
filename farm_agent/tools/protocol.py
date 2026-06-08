@@ -87,38 +87,14 @@ class GitHubTool:
     """Wraps GitHubClient as a tool."""
 
     # File extensions that should never be fetched (binary, lock, config)
-    BLOCKED_EXTENSIONS = frozenset(
-        {
-            ".png",
-            ".jpg",
-            ".jpeg",
-            ".gif",
-            ".ico",
-            ".svg",
-            ".webp",
-            ".woff",
-            ".woff2",
-            ".eot",
-            ".ttf",
-            ".otf",
-            ".zip",
-            ".tar",
-            ".gz",
-            ".bz2",
-            ".7z",
-            ".exe",
-            ".dll",
-            ".so",
-            ".dylib",
-            ".pyc",
-            ".pyo",
-            ".class",
-            ".lock",
-            ".min.js",
-            ".min.css",
-            ".map",
-        }
-    )
+    BLOCKED_EXTENSIONS = frozenset({
+        ".png", ".jpg", ".jpeg", ".gif", ".ico", ".svg", ".webp",
+        ".woff", ".woff2", ".eot", ".ttf", ".otf",
+        ".zip", ".tar", ".gz", ".bz2", ".7z",
+        ".exe", ".dll", ".so", ".dylib",
+        ".pyc", ".pyo", ".class",
+        ".lock", ".min.js", ".min.css", ".map",
+    })
 
     # Maximum file size to fetch (100KB)
     MAX_FILE_SIZE = 100_000
@@ -191,14 +167,15 @@ class GitHubTool:
 
         try:
             content = await self._client.get_file_content(
-                self._owner,
-                self._repo,
-                filepath,
+                self._owner, self._repo, filepath,
             )
 
             # Size guard
             if len(content) > self.MAX_FILE_SIZE:
-                content = content[: self.MAX_FILE_SIZE] + "\n... [truncated — file exceeds 100KB]"
+                content = (
+                    content[: self.MAX_FILE_SIZE]
+                    + "\n... [truncated — file exceeds 100KB]"
+                )
 
             return ToolResult(success=True, data=content)
 
@@ -231,7 +208,8 @@ READ_FILE_TOOL_SCHEMA = {
             "filepath": {
                 "type": "string",
                 "description": (
-                    "The relative file path in the repository (e.g. 'src/utils/helpers.py')."
+                    "The relative file path in the repository "
+                    "(e.g. 'src/utils/helpers.py')."
                 ),
             },
         },

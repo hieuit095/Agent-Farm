@@ -1,5 +1,5 @@
+import pytest
 from farm_agent.analysis.mapper import RepoMapper
-
 
 def test_python_dependencies():
     mapper = RepoMapper()
@@ -21,7 +21,7 @@ def authenticate():
         "src/utils.py": """
 def log(msg):
     print(msg)
-""",
+"""
     }
 
     # Generate skeleton to store file_contents in mapper
@@ -67,7 +67,7 @@ func Check() {}
         "db/db.go": """
 package db
 func Connect() {}
-""",
+"""
     }
 
     mapper.generate_repo_skeleton(file_contents)
@@ -105,7 +105,7 @@ impl Config {
 """,
         "src/db.rs": """
 pub fn init() {}
-""",
+"""
     }
 
     mapper.generate_repo_skeleton(file_contents)

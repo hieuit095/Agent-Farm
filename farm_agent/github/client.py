@@ -30,11 +30,11 @@ class GitHubClient:
     """
 
     # Paths that are mutation endpoints — must always use the primary token
-    _MUTATION_PATH_PREFIXES: tuple[str, ...] = ("/repos/",)
+    _MUTATION_PATH_PREFIXES: tuple[str, ...] = (
+        "/repos/",
+    )
 
-    def __init__(
-        self, token: str, rate_limit_buffer: int = 3, secondary_tokens: list[str] | None = None
-    ):
+    def __init__(self, token: str, rate_limit_buffer: int = 3, secondary_tokens: list[str] | None = None):
         self._primary_token = token
         self._rate_limit_buffer = rate_limit_buffer
 
@@ -79,16 +79,7 @@ class GitHubClient:
 
     # ── Core HTTP ──────────────────────────────────────────────────────────
 
-    async def _request(
-        self,
-        method: str,
-        url: str,
-        *,
-        _retries: int = 3,
-        use_primary_only: bool = False,
-        is_graphql: bool = False,
-        **kwargs,
-    ) -> Any:
+    async def _request(self, method: str, url: str, *, _retries: int = 3, use_primary_only: bool = False, is_graphql: bool = False, **kwargs) -> Any:
         """Make an authenticated GitHub API request with error handling and retry.
 
         Handles GitHub Secondary Rate Limits (abuse detection) by retrying
@@ -125,9 +116,7 @@ class GitHubClient:
             }
 
             try:
-                response = await self._client.request(
-                    method, url, headers=request_headers, **kwargs
-                )
+                response = await self._client.request(method, url, headers=request_headers, **kwargs)
             except httpx.HTTPError as e:
                 network_attempts += 1
                 # P0-FIX: Use repr(e) — str(e) for ConnectTimeout, ReadError, etc.
@@ -137,12 +126,7 @@ class GitHubClient:
                     wait = 2.0 * (network_attempts + 1)
                     logger.warning(
                         "HTTP error on %s %s: %s. Retrying in %.1fs (attempt %d/%d)",
-                        method,
-                        url,
-                        f"{type(e).__name__}: {e!r}",
-                        wait,
-                        network_attempts,
-                        _retries,
+                        method, url, f"{type(e).__name__}: {e!r}", wait, network_attempts, _retries,
                     )
                     await asyncio.sleep(wait)
                     continue
@@ -155,16 +139,12 @@ class GitHubClient:
                     remaining_int = int(remaining_header)
                     if remaining_int < 50 and not use_primary_only and len(self._pool_tokens) > 1:
                         old_index = self._current_token_index
-                        self._current_token_index = (self._current_token_index + 1) % len(
-                            self._pool_tokens
-                        )
+                        self._current_token_index = (self._current_token_index + 1) % len(self._pool_tokens)
                         if self._current_token_index != old_index:
                             logger.info(
                                 "Token rotation: rate-limit-remaining=%d (< 50), "
                                 "switching from pool[%d] to pool[%d]",
-                                remaining_int,
-                                old_index,
-                                self._current_token_index,
+                                remaining_int, old_index, self._current_token_index,
                             )
                 except (ValueError, TypeError):
                     pass  # non-numeric remaining, skip
@@ -182,7 +162,7 @@ class GitHubClient:
                         logger.warning(
                             "Primary Rate Limit hit (remaining=0). Token rotated. "
                             "Sleeping for %ds before retry...",
-                            wait,
+                            wait
                         )
                         await asyncio.sleep(wait)
                         continue
@@ -196,7 +176,8 @@ class GitHubClient:
                     wait = _403_backoff[min(network_attempts, len(_403_backoff) - 1)]
 
                 logger.warning(
-                    "GitHub Secondary Rate Limit hit (403). Sleeping for %d seconds... (%s %s)",
+                    "GitHub Secondary Rate Limit hit (403). "
+                    "Sleeping for %d seconds... (%s %s)",
                     wait,
                     method,
                     url,
@@ -234,6 +215,7 @@ class GitHubClient:
                     f"GitHub API error {response.status_code}: {response.text}",
                     status_code=response.status_code,
                 )
+
 
             return response.json() if response.content else None
 
@@ -276,10 +258,7 @@ class GitHubClient:
             payload["variables"] = variables
 
         result = await self._request(
-            "POST",
-            "",
-            is_graphql=True,
-            json=payload,
+            "POST", "", is_graphql=True, json=payload,
         )
 
         if isinstance(result, dict):
@@ -293,10 +272,7 @@ class GitHubClient:
         return result
 
     async def fetch_repo_structure_graphql(
-        self,
-        owner: str,
-        repo: str,
-        branch: str | None = None,
+        self, owner: str, repo: str, branch: str | None = None,
     ) -> list[FileNode]:
         """Fetch repository file tree via GitHub GraphQL API.
 
@@ -319,8 +295,7 @@ class GitHubClient:
 
         try:
             data = await self._graphql_query(
-                query,
-                variables={"owner": owner, "name": repo},
+                query, variables={"owner": owner, "name": repo},
             )
 
             if not data or not isinstance(data, dict):
@@ -347,20 +322,14 @@ class GitHubClient:
             logger.info(
                 "GraphQL tree fetched for %s/%s (branch=%s), %d top-level entries — "
                 "falling back to REST for full recursive tree",
-                owner,
-                repo,
-                actual_branch,
-                len(entries),
+                owner, repo, actual_branch, len(entries),
             )
             return await self.get_file_tree(owner, repo, branch=actual_branch)
 
         except Exception as exc:
             logger.info(
                 "GraphQL repo tree failed for %s/%s (%s): %s — falling back to REST",
-                owner,
-                repo,
-                type(exc).__name__,
-                exc,
+                owner, repo, type(exc).__name__, exc,
             )
             return await self.get_file_tree(owner, repo, branch=branch)
 
@@ -386,9 +355,7 @@ class GitHubClient:
                 if data and data.get("limit"):
                     logger.info(
                         "Interaction limits active on %s/%s: %s",
-                        owner,
-                        repo,
-                        data.get("limit"),
+                        owner, repo, data.get("limit"),
                     )
                     return True
             # 204 No Content → no limits
@@ -461,7 +428,6 @@ class GitHubClient:
         )
 
         from pathlib import Path
-
         from farm_agent.core.models import TOKEN_BLACKLIST
 
         tree = []
@@ -611,24 +577,23 @@ class GitHubClient:
         try:
             import random
             from datetime import UTC, datetime, timedelta
-
             if not hasattr(self, "_cached_user"):
                 self._cached_user = await self.get_authenticated_user()
 
-            author_name = self._cached_user.get("name") or self._cached_user.get(
-                "login", author_name
-            )
+            author_name = self._cached_user.get("name") or self._cached_user.get("login", author_name)
             author_email = self._cached_user.get("email")
             if not author_email:
                 # Use the real user ID + login to match GitHub's internal privacy pattern
-                uid = self._cached_user.get("id", "9919")
-                login = self._cached_user.get("login", "farm_agent")
+                uid = self._cached_user.get('id', '9919')
+                login = self._cached_user.get('login', 'farm_agent')
                 author_email = f"{uid}+{login}@users.noreply.github.com"
 
-            author_date = (datetime.now(UTC) - timedelta(minutes=random.randint(15, 45))).strftime(
-                "%Y-%m-%dT%H:%M:%SZ"
-            )
-            payload["author"] = {"name": author_name, "email": author_email, "date": author_date}
+            author_date = (datetime.now(UTC) - timedelta(minutes=random.randint(15, 45))).strftime("%Y-%m-%dT%H:%M:%SZ")
+            payload["author"] = {
+                "name": author_name,
+                "email": author_email,
+                "date": author_date
+            }
         except Exception as e:
             logger.error("Failed to get authenticated user: %s", e)
 
@@ -658,9 +623,7 @@ class GitHubClient:
         payload = {"title": title, "body": body, "head": head, "base": base}
         logger.debug(
             "PR CREATE REQUEST — owner=%s repo=%s payload=%s",
-            owner,
-            repo,
-            payload,
+            owner, repo, payload,
         )
 
         response = await self._client.request(
@@ -678,8 +641,7 @@ class GitHubClient:
 
         logger.debug(
             "PR CREATE RESPONSE — status=%d body=%s",
-            status_code,
-            response_data,
+            status_code, response_data,
         )
 
         if status_code != 201:
@@ -692,7 +654,7 @@ class GitHubClient:
             raise GitHubAPIError(error_msg, status_code=status_code)
 
         pr_number = response_data.get("number", "?")
-        response_data.get("html_url", "")
+        pr_url = response_data.get("html_url", "")
         logger.info("Created PR #%s on %s/%s: %s", pr_number, owner, repo, title)
         return response_data
 
@@ -824,8 +786,7 @@ class GitHubClient:
             logger.warning(
                 "fetch_user_merged_prs: could not validate username via GET /user: %s — "
                 "using provided '%s'",
-                exc,
-                username,
+                exc, username,
             )
 
         if not username or not username.strip():
@@ -854,16 +815,14 @@ class GitHubClient:
                 parts = repo_url.rstrip("/").split("/")
                 repo = "/".join(parts[-2:]) if len(parts) >= 2 else ""
 
-                results.append(
-                    {
-                        "repo": repo,
-                        "pr_number": item.get("number"),
-                        "title": item.get("title", ""),
-                        "html_url": item.get("html_url", ""),
-                        "merged_at": item.get("pull_request", {}).get("merged_at"),
-                        "state": item.get("state", "closed"),
-                    }
-                )
+                results.append({
+                    "repo": repo,
+                    "pr_number": item.get("number"),
+                    "title": item.get("title", ""),
+                    "html_url": item.get("html_url", ""),
+                    "merged_at": item.get("pull_request", {}).get("merged_at"),
+                    "state": item.get("state", "closed"),
+                })
 
             # GitHub search caps at 1000 results (10 pages of 100)
             if len(items) < per_page or page >= 50:
@@ -907,17 +866,15 @@ class GitHubClient:
                 parts = repo_url.rstrip("/").split("/")
                 repo = "/".join(parts[-2:]) if len(parts) >= 2 else ""
 
-                results.append(
-                    {
-                        "repo": repo,
-                        "pr_number": item.get("number"),
-                        "title": item.get("title", ""),
-                        "body": item.get("body", "") or "",
-                        "html_url": item.get("html_url", ""),
-                        "head_branch": item.get("pull_request", {}).get("head", {}).get("ref", ""),
-                        "state": item.get("state", "open"),
-                    }
-                )
+                results.append({
+                    "repo": repo,
+                    "pr_number": item.get("number"),
+                    "title": item.get("title", ""),
+                    "body": item.get("body", "") or "",
+                    "html_url": item.get("html_url", ""),
+                    "head_branch": item.get("pull_request", {}).get("head", {}).get("ref", ""),
+                    "state": item.get("state", "open"),
+                })
 
             if len(items) < per_page or page >= 50:
                 break
@@ -1028,18 +985,12 @@ class GitHubClient:
                 f"/repos/{owner}/{repo}/issues/{issue_number}/timeline",
             )
         except (TimeoutError, httpx.HTTPError) as e:
-            logger.error(
-                "get_issue_timeline failed for %s/%s: %s — timeline unavailable", owner, repo, e
-            )
+            logger.error("get_issue_timeline failed for %s/%s: %s — timeline unavailable",
+                         owner, repo, e)
             return []
         except Exception as e:
-            logger.critical(
-                "Unexpected error in get_issue_timeline for %s/%s: %s",
-                owner,
-                repo,
-                e,
-                exc_info=True,
-            )
+            logger.critical("Unexpected error in get_issue_timeline for %s/%s: %s",
+                            owner, repo, e, exc_info=True)
             return []
 
     # ── CI / Check Runs ────────────────────────────────────────────────────
@@ -1057,18 +1008,12 @@ class GitHubClient:
                 params={"per_page": 100},
             )
         except (TimeoutError, httpx.HTTPError) as e:
-            logger.error(
-                "get_combined_status failed for %s/%s: %s — CI status unknown", owner, repo, e
-            )
+            logger.error("get_combined_status failed for %s/%s: %s — CI status unknown",
+                         owner, repo, e)
             return None
         except Exception as e:
-            logger.critical(
-                "Unexpected error in get_combined_status for %s/%s: %s",
-                owner,
-                repo,
-                e,
-                exc_info=True,
-            )
+            logger.critical("Unexpected error in get_combined_status for %s/%s: %s",
+                            owner, repo, e, exc_info=True)
             return None
 
         runs = checks.get("check_runs", [])
@@ -1136,8 +1081,7 @@ class GitHubClient:
         except httpx.HTTPStatusError as exc:
             logger.warning(
                 "Failed to download CI log for job %d: HTTP %d",
-                check_run_id,
-                exc.response.status_code,
+                check_run_id, exc.response.status_code,
             )
             return ""
         except Exception:
@@ -1154,7 +1098,6 @@ class GitHubClient:
             await self._delete(f"/repos/{owner}/{repo}/git/refs/heads/{branch_name}")
             logger.info("Deleted branch %s on %s/%s", branch_name, owner, repo)
             import asyncio
-
             await asyncio.sleep(2.0)
         except GitHubAPIError as exc:
             if exc.status_code in (404, 422):
@@ -1215,9 +1158,7 @@ class GitHubClient:
                 if getattr(exc, "status_code", None) == 404:
                     logger.debug(
                         "Fork %s/%s not yet accessible, polling... (%.1fs remaining)",
-                        owner,
-                        repo,
-                        deadline - time.time(),
+                        owner, repo, deadline - time.time(),
                     )
                     await asyncio.sleep(poll_interval)
                     continue
@@ -1228,9 +1169,7 @@ class GitHubClient:
 
         logger.warning(
             "Fork %s/%s did not become accessible within %ds — proceeding anyway",
-            owner,
-            repo,
-            max_wait,
+            owner, repo, max_wait,
         )
         return False
 
@@ -1342,7 +1281,9 @@ class GitHubClient:
         logger.debug("Created commit %s in %s/%s", commit_sha[:8], owner, repo)
         return commit_sha
 
-    async def update_git_ref(self, owner: str, repo: str, branch: str, commit_sha: str) -> dict:
+    async def update_git_ref(
+        self, owner: str, repo: str, branch: str, commit_sha: str
+    ) -> dict:
         """Update a Git ref to point to a new commit.
 
         Args:
@@ -1407,7 +1348,9 @@ class GitHubClient:
 
     # ── Style Mimicry ──────────────────────────────────────────────────────
 
-    async def get_recent_merged_prs(self, owner: str, repo: str, limit: int = 5) -> list[dict]:
+    async def get_recent_merged_prs(
+        self, owner: str, repo: str, limit: int = 5
+    ) -> list[dict]:
         """Fetch recently merged human PRs for style analysis.
 
         Returns lightweight PR data (title, body, merged_at) suitable
@@ -1440,13 +1383,11 @@ class GitHubClient:
                 continue
 
             body = (pr.get("body") or "")[:500]  # cap to avoid token bloat
-            merged.append(
-                {
-                    "title": pr.get("title", ""),
-                    "body": body,
-                    "merged_at": pr["merged_at"],
-                }
-            )
+            merged.append({
+                "title": pr.get("title", ""),
+                "body": body,
+                "merged_at": pr["merged_at"],
+            })
             if len(merged) >= limit:
                 break
 
@@ -1454,7 +1395,9 @@ class GitHubClient:
 
     # ── Maintainer Vibe Check ─────────────────────────────────────────────
 
-    async def fetch_recent_maintainer_comments(self, owner: str, repo: str, limit: int = 3) -> str:
+    async def fetch_recent_maintainer_comments(
+        self, owner: str, repo: str, limit: int = 3
+    ) -> str:
         """Fetch recent PR review comments from maintainers for vibe analysis.
 
         Queries recently closed/merged PRs and extracts review comments
@@ -1503,7 +1446,9 @@ class GitHubClient:
 
             # Fetch review comments for this PR
             try:
-                reviews = await self._get(f"/repos/{owner}/{repo}/pulls/{pr_number}/reviews")
+                reviews = await self._get(
+                    f"/repos/{owner}/{repo}/pulls/{pr_number}/reviews"
+                )
             except Exception:
                 continue
 

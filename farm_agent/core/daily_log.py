@@ -40,17 +40,19 @@ class DailyMarkdownLogger:
         self._write(f"🎯 NEW DAY: Daily target set to {daily_limit} successful PRs.")
 
     def log_hunt_success(
-        self,
-        repo: str,
-        pr_number: int,
-        pr_url: str,
+        self, repo: str, pr_number: int, pr_url: str,
     ) -> None:
         """Log a successful PR creation from a Hunt action."""
-        self._write(f"🦅 HUNT: Created PR #{pr_number} on `{repo}` ([link]({pr_url})).")
+        self._write(
+            f"🦅 HUNT: Created PR #{pr_number} on `{repo}` "
+            f"([link]({pr_url}))."
+        )
 
     def log_hunt_no_result(self, repos_analyzed: int) -> None:
         """Log a Hunt that analyzed repos but created no PRs."""
-        self._write(f"🦅 HUNT: Analyzed {repos_analyzed} repo(s), no PR created.")
+        self._write(
+            f"🦅 HUNT: Analyzed {repos_analyzed} repo(s), no PR created."
+        )
 
     def log_patrol_result(
         self,
@@ -76,7 +78,8 @@ class DailyMarkdownLogger:
     def log_quota_met(self, today_prs: int, daily_limit: int) -> None:
         """Log the moment the daily quota is reached."""
         self._write(
-            f"🛑 QUOTA MET: {today_prs}/{daily_limit} PRs created. Switched to Patrol-only mode."
+            f"🛑 QUOTA MET: {today_prs}/{daily_limit} PRs created. "
+            f"Switched to Patrol-only mode."
         )
 
     def log_error(self, action: str, error: str) -> None:
@@ -85,7 +88,9 @@ class DailyMarkdownLogger:
 
     def log_shutdown(self, iterations: int) -> None:
         """Log a clean shutdown (time-warp exit or Ctrl+C)."""
-        self._write(f"🏁 SHUTDOWN: Completed {iterations} iteration(s). Goodbye.")
+        self._write(
+            f"🏁 SHUTDOWN: Completed {iterations} iteration(s). Goodbye."
+        )
 
     # ── Internals ─────────────────────────────────────────────────────
 
@@ -115,6 +120,5 @@ class DailyMarkdownLogger:
 
         except Exception as exc:
             logger.error(
-                "DailyMarkdownLogger: failed to write log entry: %s",
-                exc,
+                "DailyMarkdownLogger: failed to write log entry: %s", exc,
             )
