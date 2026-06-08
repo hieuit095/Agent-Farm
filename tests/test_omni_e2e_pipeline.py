@@ -353,6 +353,8 @@ async def test_omni_e2e_pipeline(tmp_path):
     # ── Patch definitions (applied via ExitStack) ──────────────────────────
     patch_defs = [
         patch.object(OpenRouterProvider, "complete", new=tracker),
+        patch.object(OpenRouterProvider, "close", new_callable=AsyncMock),
+        patch.object(OpenRouterProvider, "close", new_callable=AsyncMock),
         patch("farm_agent.core.sandbox.DockerSandbox.__init__", return_value=None),
         patch.object(
             DockerSandbox,

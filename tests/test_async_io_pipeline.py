@@ -11,6 +11,12 @@ from farm_agent.orchestrator.pipeline import FarmAgentPipeline
 class TestAsyncIOPipeline(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.config = MagicMock()
+        self.config.pipeline.max_concurrent_repos = 5
+        self.config.pipeline.llm_concurrency_cap = 5
+        self.config.pipeline.rate_limit_cooldown_sec = 300
+        self.config.pipeline.max_concurrent_repos = 5
+        self.config.pipeline.llm_concurrency_cap = 5
+        self.config.pipeline.rate_limit_cooldown_sec = 300
         self.config.notifications.telegram_token = None
         self.config.notifications.telegram_chat_id = None
         self.pipeline = FarmAgentPipeline(self.config)
@@ -28,7 +34,7 @@ class TestAsyncIOPipeline(unittest.IsolatedAsyncioTestCase):
                 return None
             return await asyncio.to_thread(func, *args, **kwargs)
 
-        mock_to_thread.side_effect = mock_to_thread_func
+        mock_to_thread.side_effect = lambda f, *a, **kw: f(*a, **kw) if getattr(f, "__name__", "") == "makedirs" else None
 
         changes = [FileChange(path="test.py", new_content="print(1)", is_new_file=True)]
         tests_added = []
@@ -39,10 +45,11 @@ class TestAsyncIOPipeline(unittest.IsolatedAsyncioTestCase):
         # Also need to mock _do_clone inside the function or just mock the whole to_thread
         # Let's simplify and just check calls to mock_to_thread
 
-        with patch(
-            "farm_agent.orchestrator.pipeline.asyncio.gather",
-            new_callable=unittest.mock.AsyncMock
-        ):
+        async def mock_gather(*args, **kwargs):
+            for task in args:
+                if hasattr(task, "__await__"):
+                    await task
+        with patch("farm_agent.orchestrator.pipeline.asyncio.gather", side_effect=mock_gather):
             # Reset mock to avoid noise from previous setups
             mock_to_thread.reset_mock()
 
