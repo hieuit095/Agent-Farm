@@ -1,4 +1,3 @@
-
 import asyncio
 import os
 import unittest
@@ -24,7 +23,9 @@ class TestAsyncIOPipeline(unittest.IsolatedAsyncioTestCase):
     @patch("farm_agent.orchestrator.pipeline.asyncio.to_thread")
     @patch("farm_agent.orchestrator.pipeline.os.path.join")
     @patch("farm_agent.orchestrator.pipeline.tempfile.gettempdir")
-    async def test_clone_and_patch_repo_uses_to_thread(self, mock_gettempdir, mock_join, mock_to_thread):
+    async def test_clone_and_patch_repo_uses_to_thread(
+        self, mock_gettempdir, mock_join, mock_to_thread
+    ):
         mock_gettempdir.return_value = "/tmp"
         mock_join.return_value = "/tmp/clone"
 
@@ -34,7 +35,9 @@ class TestAsyncIOPipeline(unittest.IsolatedAsyncioTestCase):
                 return None
             return await asyncio.to_thread(func, *args, **kwargs)
 
-        mock_to_thread.side_effect = lambda f, *a, **kw: f(*a, **kw) if getattr(f, "__name__", "") == "makedirs" else None
+        mock_to_thread.side_effect = lambda f, *a, **kw: (
+            f(*a, **kw) if getattr(f, "__name__", "") == "makedirs" else None
+        )
 
         changes = [FileChange(path="test.py", new_content="print(1)", is_new_file=True)]
         tests_added = []
@@ -49,6 +52,7 @@ class TestAsyncIOPipeline(unittest.IsolatedAsyncioTestCase):
             for task in args:
                 if hasattr(task, "__await__"):
                     await task
+
         with patch("farm_agent.orchestrator.pipeline.asyncio.gather", side_effect=mock_gather):
             # Reset mock to avoid noise from previous setups
             mock_to_thread.reset_mock()
@@ -78,7 +82,7 @@ class TestAsyncIOPipeline(unittest.IsolatedAsyncioTestCase):
         # Mock os.path.normpath to return a predictable path
         with (
             patch("farm_agent.orchestrator.pipeline.os.path.normpath", side_effect=lambda x: x),
-            patch("farm_agent.orchestrator.pipeline.os.path.dirname", return_value="/tmp/clone")
+            patch("farm_agent.orchestrator.pipeline.os.path.dirname", return_value="/tmp/clone"),
         ):
             self.pipeline._apply_patch_sync(clone_path, change)
 
