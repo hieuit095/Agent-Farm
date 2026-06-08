@@ -2,7 +2,7 @@
 import asyncio
 import os
 import unittest
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from farm_agent.core.models import FileChange
 from farm_agent.orchestrator.pipeline import FarmAgentPipeline
@@ -11,6 +11,12 @@ from farm_agent.orchestrator.pipeline import FarmAgentPipeline
 class TestAsyncIOPipeline(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.config = MagicMock()
+        self.config.pipeline.max_concurrent_repos = 5
+        self.config.pipeline.llm_concurrency_cap = 5
+        self.config.pipeline.rate_limit_cooldown_sec = 300
+        self.config.pipeline.max_concurrent_repos = 5
+        self.config.pipeline.llm_concurrency_cap = 5
+        self.config.pipeline.rate_limit_cooldown_sec = 300
         self.config.notifications.telegram_token = None
         self.config.notifications.telegram_chat_id = None
         self.pipeline = FarmAgentPipeline(self.config)
@@ -35,14 +41,20 @@ class TestAsyncIOPipeline(unittest.IsolatedAsyncioTestCase):
 
         # We need to mock _apply_patch_sync because it's called via to_thread
         self.pipeline._apply_patch_sync = MagicMock()
+        async def mock_to_thread_override(func, *args, **kwargs):
+            if func == self.pipeline._apply_patch_sync:
+                func(*args, **kwargs)
+            return None
+        mock_to_thread.side_effect = mock_to_thread_override
 
         # Also need to mock _do_clone inside the function or just mock the whole to_thread
         # Let's simplify and just check calls to mock_to_thread
 
-        with patch(
-            "farm_agent.orchestrator.pipeline.asyncio.gather",
-            new_callable=unittest.mock.AsyncMock
-        ):
+        async def mock_gather(*args, **kwargs):
+            for task in args:
+                if hasattr(task, "__await__"):
+                    await task
+        with patch("farm_agent.orchestrator.pipeline.asyncio.gather", side_effect=mock_gather):
             # Reset mock to avoid noise from previous setups
             mock_to_thread.reset_mock()
 

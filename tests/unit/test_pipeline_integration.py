@@ -51,7 +51,7 @@ async def test_process_repo_integration(mock_mapper_cls, mock_indexer_cls, mock_
     pipeline._memory.get_style_guide = AsyncMock(return_value=None)
     pipeline._memory.record_analysis = AsyncMock()
     pipeline._memory.get_repo_prs = AsyncMock(return_value=[])
-    
+
     # Mock analyzer.analyze to return a finding
     pipeline._analyzer = MagicMock()
     finding = Finding(
@@ -66,7 +66,7 @@ async def test_process_repo_integration(mock_mapper_cls, mock_indexer_cls, mock_
         repo=Repository(owner="owner", name="repo", full_name="owner/repo"),
         findings=[finding]
     ))
-    
+
     # Mock LLM provider for PoC Generator and Evaluator
     poc_gen_json = '{"filename": "poc.py", "content": "print()", "command": "python poc.py"}'
     evaluate_poc_json = '{"is_triggered": true, "reason": "Verified"}'
@@ -107,11 +107,11 @@ async def test_process_repo_integration(mock_mapper_cls, mock_indexer_cls, mock_
 
     # Run _process_repo under test
     repo = Repository(owner="owner", name="repo", full_name="owner/repo", clone_url="https://github.com/owner/repo.git")
-    
+
     with patch("asyncio.to_thread", new=AsyncMock()) as mock_to_thread:
         # We need mock_to_thread to return index_repo count or perform action
         mock_to_thread.side_effect = lambda func, *args, **kwargs: func(*args, **kwargs)
-        
+
         # Patch the file reading to return empty dict
         with patch("farm_agent.orchestrator.pipeline._read_all_repo_files_sync", return_value={"src/main.py": "content"}) as mock_read_files:
             await pipeline._process_repo(repo, dry_run=True, max_prs=1)
@@ -166,7 +166,7 @@ async def test_process_repo_drops_medium_severity(mock_mapper_cls, mock_indexer_
     pipeline._memory.get_style_guide = AsyncMock(return_value=None)
     pipeline._memory.record_analysis = AsyncMock()
     pipeline._memory.get_repo_prs = AsyncMock(return_value=[])
-    
+
     # Mock analyzer.analyze to return a Severity.MEDIUM finding
     pipeline._analyzer = MagicMock()
     finding = Finding(
@@ -181,20 +181,19 @@ async def test_process_repo_drops_medium_severity(mock_mapper_cls, mock_indexer_
         repo=Repository(owner="owner", name="repo", full_name="owner/repo"),
         findings=[finding]
     ))
-    
+
     # Mock other methods to avoid calls since it should drop
     pipeline._check_ai_policy = AsyncMock(return_value=False)
     pipeline._clone_and_patch_repo = AsyncMock(return_value="/tmp/fake-repo")
 
     # Run _process_repo under test
     repo = Repository(owner="owner", name="repo", full_name="owner/repo", clone_url="https://github.com/owner/repo.git")
-    
+
     with patch("asyncio.to_thread", new=AsyncMock()) as mock_to_thread:
         mock_to_thread.side_effect = lambda func, *args, **kwargs: func(*args, **kwargs)
         with patch("farm_agent.orchestrator.pipeline._read_all_repo_files_sync", return_value={"src/main.py": "content"}):
             result = await pipeline._process_repo(repo, dry_run=True, max_prs=1)
-            
+
             # Since the finding was dropped, prs_created is 0 and contributions_generated is 0
             assert result.prs_created == 0
             assert result.contributions_generated == 0
-
