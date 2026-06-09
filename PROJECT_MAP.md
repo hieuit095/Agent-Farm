@@ -1,6 +1,6 @@
 # PROJECT_MAP.md — Agent-Farm Ground Truth
 
-**Generated:** 2026-06-02  
+**Generated:** 2026-06-02
 **Version:** v4.0.0 — Omniscient Context Engine  
 **Entry Point:** `farm_agent/cli/main.py` → `cli()` (Click-based CLI)  
 **Language:** Python 3.11+  
