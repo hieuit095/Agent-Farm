@@ -61,7 +61,7 @@ line-length = 100
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "W", "UP", "B", "SIM", "RUF"]
-ignore = ["RUF012"]  # Mutable class defaults are standard in Pydantic models
+ignore = ["RUF012", "E501"]  # Mutable class defaults are standard in Pydantic models; Disable line-length because too many logging statements exceed 100
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
