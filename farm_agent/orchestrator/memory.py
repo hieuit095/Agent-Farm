@@ -781,7 +781,7 @@ class Memory:
         try:
             raw = json_path.read_text(encoding="utf-8")
             entries = _json.loads(raw)
-        except (json.JSONDecodeError, OSError) as exc:
+        except (_json.JSONDecodeError, OSError) as exc:
             logger.error("Failed to read target_repo.json for seeding: %s", exc)
             return 0
 

@@ -10,7 +10,7 @@ import logging
 import re
 from dataclasses import dataclass
 
-from farm_agent.core.models import Contribution, ContributionType
+from farm_agent.core.models import Contribution, ContributionType, QAResult, VulnerabilityDossier
 
 logger = logging.getLogger(__name__)
 
@@ -242,8 +242,6 @@ class QAHardcoreScorer:
         """
         import json as _json
 
-        from farm_agent.core.models import QAResult
-
         # ── Build diff string from contribution ──────────────────────────
         diff_parts = []
         for change in contribution.changes:
@@ -265,7 +263,6 @@ class QAHardcoreScorer:
         diff_str = "\n\n".join(diff_parts) if diff_parts else "No diff available."
 
         if not diff_str.strip() or diff_str == "No diff available.":
-            from farm_agent.core.models import QAResult
             return QAResult(
                 score=0.0,
                 critiques=["Your Search block did not match the file. Copy the lines EXACTLY from the source including all whitespace."],

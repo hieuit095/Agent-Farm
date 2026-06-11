@@ -2490,6 +2490,7 @@ class FarmAgentPipeline:
                             )
                             return result
 
+                        import random
                         logger.info("⏳ Chuẩn bị push code... (Taking a deep breath)")
                         await asyncio.sleep(random.randint(15, 45))
 
