@@ -1,4 +1,3 @@
-
 import asyncio
 import os
 import shutil
@@ -8,12 +7,15 @@ import time
 
 # Mocking the FileChange structure
 class MockFileChange:
-    def __init__(self, path, new_content, original_content=None, is_new_file=False, is_deleted=False):
+    def __init__(
+        self, path, new_content, original_content=None, is_new_file=False, is_deleted=False
+    ):
         self.path = path
         self.new_content = str(new_content)
         self.original_content = original_content
         self.is_new_file = is_new_file
         self.is_deleted = is_deleted
+
 
 async def heartbeat(interval):
     """A task that runs in the event loop to check for blockage."""
@@ -33,6 +35,7 @@ async def heartbeat(interval):
     avg_latency = sum(latencies) / len(latencies)
     max_latency = max(latencies)
     return avg_latency, max_latency
+
 
 def apply_patch_sync(clone_path, change):
     """Synchronous file I/O logic similar to pipeline.py."""
@@ -67,6 +70,7 @@ def apply_patch_sync(clone_path, change):
     except Exception as e:
         print(f"Error: {e}")
 
+
 async def run_benchmark(mode="sync"):
     clone_path = tempfile.mkdtemp()
     changes = [
@@ -87,7 +91,7 @@ async def run_benchmark(mode="sync"):
         # Process changes sequentially (blocks the loop between each change)
         for change in changes:
             apply_patch_sync(clone_path, change)
-            await asyncio.sleep(0) # yield to loop
+            await asyncio.sleep(0)  # yield to loop
     else:
         # Optimized: processing in parallel threads
         tasks = [asyncio.to_thread(apply_patch_sync, clone_path, change) for change in changes]
@@ -103,13 +107,15 @@ async def run_benchmark(mode="sync"):
     duration = end_time - start_time
     print(f"Mode: {mode}")
     print(f"Total Duration: {duration:.4f}s")
-    print(f"Heartbeat Avg Latency: {avg_hb_latency*1000:.4f}ms")
-    print(f"Heartbeat Max Latency: {max_hb_latency*1000:.4f}ms")
+    print(f"Heartbeat Avg Latency: {avg_hb_latency * 1000:.4f}ms")
+    print(f"Heartbeat Max Latency: {max_hb_latency * 1000:.4f}ms")
 
     shutil.rmtree(clone_path)
     return duration
 
+
 if __name__ == "__main__":
     import sys
+
     mode = sys.argv[1] if len(sys.argv) > 1 else "sync"
     asyncio.run(run_benchmark(mode=mode))

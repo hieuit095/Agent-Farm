@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Script to ingest architectural constraints from PROJECT_MAP.md into memory.db."""
 
-import os
 import re
 import sqlite3
 from pathlib import Path
+
 
 def ingest():
     project_root = Path(__file__).resolve().parent.parent
@@ -73,10 +73,13 @@ def ingest():
     for block in constraints:
         for repo_key in ("global", "*"):
             try:
-                cursor.execute("""
+                cursor.execute(
+                    """
                 INSERT OR REPLACE INTO knowledge_base (repo_name, entry_type, content)
                 VALUES (?, 'ARCHITECTURE_CONTEXT', ?)
-                """, (repo_key, block))
+                """,
+                    (repo_key, block),
+                )
                 ingested_count += 1
             except Exception as e:
                 print(f"Failed to ingest block for {repo_key}: {e}")
@@ -84,7 +87,10 @@ def ingest():
     conn.commit()
     conn.close()
 
-    print(f"Successfully ingested {ingested_count} architectural constraints into the knowledge_base!")
+    print(
+        f"Successfully ingested {ingested_count} architectural constraints into the knowledge_base!"
+    )
+
 
 if __name__ == "__main__":
     ingest()
