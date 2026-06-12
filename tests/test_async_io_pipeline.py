@@ -29,7 +29,8 @@ class TestAsyncIOPipeline(unittest.IsolatedAsyncioTestCase):
                 return None
             return await asyncio.to_thread(func, *args, **kwargs)
 
-        mock_to_thread.side_effect = mock_to_thread_func
+        async def dummy(*a,**kw): pass
+        mock_to_thread.side_effect = dummy
 
         changes = [FileChange(path="test.py", new_content="print(1)", is_new_file=True)]
         tests_added = []
