@@ -9,13 +9,12 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 import logging
 import re
 import time
 import uuid
 from fnmatch import fnmatch
-
-import json
 from pathlib import Path
 
 from farm_agent.core.config import AnalysisConfig
@@ -897,7 +896,6 @@ class CodeAnalyzer:
 
     def _filter_severity(self, findings: list[Finding]) -> list[Finding]:
         """Filter findings by minimum severity threshold."""
-        order = [Severity.LOW, Severity.MEDIUM, Severity.HIGH, Severity.CRITICAL]
         # Define a mapping from Severity enum to an integer order for comparison
         severity_order = {
             Severity.LOW.value: 0,
@@ -1141,7 +1139,7 @@ class BloodhoundAnalyzer:
                 logger.warning("Semgrep returned invalid JSON. Logging raw output for diagnostics:")
                 logger.warning("STDOUT (first 1000 chars): %s", stdout_text[:1000])
                 logger.warning("STDERR (first 1000 chars): %s", stderr_text[:1000])
-                
+
                 # Attempt to extract JSON from plain text warnings
                 start_idx = stdout_text.find('{')
                 end_idx = stdout_text.rfind('}')
@@ -1162,10 +1160,8 @@ class BloodhoundAnalyzer:
             for result in results:
                 file_path = result.get("path", "")
                 if file_path:
-                    try:
+                    with contextlib.suppress(ValueError):
                         file_path = str(Path(file_path).relative_to(repo_path))
-                    except ValueError:
-                        pass
 
                 line_num = result.get("start", {}).get("line", 0)
                 lines_text = result.get("extra", {}).get("lines", "")
@@ -1183,7 +1179,7 @@ class BloodhoundAnalyzer:
             logger.info("Semgrep found %d matches for %s", len(matches), repo_path.name)
             return matches
 
-        except asyncio.TimeoutError:
+        except TimeoutError:
             logger.warning("Semgrep scan timed out (%ds) for %s", self.SEMGREP_TIMEOUT, repo_path.name)
             return []
         except json.JSONDecodeError:
@@ -1199,12 +1195,12 @@ class BloodhoundAnalyzer:
     ) -> VulnerabilityDossier:
         context_parts = []
         max_chars = getattr(self._llm.config, "max_snippet_chars", 15000) if hasattr(self, "_llm") and hasattr(self._llm, "config") else 15000
-        
+
         for m in matches:
             severity = m.get("severity", "UNKNOWN").upper()
             if severity in ("INFO", "LOW"):
                 continue
-                
+
             snippet = m.get('match', '')
 
             # TASK 3: Programmatic pre-filter — skip garbage snippets before LLM call
@@ -1223,7 +1219,7 @@ class BloodhoundAnalyzer:
             context_parts.append(
                 f"File: {m['file']}\nLine: {m['line']}\nRule: {m['rule']}\nSnippet:\n{snippet}\n"
             )
-            
+
         if not context_parts:
             # If everything was filtered out, skip LLM call
             return VulnerabilityDossier(repo_url=repo_url, target_commit="unknown", vulnerabilities=[])
@@ -1241,7 +1237,7 @@ Your core directives:
 2. CHAINING: Do not just look at the single line; deduce how this snippet connects to user input or global state to form an exploit chain.
 3. RUTHLESSNESS: If the code relies on "security by obscurity" or weak default configurations, tear it apart.
 
-You will receive a Semgrep match report. 
+You will receive a Semgrep match report.
 - If the code is genuinely secure and cannot be exploited in any scenario, you MUST return [{"file": "NONE"}].
 - If it is exploitable, you must provide the exact attack path.
 
@@ -1363,10 +1359,7 @@ You MUST respond strictly in the following JSON array format. No markdown, no co
             return False
 
         structural_chars = {"{", "}", "(", ")", "[", "]", "=", ">", "<", "+", "-", "*", "/", "!", ";", ":"}
-        if not any(ch in stripped for ch in structural_chars):
-            return False
-
-        return True
+        return any(ch in stripped for ch in structural_chars)
 
     def _parse_audit_response(self, response: str, repo_url: str, forbidden_paths: list[str] | None = None) -> VulnerabilityDossier:
         import re as _re

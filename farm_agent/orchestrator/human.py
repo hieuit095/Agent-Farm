@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-
 from datetime import UTC, date, datetime
 
 from farm_agent.core.exceptions import FarmAgentError, GitHubAPIError, LLMRateLimitError
@@ -233,6 +232,7 @@ class SuperHumanLoop:
 
             github = self._pipeline._github
             import copy
+
             from farm_agent.llm.provider import create_llm_provider
             patrol_cfg = copy.copy(self._pipeline.config.llm)
             patrol_cfg.provider = "openrouter"
@@ -379,7 +379,7 @@ class SuperHumanLoop:
 
             # ── Deterministic action: hunt first, then patrol ──
             try:
-                prs_opened, repos_scanned = await self._do_hunt()
+                prs_opened, _repos_scanned = await self._do_hunt()
                 if prs_opened > 0:
                     self._prs_created_today += prs_opened
                     logger.info(
