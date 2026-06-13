@@ -57,12 +57,38 @@ The CLI is Click-based and located in [main.py](file:///c:/Users/USER/Documents/
 | `farm_agent profile` | `run_profile()` | Run the pipeline pre-loaded with quick, standard, or thorough presets. |
 | `farm_agent models` | `show_models()` | List the active LLM routing mappings. |
 | `farm_agent leaderboard` | `show_leaderboard()` | Show leaderboards of merged and submitted contributions. |
+| `farm_agent notify-test` | `notify_test()` | Send a test notification to configured channels. |
+| `farm_agent system-status` | `sysinfo()` | Show Farm-Agent system status (memory, PRs, rate limits). |
 | `farm_agent gc` | `gc()` | Purge knowledge base entries older than N days. |
 | `farm_agent janitor` | `SweepAndDestroy()` | Sweeps all open PRs and closes/deletes low-quality/garbage contributions. |
 
 ---
 
 ## 3. Core Execution Pipelines
+
+### 3.1. Core Module Dependency Graph
+
+```mermaid
+graph TD;
+    CLI[farm_agent/cli/main.py] --> Orchestrator[farm_agent/orchestrator/pipeline.py]
+    Orchestrator --> DB[farm_agent/orchestrator/memory.py]
+    Orchestrator --> Analysis[farm_agent/analysis/analyzer.py]
+    Orchestrator --> Generator[farm_agent/generator/engine.py]
+    Generator --> POC[farm_agent/generator/poc.py]
+    Generator --> QAScorer[farm_agent/generator/scorer.py]
+    Orchestrator --> Sandbox[farm_agent/core/sandbox.py]
+    Analysis --> GitHub[farm_agent/github/client.py]
+    Generator --> GitHub
+    Orchestrator --> PRManager[farm_agent/pr/manager.py]
+    PRManager --> GitHub
+    Orchestrator --> LLMProvider[farm_agent/llm/provider.py]
+    Analysis --> LLMProvider
+    Generator --> LLMProvider
+    QAScorer --> LLMProvider
+    Orchestrator --> Patrol[farm_agent/pr/patrol.py]
+    Patrol --> GitHub
+    Patrol --> LLMProvider
+```
 
 ### 3A. Standard Pipeline — `_process_repo()` ([pipeline.py:1172](file:///c:/Users/USER/Documents/GitHub/Agent-Farm/farm_agent/orchestrator/pipeline.py#L1172))
 
@@ -363,8 +389,7 @@ Database file resides in `data/memory.db` and operates in **WAL (Write-Ahead Log
 │   │
 │   ├── pr/
 │   │   ├── manager.py                  # Pull Request manager (forking, branches, commits)
-│   │   ├── patrol.py                   # PR Patrol (reviews comments, fixes CI errors)
-│   │   └── janitor.py                  # PR Janitor (sweeps and destroys garbage PRs)
+│   │   └── patrol.py                   # PR Patrol (reviews comments, fixes CI errors)
 │   │
 │   ├── agents/
 │   │   └── registry.py                 # Task agent configurations

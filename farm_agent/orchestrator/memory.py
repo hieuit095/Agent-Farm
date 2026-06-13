@@ -671,7 +671,7 @@ class Memory:
 
         if "://" in repo_name:
             repo_name = repo_name.split("/")[-2] + "/" + repo_name.split("/")[-1]
-        
+
         try:
             cursor = await self._db.execute(
                 """SELECT content FROM knowledge_base
@@ -724,11 +724,10 @@ class Memory:
         if self._db is None:
             return 0
 
-        import time as _time
         try:
             # Compute UTC midnight as Unix timestamp for today
             import datetime as _dt
-            now_utc = _dt.datetime.now(_dt.timezone.utc)
+            now_utc = _dt.datetime.now(_dt.UTC)
             midnight_utc = now_utc.replace(hour=0, minute=0, second=0, microsecond=0)
             day_start_ts = midnight_utc.timestamp()
 
@@ -845,22 +844,22 @@ class Memory:
 
         if excluded_languages:
             placeholders = ",".join(["?"] * len(excluded_languages))
-            query = f"""UPDATE target_repos 
-               SET scanned_at = ? 
-               WHERE repo_url = (SELECT repo_url FROM target_repos WHERE LOWER(language) NOT IN ({placeholders}) ORDER BY COALESCE(scanned_at, 0) ASC, rowid ASC LIMIT 1) 
+            query = f"""UPDATE target_repos
+               SET scanned_at = ?
+               WHERE repo_url = (SELECT repo_url FROM target_repos WHERE LOWER(language) NOT IN ({placeholders}) ORDER BY COALESCE(scanned_at, 0) ASC, rowid ASC LIMIT 1)
                RETURNING *"""
             params = (now_ts, *[lang.lower() for lang in excluded_languages])
         else:
-            query = """UPDATE target_repos 
-               SET scanned_at = ? 
-               WHERE repo_url = (SELECT repo_url FROM target_repos ORDER BY COALESCE(scanned_at, 0) ASC, rowid ASC LIMIT 1) 
+            query = """UPDATE target_repos
+               SET scanned_at = ?
+               WHERE repo_url = (SELECT repo_url FROM target_repos ORDER BY COALESCE(scanned_at, 0) ASC, rowid ASC LIMIT 1)
                RETURNING *"""
             params = (now_ts,)
 
         cursor = await self._db.execute(query, params)
         row = await cursor.fetchone()
         await self._db.commit()
-        
+
         if row is None:
             return None
 
@@ -965,7 +964,7 @@ class Memory:
 
     async def check_and_record_llm_quota(self, provider: str = "openrouter") -> None:
         """Sliding-window quota checker and recorder for LLM providers.
-        
+
         Hardcoded safety limits: 1000 requests per 5 hours, 10000 per 7 days.
         Uses a 5% safety buffer (950 / 9500) to prevent overshoot.
 
