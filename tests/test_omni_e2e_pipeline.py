@@ -297,6 +297,9 @@ async def test_omni_e2e_pipeline(tmp_path):
     config.github.max_prs_per_day = 10
     config.llm.openrouter_api_key = "sk-test"
     config.llm.model = MODEL_PRIMARY
+    config.pipeline.max_concurrent_repos = 3
+    config.pipeline.llm_concurrency_cap = 5
+    config.pipeline.rate_limit_cooldown_sec = 300
 
     pipeline = FarmAgentPipeline(config)
 
@@ -353,6 +356,7 @@ async def test_omni_e2e_pipeline(tmp_path):
     # ── Patch definitions (applied via ExitStack) ──────────────────────────
     patch_defs = [
         patch.object(OpenRouterProvider, "complete", new=tracker),
+        patch.object(OpenRouterProvider, "close", new_callable=AsyncMock),
         patch("farm_agent.core.sandbox.DockerSandbox.__init__", return_value=None),
         patch.object(
             DockerSandbox,
