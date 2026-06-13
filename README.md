@@ -90,11 +90,17 @@ farm_agent run
 # Target a specific repository directly
 farm_agent target <repo_url>
 
+# Analyze a repository without contributing
+farm_agent analyze <repo_url>
+
 # Solve open issues in a specific repository
 farm_agent solve <repo_url>
 
-# Run in Hunt Mode: agresively discover repos and solve issues/bugs
+# Run in Hunt Mode: aggressively discover repos and solve issues/bugs
 farm_agent hunt [--rounds N] [--mode analysis|issues|both]
+
+# Run the Circular Target Loop deterministically
+farm_agent hunt-circular
 
 # Run the Relentless 24/7 Super Human loop (patrols PRs and hunts targets)
 farm_agent superhuman
@@ -119,6 +125,12 @@ farm_agent profile <profile_name>
 
 # Clear run logs and start with a fresh target pipeline queue
 farm_agent reset-db
+
+# Test notification channels
+farm_agent notify-test
+
+# Show system status
+farm_agent system-status
 
 # Run garbage collection to purge stale knowledge base entries
 farm_agent gc --days 90
