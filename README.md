@@ -6,6 +6,8 @@
 [![Docker Ready](https://img.shields.io/badge/docker-ready-2496ED?logo=docker&logoColor=white)](docker-compose.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Code Style: Ruff](https://img.shields.io/badge/code%20style-ruff-000000?logo=ruff)](https://github.com/astral-sh/ruff)
+[![SQLite](https://img.shields.io/badge/sqlite-%2307405e.svg?logo=sqlite&logoColor=white)](https://sqlite.org/)
+[![Click](https://img.shields.io/badge/cli-click-blueviolet.svg)](https://click.palletsprojects.com/)
 
 ---
 
@@ -35,12 +37,21 @@ Validates generated patches in isolated Docker sandboxes through a double-pass c
 
 ---
 
+## 📐 System Architecture (High-Level)
+
+The Agent-Farm system leverages a custom registry-based agent architecture ("DeerFlow" pattern) that cycles through target discovery, AI analysis, patch generation, and PR management. It operates using a multi-agent model leveraging primary models like `deepseek-v4-flash` for the Bloodhound Red Team, `deepseek-v4-pro` for patch generation, along with specialized layers for appraisal (`qwen3.7-max`) and auditing (`gemini-3.5-flash`).
+
+A persistent SQLite database (running in WAL mode) tracks target queues, findings cache, and LLM rate limits. A Docker-based sandbox ensures complete network and capability isolation when verifying dynamic PoCs and baseline regressions. Code architecture context is deeply embedded through ChromaDB RAG mappings.
+
+---
+
 ## 🛠️ Getting Started (1-Click Docker Quick-Start)
 
 Agent-Farm provides a robust, pre-configured Docker setup that mounts the Docker socket from the host to spawn sibling containers for isolated PoC and test execution.
 
 ### Prerequisites
-* **Docker Desktop** installed and running.
+* **Python**: `3.11+`
+* **Docker Desktop** installed and running (`>= 7.1`).
 * **Git** installed on the host machine.
 * A GitHub Personal Access Token (PAT) with `repo` scope.
 * An OpenRouter API Key configured with credits.
@@ -71,6 +82,7 @@ Agent-Farm provides a robust, pre-configured Docker setup that mounts the Docker
    GITHUB_TOKEN=your_github_pat_here
    OPENROUTER_API_KEY=your_openrouter_key_here
    ```
+   *(Optional: `TELEGRAM_BOT_TOKEN`, `MINIMAX_API_KEY`)*
 
 4. **Attach to the Agent CLI:**
    ```bash
@@ -93,7 +105,7 @@ farm_agent target <repo_url>
 # Solve open issues in a specific repository
 farm_agent solve <repo_url>
 
-# Run in Hunt Mode: agresively discover repos and solve issues/bugs
+# Run in Hunt Mode: agressively discover repos and solve issues/bugs
 farm_agent hunt [--rounds N] [--mode analysis|issues|both]
 
 # Run the Relentless 24/7 Super Human loop (patrols PRs and hunts targets)
@@ -128,6 +140,6 @@ farm_agent gc --days 90
 
 ## 📜 Contributing & License
 
-We welcome white-hat security researchers and AI engineers to contribute! Please follow conventional commit formats and ensure all patches are validated locally using our test suites.
+We welcome white-hat security researchers and AI engineers to contribute! Please follow conventional commit formats and ensure all patches are validated locally using our test suites (`make test`).
 
 Licensed under the [MIT License](LICENSE).
