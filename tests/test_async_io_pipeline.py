@@ -1,3 +1,4 @@
+
 import asyncio
 import os
 import unittest
@@ -20,9 +21,7 @@ class TestAsyncIOPipeline(unittest.IsolatedAsyncioTestCase):
     @patch("farm_agent.orchestrator.pipeline.asyncio.to_thread")
     @patch("farm_agent.orchestrator.pipeline.os.path.join")
     @patch("farm_agent.orchestrator.pipeline.tempfile.gettempdir")
-    async def test_clone_and_patch_repo_uses_to_thread(
-        self, mock_gettempdir, mock_join, mock_to_thread
-    ):
+    async def test_clone_and_patch_repo_uses_to_thread(self, mock_gettempdir, mock_join, mock_to_thread):
         mock_gettempdir.return_value = "/tmp"
         mock_join.return_value = "/tmp/clone"
 
@@ -44,7 +43,8 @@ class TestAsyncIOPipeline(unittest.IsolatedAsyncioTestCase):
         # Let's simplify and just check calls to mock_to_thread
 
         with patch(
-            "farm_agent.orchestrator.pipeline.asyncio.gather", new_callable=unittest.mock.AsyncMock
+            "farm_agent.orchestrator.pipeline.asyncio.gather",
+            new_callable=unittest.mock.AsyncMock
         ):
             # Reset mock to avoid noise from previous setups
             mock_to_thread.reset_mock()
@@ -74,7 +74,7 @@ class TestAsyncIOPipeline(unittest.IsolatedAsyncioTestCase):
         # Mock os.path.normpath to return a predictable path
         with (
             patch("farm_agent.orchestrator.pipeline.os.path.normpath", side_effect=lambda x: x),
-            patch("farm_agent.orchestrator.pipeline.os.path.dirname", return_value="/tmp/clone"),
+            patch("farm_agent.orchestrator.pipeline.os.path.dirname", return_value="/tmp/clone")
         ):
             self.pipeline._apply_patch_sync(clone_path, change)
 

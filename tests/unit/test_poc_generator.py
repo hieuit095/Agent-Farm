@@ -7,37 +7,31 @@ from unittest.mock import MagicMock, AsyncMock, patch
 
 # Ensure chromadb is mocked out
 mock_chromadb = MagicMock()
-sys.modules["chromadb"] = mock_chromadb
+sys.modules['chromadb'] = mock_chromadb
 
 # Ensure docker is mocked out
 mock_docker = MagicMock()
 mock_docker_errors = MagicMock()
 mock_docker_models = MagicMock()
 
-
-class MockDockerException(Exception):
-    pass
-
-
+class MockDockerException(Exception): pass
 mock_docker_errors.APIError = MockDockerException
 mock_docker_errors.ImageNotFound = MockDockerException
 mock_docker_errors.NotFound = MockDockerException
 
-sys.modules["docker"] = mock_docker
-sys.modules["docker.errors"] = mock_docker_errors
-sys.modules["docker.models.containers"] = mock_docker_models
+sys.modules['docker'] = mock_docker
+sys.modules['docker.errors'] = mock_docker_errors
+sys.modules['docker.models.containers'] = mock_docker_models
 
 from farm_agent.core.models import Finding, ContributionType, Severity, ImpactLevel
 from farm_agent.generator.poc import PoCGenerator
 from farm_agent.core.sandbox import DockerSandbox
-
 
 @pytest.fixture
 def mock_llm():
     llm = MagicMock()
     llm.complete = AsyncMock()
     return llm
-
 
 @pytest.fixture
 def finding():
@@ -48,11 +42,8 @@ def finding():
         description="Vulnerability description",
         file_path="src/main.py",
         impact_level=ImpactLevel.HIGH,
-        metadata={
-            "module_dependencies": {"imports": ["auth.py"], "calls": ["db.py"], "dependents": []}
-        },
+        metadata={"module_dependencies": {"imports": ["auth.py"], "calls": ["db.py"], "dependents": []}}
     )
-
 
 @pytest.mark.asyncio
 async def test_generate_poc_success(mock_llm, finding):
@@ -75,7 +66,6 @@ async def test_generate_poc_success(mock_llm, finding):
     assert command == "python poc.py"
     mock_llm.complete.assert_called_once()
 
-
 @pytest.mark.asyncio
 async def test_generate_poc_failure_fallback(mock_llm, finding):
     # Setup mock LLM response that fails to output valid JSON
@@ -87,7 +77,6 @@ async def test_generate_poc_failure_fallback(mock_llm, finding):
     assert filename is None
     assert content is None
     assert command is None
-
 
 @pytest.mark.asyncio
 async def test_evaluate_poc_result_success(mock_llm, finding):
@@ -106,17 +95,14 @@ async def test_evaluate_poc_result_success(mock_llm, finding):
         "exit_code": 1,
         "stdout": "Running exploit...",
         "stderr": "AssertionError: SQL Injection successful",
-        "timed_out": False,
+        "timed_out": False
     }
 
-    is_triggered, reason = await generator.evaluate_poc_result(
-        finding, "print('exploit')", sandbox_output
-    )
+    is_triggered, reason = await generator.evaluate_poc_result(finding, "print('exploit')", sandbox_output)
 
     assert is_triggered is True
     assert reason == "AssertionError: SQL Injection successful"
     mock_llm.complete.assert_called_once()
-
 
 @pytest.mark.asyncio
 async def test_evaluate_poc_result_fallback(mock_llm, finding):
@@ -128,16 +114,13 @@ async def test_evaluate_poc_result_fallback(mock_llm, finding):
         "exit_code": 1,
         "stdout": "Running exploit...",
         "stderr": "AssertionError: SQL Injection successful",
-        "timed_out": False,
+        "timed_out": False
     }
 
-    is_triggered, reason = await generator.evaluate_poc_result(
-        finding, "print('exploit')", sandbox_output
-    )
+    is_triggered, reason = await generator.evaluate_poc_result(finding, "print('exploit')", sandbox_output)
 
     assert is_triggered is False
     assert "Failed to parse evaluation response" in reason
-
 
 @pytest.mark.asyncio
 async def test_verify_vulnerability_with_poc():
@@ -152,7 +135,7 @@ async def test_verify_vulnerability_with_poc():
                 "exit_code": 1,
                 "stdout": "Success",
                 "stderr": "Error",
-                "timed_out": False,
+                "timed_out": False
             }
             sandbox.run_in_sandbox = AsyncMock(return_value=mock_result)
 
@@ -169,7 +152,7 @@ async def test_verify_vulnerability_with_poc():
                 poc_filename=poc_filename,
                 poc_content=poc_content,
                 run_command=run_command,
-                timeout=10,
+                timeout=10
             )
 
             # Assert execution attributes returned correctly
@@ -183,5 +166,7 @@ async def test_verify_vulnerability_with_poc():
 
             # Assert run_in_sandbox was called with correct command
             sandbox.run_in_sandbox.assert_called_once_with(
-                repo_path=temp_dir, command=run_command, timeout=10
+                repo_path=temp_dir,
+                command=run_command,
+                timeout=10
             )

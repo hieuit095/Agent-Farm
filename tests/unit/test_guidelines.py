@@ -4,7 +4,6 @@ import tempfile
 import pytest
 from farm_agent.github.guidelines import RepoGuidelines
 
-
 @pytest.mark.asyncio
 async def test_discover_subsystem_docs():
     # Create a temporary directory structure

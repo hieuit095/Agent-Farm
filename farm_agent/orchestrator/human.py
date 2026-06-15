@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+
 from datetime import UTC, date, datetime
 
 from farm_agent.core.exceptions import FarmAgentError, GitHubAPIError, LLMRateLimitError
@@ -26,11 +27,11 @@ logger = logging.getLogger(__name__)
 WARP_MAX_ITERATIONS = 10
 
 # Terminator loop constants
-TERMINATOR_SLEEP = 10  # Seconds between iterations (prevents CPU pegging)
-TERMINATOR_SLEEP_WARP = 1  # Seconds in time-warp mode
-PATROL_ONLY_SLEEP = 60  # Seconds when in patrol-only mode (quota met)
-LLM_QUOTA_COOLDOWN = 300  # Seconds when LLM quota exhausted (5 min)
-LLM_QUOTA_COOLDOWN_WARP = 3  # Seconds in time-warp mode
+TERMINATOR_SLEEP = 10          # Seconds between iterations (prevents CPU pegging)
+TERMINATOR_SLEEP_WARP = 1      # Seconds in time-warp mode
+PATROL_ONLY_SLEEP = 60         # Seconds when in patrol-only mode (quota met)
+LLM_QUOTA_COOLDOWN = 300       # Seconds when LLM quota exhausted (5 min)
+LLM_QUOTA_COOLDOWN_WARP = 3    # Seconds in time-warp mode
 
 
 class SuperHumanLoop:
@@ -176,6 +177,8 @@ class SuperHumanLoop:
             logger.error("[TERMINATOR] Hunt failed (unexpected error): %s", exc)
             raise
 
+
+
     async def _run_janitor_sweep(self) -> dict:
         """Run the PR Janitor sweep."""
         from farm_agent.pr.janitor import PRJanitor
@@ -185,21 +188,14 @@ class SuperHumanLoop:
             username: str = user.get("login", "")
         except Exception as exc:
             logger.warning("Janitor sweep: could not get GitHub username: %s", exc)
-            return {
-                "total_scanned": 0,
-                "garbage_closed": 0,
-                "critical_spared": 0,
-                "errors": 1,
-                "details": [],
-            }
+            return {"total_scanned": 0, "garbage_closed": 0, "critical_spared": 0, "errors": 1, "details": []}
 
         janitor = PRJanitor(self._pipeline._github, username, self._pipeline.config.llm)
         logger.info("[TERMINATOR] Janitor sweep triggered.")
         result = await janitor.sweep_and_destroy()
         logger.info(
             "[TERMINATOR] Janitor sweep: scanned=%d, destroyed=%d",
-            result["total_scanned"],
-            result["garbage_closed"],
+            result["total_scanned"], result["garbage_closed"],
         )
         return result
 
@@ -237,9 +233,7 @@ class SuperHumanLoop:
 
             github = self._pipeline._github
             import copy
-
             from farm_agent.llm.provider import create_llm_provider
-
             patrol_cfg = copy.copy(self._pipeline.config.llm)
             patrol_cfg.provider = "openrouter"
             patrol_cfg.model = "google/gemini-3.5-flash"
@@ -284,9 +278,7 @@ class SuperHumanLoop:
         try:
             open_prs = await self._memory.get_prs(status="open", limit=10)
             if open_prs:
-                logger.info(
-                    "[TERMINATOR] %d PR(s) with open feedback — prioritizing patrol.", len(open_prs)
-                )
+                logger.info("[TERMINATOR] %d PR(s) with open feedback — prioritizing patrol.", len(open_prs))
                 return True
             return False
         except Exception:
@@ -340,9 +332,7 @@ class SuperHumanLoop:
         while True:
             # ── Graceful shutdown: drain current iteration then exit ──
             if self._is_shutting_down:
-                logger.info(
-                    "[TERMINATOR] Shutdown signal received — finishing current iteration then exiting."
-                )
+                logger.info("[TERMINATOR] Shutdown signal received — finishing current iteration then exiting.")
                 self._daily_log.log_shutdown(self._iteration)
                 logger.info("[TERMINATOR] Graceful shutdown complete. Data secured.")
                 break
@@ -351,10 +341,7 @@ class SuperHumanLoop:
 
             # ── Time-warp exit gate ──
             if time_warp and self._iteration > WARP_MAX_ITERATIONS:
-                logger.info(
-                    "[TERMINATOR] TIME-WARP: Completed %d iterations — exiting.",
-                    WARP_MAX_ITERATIONS,
-                )
+                logger.info("[TERMINATOR] TIME-WARP: Completed %d iterations — exiting.", WARP_MAX_ITERATIONS)
                 break
 
             # ── Daily reset & KB GC ──
@@ -370,8 +357,7 @@ class SuperHumanLoop:
             if today_prs >= max_prs:
                 logger.info(
                     "[TERMINATOR] Daily PR cap reached (%d/%d) — patrol-only mode.",
-                    today_prs,
-                    max_prs,
+                    today_prs, max_prs,
                 )
                 self._daily_log.log_quota_met(today_prs, max_prs)
                 try:
@@ -398,9 +384,7 @@ class SuperHumanLoop:
                     self._prs_created_today += prs_opened
                     logger.info(
                         "[TERMINATOR] Hunt: +%d PRs → %d/%d today",
-                        prs_opened,
-                        self._prs_created_today,
-                        max_prs,
+                        prs_opened, self._prs_created_today, max_prs,
                     )
             except LLMRateLimitError as exc:
                 cooldown = LLM_QUOTA_COOLDOWN_WARP if time_warp else LLM_QUOTA_COOLDOWN

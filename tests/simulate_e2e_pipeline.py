@@ -2,7 +2,6 @@
 Ultimate End-to-End System Test & Protocol Verification
 Phase 3 & 4: Dynamic End-to-End Mocked Simulations
 """
-
 import asyncio
 import json
 from unittest.mock import AsyncMock, patch, MagicMock
@@ -11,18 +10,11 @@ import pytest
 
 from farm_agent.core.config import FarmAgentConfig
 from farm_agent.core.models import (
-    Repository,
-    Finding,
-    Contribution,
-    ImpactLevel,
-    ContributionType,
-    Severity,
-    FileChange,
-    PRResult,
+    Repository, Finding, Contribution, ImpactLevel, ContributionType,
+    Severity, FileChange, PRResult
 )
 from farm_agent.orchestrator.pipeline import FarmAgentPipeline
 from farm_agent.analysis.analyzer import AnalysisResult
-
 
 @pytest.fixture
 def config():
@@ -55,17 +47,9 @@ async def pipeline(config):
     p._analyzer = AsyncMock()
     p._analyzer.check_maintainer_vibe.return_value = "FRIENDLY"
 
-    dummy_repo = Repository(
-        full_name="mock/repo", name="repo", owner="mock", html_url="", clone_url=""
-    )
+    dummy_repo = Repository(full_name="mock/repo", name="repo", owner="mock", html_url="", clone_url="")
     dummy_contrib = Contribution(
-        finding=Finding(
-            type=ContributionType.SECURITY_FIX,
-            severity=Severity.CRITICAL,
-            title="x",
-            file_path="y",
-            description="z",
-        ),
+        finding=Finding(type=ContributionType.SECURITY_FIX, severity=Severity.CRITICAL, title="x", file_path="y", description="z"),
         contribution_type=ContributionType.SECURITY_FIX,
         title="x",
         description="y",
@@ -77,7 +61,7 @@ async def pipeline(config):
         pr_number=1337,
         pr_url="https://github.com/mock/repo/pull/1337",
         branch_name="mock-branch",
-        fork_full_name="mock/repo",
+        fork_full_name="mock/repo"
     )
 
     p._sandbox = AsyncMock()
@@ -97,7 +81,7 @@ def repo():
         description="A mock repo",
         clone_url="https://github.com/owner/mock-repo.git",
         default_branch="main",
-        stars=1000,
+        stars=1000
     )
 
 
@@ -120,9 +104,7 @@ class MockLLMProvider:
 @patch("farm_agent.orchestrator.pipeline.fetch_repo_guidelines")
 @patch("farm_agent.orchestrator.pipeline.run_security_gate")
 @patch.object(FarmAgentPipeline, "_clone_and_patch_repo")
-async def test_happy_path(
-    mock_clone, mock_sec_gate, mock_guidelines, mock_create_llm, pipeline, repo
-):
+async def test_happy_path(mock_clone, mock_sec_gate, mock_guidelines, mock_create_llm, pipeline, repo):
     """TEST 1: The Happy Path (Complete Success)"""
     mock_guidelines.return_value.has_guidelines = False
     mock_sec_gate.return_value = None
@@ -130,7 +112,6 @@ async def test_happy_path(
     # Needs a mock Future/Coroutine returning "/tmp/mock" to simulate async return safely in Py 3.14
     async def _dummy_clone(*args, **kwargs):
         return "/tmp/mock"
-
     mock_clone.side_effect = _dummy_clone
 
     # Setup LLM mocks
@@ -141,22 +122,24 @@ async def test_happy_path(
     pipeline._llm = MockLLMProvider()
 
     # Mock Devil's Advocate approval
-    pipeline._llm.response_text = json.dumps(
-        {
-            "devil_advocate_critique": "Looks fine",
-            "is_real_vulnerability": True,
-            "confidence_score": 95,
-            "data_flow_proof": "Flows from req.body to eval()",
-        }
-    )
+    pipeline._llm.response_text = json.dumps({
+        "devil_advocate_critique": "Looks fine",
+        "is_real_vulnerability": True,
+        "confidence_score": 95,
+        "data_flow_proof": "Flows from req.body to eval()"
+    })
 
     layer1_llm = MockLLMProvider()
-    layer1_llm.response_text = json.dumps(
-        {"is_genuine_severe_vuln": True, "expert_critique": "Genuine critical bug."}
-    )
+    layer1_llm.response_text = json.dumps({
+        "is_genuine_severe_vuln": True,
+        "expert_critique": "Genuine critical bug."
+    })
 
     layer2_llm = MockLLMProvider()
-    layer2_llm.response_text = json.dumps({"final_approval": True, "rejection_reason": ""})
+    layer2_llm.response_text = json.dumps({
+        "final_approval": True,
+        "rejection_reason": ""
+    })
 
     # create_llm_provider is called by L1 and L2
     mock_create_llm.side_effect = [layer1_llm, layer2_llm]
@@ -171,22 +154,16 @@ async def test_happy_path(
     )
 
     pipeline._generator.generate.return_value = Contribution(
-        finding=Finding(
-            type=ContributionType.SECURITY_FIX,
-            severity=Severity.CRITICAL,
-            title="RCE",
-            file_path="src/main.py",
-            description="x",
-        ),
+        finding=Finding(type=ContributionType.SECURITY_FIX, severity=Severity.CRITICAL, title="RCE", file_path="src/main.py", description="x"),
         contribution_type=ContributionType.SECURITY_FIX,
         title="Fix RCE",
         description="Fixed",
-        changes=[patch_change],
+        changes=[patch_change]
     )
 
     # Mock Analyzer returning 1 finding
     finding = Finding(
-        type=ContributionType.FEATURE_ADD,  # Feature bypasses keyword blacklist
+        type=ContributionType.FEATURE_ADD, # Feature bypasses keyword blacklist
         severity=Severity.HIGH,
         title="RCE in auth",
         description="import os; eval()",
@@ -194,14 +171,10 @@ async def test_happy_path(
         impact_level=ImpactLevel.CRITICAL,
         priority_score=100,
     )
-    pipeline._analyzer.analyze.return_value = AnalysisResult(
-        repo=repo, findings=[finding], analyzed_files=1
-    )
+    pipeline._analyzer.analyze.return_value = AnalysisResult(repo=repo, findings=[finding], analyzed_files=1)
     pipeline._github.get_file_content.return_value = "import os\n os.system(cmd)"
 
-    print(
-        "DEBUG MOCK FILE CONTENT:", await pipeline._github.get_file_content("o", "r", "src/main.py")
-    )
+    print("DEBUG MOCK FILE CONTENT:", await pipeline._github.get_file_content("o", "r", "src/main.py"))
 
     # Execute
     res = await pipeline._process_repo(repo, dry_run=False)
@@ -228,9 +201,7 @@ async def test_snippet_sanity_trap(mock_clone, mock_guidelines, mock_create_llm,
         impact_level=ImpactLevel.CRITICAL,
         priority_score=100,
     )
-    pipeline._analyzer.analyze.return_value = AnalysisResult(
-        repo=repo, findings=[finding], analyzed_files=1
-    )
+    pipeline._analyzer.analyze.return_value = AnalysisResult(repo=repo, findings=[finding], analyzed_files=1)
 
     # Mock fetch content returning just the string
     pipeline._github.get_file_content.return_value = "requires login"
@@ -257,19 +228,18 @@ async def test_kimi_rejection(mock_clone, mock_guidelines, mock_create_llm, pipe
     mock_guidelines.return_value.has_guidelines = False
 
     pipeline._llm = MockLLMProvider()
-    pipeline._llm.response_text = json.dumps(
-        {
-            "devil_advocate_critique": "Looks fine",
-            "is_real_vulnerability": True,
-            "confidence_score": 95,
-            "data_flow_proof": "Flows from req.body to eval()",
-        }
-    )
+    pipeline._llm.response_text = json.dumps({
+        "devil_advocate_critique": "Looks fine",
+        "is_real_vulnerability": True,
+        "confidence_score": 95,
+        "data_flow_proof": "Flows from req.body to eval()"
+    })
 
     layer1_llm = MockLLMProvider()
-    layer1_llm.response_text = json.dumps(
-        {"is_genuine_severe_vuln": False, "expert_critique": "Mocked hallucination"}
-    )
+    layer1_llm.response_text = json.dumps({
+        "is_genuine_severe_vuln": False,
+        "expert_critique": "Mocked hallucination"
+    })
     mock_create_llm.side_effect = [layer1_llm]
 
     finding = Finding(
@@ -281,12 +251,10 @@ async def test_kimi_rejection(mock_clone, mock_guidelines, mock_create_llm, pipe
         impact_level=ImpactLevel.CRITICAL,
         priority_score=100,
     )
-    pipeline._analyzer.analyze.return_value = AnalysisResult(
-        repo=repo, findings=[finding], analyzed_files=1
-    )
+    pipeline._analyzer.analyze.return_value = AnalysisResult(repo=repo, findings=[finding], analyzed_files=1)
     pipeline._github.get_file_content.return_value = "def real_looking_code(); pass"
 
-    pipeline._generator = AsyncMock()  # Should never be called
+    pipeline._generator = AsyncMock() # Should never be called
 
     # Execute
     res = await pipeline._process_repo(repo, dry_run=False)
@@ -297,7 +265,7 @@ async def test_kimi_rejection(mock_clone, mock_guidelines, mock_create_llm, pipe
     # Confirm DB lesson recorded
     pipeline._memory.add_filter_lesson.assert_called_once()
     args, kwargs = pipeline._memory.add_filter_lesson.call_args
-    assert args[1] == 1  # layer=1
+    assert args[1] == 1 # layer=1
     assert "Mocked hallucination" in args[3]
 
 
@@ -305,35 +273,32 @@ async def test_kimi_rejection(mock_clone, mock_guidelines, mock_create_llm, pipe
 @patch("farm_agent.llm.provider.create_llm_provider")
 @patch("farm_agent.orchestrator.pipeline.fetch_repo_guidelines")
 @patch.object(FarmAgentPipeline, "_clone_and_patch_repo")
-async def test_gemini_rejection_lazy_code(
-    mock_clone, mock_guidelines, mock_create_llm, pipeline, repo
-):
+async def test_gemini_rejection_lazy_code(mock_clone, mock_guidelines, mock_create_llm, pipeline, repo):
     """TEST 4: The Gemini Rejection (Layer 2) / Lazy Code"""
     mock_guidelines.return_value.has_guidelines = False
 
     async def _dummy_clone(*args, **kwargs):
         return "/tmp/mock"
-
     mock_clone.side_effect = _dummy_clone
 
     pipeline._llm = MockLLMProvider()
-    pipeline._llm.response_text = json.dumps(
-        {
-            "devil_advocate_critique": "Looks fine",
-            "is_real_vulnerability": True,
-            "confidence_score": 95,
-            "data_flow_proof": "Flows from req.body to eval()",
-        }
-    )
+    pipeline._llm.response_text = json.dumps({
+        "devil_advocate_critique": "Looks fine",
+        "is_real_vulnerability": True,
+        "confidence_score": 95,
+        "data_flow_proof": "Flows from req.body to eval()"
+    })
 
     layer1_llm = MockLLMProvider()
-    layer1_llm.response_text = json.dumps(
-        {"is_genuine_severe_vuln": True, "expert_critique": "Good."}
-    )
+    layer1_llm.response_text = json.dumps({
+        "is_genuine_severe_vuln": True,
+        "expert_critique": "Good."
+    })
     layer2_llm = MockLLMProvider()
-    layer2_llm.response_text = json.dumps(
-        {"final_approval": False, "rejection_reason": "Contains TODO placeholder"}
-    )
+    layer2_llm.response_text = json.dumps({
+        "final_approval": False,
+        "rejection_reason": "Contains TODO placeholder"
+    })
     mock_create_llm.side_effect = [layer1_llm, layer2_llm]
 
     finding = Finding(
@@ -345,9 +310,7 @@ async def test_gemini_rejection_lazy_code(
         impact_level=ImpactLevel.CRITICAL,
         priority_score=100,
     )
-    pipeline._analyzer.analyze.return_value = AnalysisResult(
-        repo=repo, findings=[finding], analyzed_files=1
-    )
+    pipeline._analyzer.analyze.return_value = AnalysisResult(repo=repo, findings=[finding], analyzed_files=1)
     pipeline._github.get_file_content.return_value = "def real_looking_code(); pass"
 
     # Generator mockup with TODO
@@ -363,7 +326,7 @@ async def test_gemini_rejection_lazy_code(
         contribution_type=ContributionType.SECURITY_FIX,
         title="Fix RCE",
         description="Fixed with TODO",
-        changes=[patch_change],
+        changes=[patch_change]
     )
 
     # Execute
@@ -376,7 +339,5 @@ async def test_gemini_rejection_lazy_code(
     # Confirm DB lesson recorded for Layer 2
     pipeline._memory.add_filter_lesson.assert_called_once()
     args, kwargs = pipeline._memory.add_filter_lesson.call_args
-    assert args[1] == 2  # layer=2
-    assert (
-        "Contains TODO placeholder" in kwargs.get("critique") or "Contains TODO placeholder" in args
-    )
+    assert args[1] == 2 # layer=2
+    assert "Contains TODO placeholder" in kwargs.get("critique") or "Contains TODO placeholder" in args

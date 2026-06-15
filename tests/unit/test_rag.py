@@ -3,12 +3,11 @@ from unittest.mock import MagicMock
 
 # Mock chromadb module before importing it anywhere
 mock_chromadb = MagicMock()
-sys.modules["chromadb"] = mock_chromadb
+sys.modules['chromadb'] = mock_chromadb
 
 import pytest
 from unittest.mock import patch, MagicMock
 from farm_agent.core.rag import CodeChunk, chunk_markdown, RepoIndexer
-
 
 def test_chunk_markdown_basic():
     markdown_content = """# Subsystem A
@@ -60,9 +59,7 @@ This is subsystem A.
 
 def test_chunk_markdown_fallback():
     # Test fallback to sliding window chunking when no headers are present
-    content = (
-        "Some document that doesn't have any markdown headers. It just has normal paragraph text."
-    )
+    content = "Some document that doesn't have any markdown headers. It just has normal paragraph text."
     file_path = "docs/plain.md"
 
     chunks = chunk_markdown(content, file_path)
@@ -81,7 +78,7 @@ def test_repo_indexer_metadata(mock_persistent_client):
 
     file_contents = {
         "docs/subsystem_a.md": "# Subsystem A\nContent description.",
-        "src/main.py": "def main():\n    pass",
+        "src/main.py": "def main():\n    pass"
     }
 
     indexer.index_repo("test/repo", file_contents)

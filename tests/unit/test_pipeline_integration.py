@@ -4,19 +4,11 @@ from unittest.mock import MagicMock, AsyncMock, patch
 
 # Ensure chromadb is mocked out
 mock_chromadb = MagicMock()
-sys.modules["chromadb"] = mock_chromadb
+sys.modules['chromadb'] = mock_chromadb
 
 from farm_agent.orchestrator.pipeline import FarmAgentPipeline
 from farm_agent.core.config import FarmAgentConfig
-from farm_agent.core.models import (
-    Repository,
-    Finding,
-    ContributionType,
-    Severity,
-    ImpactLevel,
-    AnalysisResult,
-)
-
+from farm_agent.core.models import Repository, Finding, ContributionType, Severity, ImpactLevel, AnalysisResult
 
 @pytest.mark.asyncio
 @patch("farm_agent.orchestrator.pipeline.fetch_repo_guidelines")
@@ -37,7 +29,7 @@ async def test_process_repo_integration(mock_mapper_cls, mock_indexer_cls, mock_
     mock_mapper.get_module_dependencies.return_value = {
         "imports": ["src/auth.py"],
         "calls": ["src/utils.py"],
-        "dependents": [],
+        "dependents": []
     }
     mock_mapper_cls.return_value = mock_mapper
 
@@ -68,13 +60,12 @@ async def test_process_repo_integration(mock_mapper_cls, mock_indexer_cls, mock_
         title="SQL Injection",
         description="Vulnerability description",
         file_path="src/main.py",
-        impact_level=ImpactLevel.HIGH,
+        impact_level=ImpactLevel.HIGH
     )
-    pipeline._analyzer.analyze = AsyncMock(
-        return_value=AnalysisResult(
-            repo=Repository(owner="owner", name="repo", full_name="owner/repo"), findings=[finding]
-        )
-    )
+    pipeline._analyzer.analyze = AsyncMock(return_value=AnalysisResult(
+        repo=Repository(owner="owner", name="repo", full_name="owner/repo"),
+        findings=[finding]
+    ))
 
     # Mock LLM provider for PoC Generator and Evaluator
     poc_gen_json = '{"filename": "poc.py", "content": "print()", "command": "python poc.py"}'
@@ -84,21 +75,15 @@ async def test_process_repo_integration(mock_mapper_cls, mock_indexer_cls, mock_
 
     # Mock DockerSandbox and verify_vulnerability_with_poc method
     pipeline._sandbox = MagicMock()
-    pipeline._sandbox.verify_vulnerability_with_poc = AsyncMock(
-        return_value={"exit_code": 1, "stdout": "", "stderr": "", "timed_out": False}
-    )
-    pipeline._sandbox.run_native_test_suite = AsyncMock(
-        return_value={
-            "exit_code": 0,
-            "status": "tests_missing",
-            "stdout": "",
-            "stderr": "",
-            "timed_out": False,
-        }
-    )
-    pipeline._sandbox.run_in_sandbox = AsyncMock(
-        return_value={"exit_code": 0, "stdout": "", "stderr": "", "timed_out": False}
-    )
+    pipeline._sandbox.verify_vulnerability_with_poc = AsyncMock(return_value={
+        "exit_code": 1, "stdout": "", "stderr": "", "timed_out": False
+    })
+    pipeline._sandbox.run_native_test_suite = AsyncMock(return_value={
+        "exit_code": 0, "status": "tests_missing", "stdout": "", "stderr": "", "timed_out": False
+    })
+    pipeline._sandbox.run_in_sandbox = AsyncMock(return_value={
+        "exit_code": 0, "stdout": "", "stderr": "", "timed_out": False
+    })
 
     # Mock generator to return a dummy contribution
     mock_contribution = MagicMock()
@@ -121,22 +106,14 @@ async def test_process_repo_integration(mock_mapper_cls, mock_indexer_cls, mock_
     pipeline._validate_findings = AsyncMock(return_value=[finding])
 
     # Run _process_repo under test
-    repo = Repository(
-        owner="owner",
-        name="repo",
-        full_name="owner/repo",
-        clone_url="https://github.com/owner/repo.git",
-    )
+    repo = Repository(owner="owner", name="repo", full_name="owner/repo", clone_url="https://github.com/owner/repo.git")
 
     with patch("asyncio.to_thread", new=AsyncMock()) as mock_to_thread:
         # We need mock_to_thread to return index_repo count or perform action
         mock_to_thread.side_effect = lambda func, *args, **kwargs: func(*args, **kwargs)
 
         # Patch the file reading to return empty dict
-        with patch(
-            "farm_agent.orchestrator.pipeline._read_all_repo_files_sync",
-            return_value={"src/main.py": "content"},
-        ) as mock_read_files:
+        with patch("farm_agent.orchestrator.pipeline._read_all_repo_files_sync", return_value={"src/main.py": "content"}) as mock_read_files:
             await pipeline._process_repo(repo, dry_run=True, max_prs=1)
 
             # Assert early clone occurred
@@ -157,9 +134,7 @@ async def test_process_repo_integration(mock_mapper_cls, mock_indexer_cls, mock_
 @patch("farm_agent.orchestrator.pipeline.fetch_repo_guidelines")
 @patch("farm_agent.core.rag.RepoIndexer")
 @patch("farm_agent.analysis.mapper.RepoMapper")
-async def test_process_repo_drops_medium_severity(
-    mock_mapper_cls, mock_indexer_cls, mock_fetch_guidelines
-):
+async def test_process_repo_drops_medium_severity(mock_mapper_cls, mock_indexer_cls, mock_fetch_guidelines):
     # Setup mocks
     mock_guidelines = MagicMock()
     mock_guidelines.has_guidelines = True
@@ -200,32 +175,23 @@ async def test_process_repo_drops_medium_severity(
         title="SQL Injection",
         description="Vulnerability description",
         file_path="src/main.py",
-        impact_level=ImpactLevel.MEDIUM,
+        impact_level=ImpactLevel.MEDIUM
     )
-    pipeline._analyzer.analyze = AsyncMock(
-        return_value=AnalysisResult(
-            repo=Repository(owner="owner", name="repo", full_name="owner/repo"), findings=[finding]
-        )
-    )
+    pipeline._analyzer.analyze = AsyncMock(return_value=AnalysisResult(
+        repo=Repository(owner="owner", name="repo", full_name="owner/repo"),
+        findings=[finding]
+    ))
 
     # Mock other methods to avoid calls since it should drop
     pipeline._check_ai_policy = AsyncMock(return_value=False)
     pipeline._clone_and_patch_repo = AsyncMock(return_value="/tmp/fake-repo")
 
     # Run _process_repo under test
-    repo = Repository(
-        owner="owner",
-        name="repo",
-        full_name="owner/repo",
-        clone_url="https://github.com/owner/repo.git",
-    )
+    repo = Repository(owner="owner", name="repo", full_name="owner/repo", clone_url="https://github.com/owner/repo.git")
 
     with patch("asyncio.to_thread", new=AsyncMock()) as mock_to_thread:
         mock_to_thread.side_effect = lambda func, *args, **kwargs: func(*args, **kwargs)
-        with patch(
-            "farm_agent.orchestrator.pipeline._read_all_repo_files_sync",
-            return_value={"src/main.py": "content"},
-        ):
+        with patch("farm_agent.orchestrator.pipeline._read_all_repo_files_sync", return_value={"src/main.py": "content"}):
             result = await pipeline._process_repo(repo, dry_run=True, max_prs=1)
 
             # Since the finding was dropped, prs_created is 0 and contributions_generated is 0

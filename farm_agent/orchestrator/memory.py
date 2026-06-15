@@ -387,6 +387,8 @@ class Memory:
         cols = [d[0] for d in cursor.description]
         return [dict(zip(cols, row, strict=False)) for row in rows]
 
+
+
     # ── CI Fix Attempts ───────────────────────────────────────────────────
 
     async def get_ci_fix_attempts(self, repo: str, pr_number: int) -> int:
@@ -645,9 +647,7 @@ class Memory:
         except Exception as exc:
             logger.debug("Could not record QA lesson for %s: %s", repo_name, exc)
 
-    async def add_filter_lesson(
-        self, repo: str, layer: int, snippet_or_fix: str, critique: str
-    ) -> None:
+    async def add_filter_lesson(self, repo: str, layer: int, snippet_or_fix: str, critique: str) -> None:
         """Record a rejection lesson from Layer 1 or Layer 2 filters."""
         if self._db is None:
             return
@@ -724,11 +724,11 @@ class Memory:
         if self._db is None:
             return 0
 
+        import time as _time
         try:
             # Compute UTC midnight as Unix timestamp for today
             import datetime as _dt
-
-            now_utc = _dt.datetime.now(_dt.UTC)
+            now_utc = _dt.datetime.now(_dt.timezone.utc)
             midnight_utc = now_utc.replace(hour=0, minute=0, second=0, microsecond=0)
             day_start_ts = midnight_utc.timestamp()
 
@@ -841,7 +841,6 @@ class Memory:
             return None
 
         import time
-
         now_ts = time.time()
 
         if excluded_languages:
@@ -867,9 +866,7 @@ class Memory:
 
         cols = [d[0] for d in cursor.description]
         result = dict(zip(cols, row, strict=False))
-        logger.info(
-            f"[TARGET ACQUIRED] Repo: {result.get('repo_url')} | Language: {result.get('language')} | Bounty: {result.get('bounty_amount')} | Diamond: {result.get('diamond_target')}"
-        )
+        logger.info(f"[TARGET ACQUIRED] Repo: {result.get('repo_url')} | Language: {result.get('language')} | Bounty: {result.get('bounty_amount')} | Diamond: {result.get('diamond_target')}")
         return result
 
     async def mark_target_status(
