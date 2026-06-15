@@ -671,7 +671,7 @@ class Memory:
 
         if "://" in repo_name:
             repo_name = repo_name.split("/")[-2] + "/" + repo_name.split("/")[-1]
-        
+
         try:
             cursor = await self._db.execute(
                 """SELECT content FROM knowledge_base
@@ -860,7 +860,7 @@ class Memory:
         cursor = await self._db.execute(query, params)
         row = await cursor.fetchone()
         await self._db.commit()
-        
+
         if row is None:
             return None
 
@@ -965,7 +965,7 @@ class Memory:
 
     async def check_and_record_llm_quota(self, provider: str = "openrouter") -> None:
         """Sliding-window quota checker and recorder for LLM providers.
-        
+
         Hardcoded safety limits: 1000 requests per 5 hours, 10000 per 7 days.
         Uses a 5% safety buffer (950 / 9500) to prevent overshoot.
 
@@ -1112,4 +1112,3 @@ class Memory:
             return None
         cols = [d[0] for d in cursor.description]
         return dict(zip(cols, row, strict=False))
-

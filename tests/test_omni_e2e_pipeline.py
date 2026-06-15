@@ -367,6 +367,7 @@ async def test_omni_e2e_pipeline(tmp_path):
         patch.object(FarmAgentPipeline, "_check_ai_policy", new_callable=AsyncMock, return_value=False),
         patch.object(FarmAgentPipeline, "_clone_and_patch_repo", new=mock_clone_and_patch),
         patch("farm_agent.github.client.GitHubClient.__init__", return_value=None),
+        patch("farm_agent.llm.provider.OpenRouterProvider.close", new_callable=AsyncMock),
         patch.object(GitHubClient, "close", new_callable=AsyncMock),
         patch.object(GitHubClient, "check_interaction_limits", new_callable=AsyncMock, return_value=False),
         patch.object(GitHubClient, "get_repo_details", new_callable=AsyncMock, return_value=fake_repo),
