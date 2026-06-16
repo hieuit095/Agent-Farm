@@ -111,7 +111,7 @@ class RepoGuidelines:
 
 def _discover_docs_sync(repo_path: str) -> dict[str, str]:
     docs = {}
-    
+
     # 1. Read root README.md
     for name in ["README.md", "readme.md", "README.txt", "README.rst"]:
         readme_path = os.path.join(repo_path, name)
@@ -143,7 +143,7 @@ def _discover_docs_sync(repo_path: str) -> dict[str, str]:
                                     logger.debug("Failed to read doc file %s: %s", full_path, e)
         except Exception as e:
             logger.warning("Error walking repository path %s for docs: %s", repo_path, e)
-            
+
     return docs
 
 

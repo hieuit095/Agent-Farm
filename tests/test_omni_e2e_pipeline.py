@@ -303,6 +303,9 @@ async def test_omni_e2e_pipeline(tmp_path):
     # ── Global mock for OpenRouterProvider.complete ────────────────────────
     tracker = TrackedAsyncMock(side_effect=_openrouter_complete_side_effect)
 
+    # Needs to be an AsyncMock so awaiting it in cleanup does not crash
+    mock_close = AsyncMock()
+
     # Fake repo / target / PR result
     fake_repo = _make_fake_repo()
     fake_target = MagicMock(repo_url="https://github.com/testorg/testrepo", scanned_at=None)
@@ -353,6 +356,7 @@ async def test_omni_e2e_pipeline(tmp_path):
     # ── Patch definitions (applied via ExitStack) ──────────────────────────
     patch_defs = [
         patch.object(OpenRouterProvider, "complete", new=tracker),
+        patch.object(OpenRouterProvider, "close", new=mock_close),
         patch("farm_agent.core.sandbox.DockerSandbox.__init__", return_value=None),
         patch.object(
             DockerSandbox,

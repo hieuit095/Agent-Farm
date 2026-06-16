@@ -1141,7 +1141,7 @@ class BloodhoundAnalyzer:
                 logger.warning("Semgrep returned invalid JSON. Logging raw output for diagnostics:")
                 logger.warning("STDOUT (first 1000 chars): %s", stdout_text[:1000])
                 logger.warning("STDERR (first 1000 chars): %s", stderr_text[:1000])
-                
+
                 # Attempt to extract JSON from plain text warnings
                 start_idx = stdout_text.find('{')
                 end_idx = stdout_text.rfind('}')
@@ -1199,12 +1199,12 @@ class BloodhoundAnalyzer:
     ) -> VulnerabilityDossier:
         context_parts = []
         max_chars = getattr(self._llm.config, "max_snippet_chars", 15000) if hasattr(self, "_llm") and hasattr(self._llm, "config") else 15000
-        
+
         for m in matches:
             severity = m.get("severity", "UNKNOWN").upper()
             if severity in ("INFO", "LOW"):
                 continue
-                
+
             snippet = m.get('match', '')
 
             # TASK 3: Programmatic pre-filter — skip garbage snippets before LLM call
@@ -1223,7 +1223,7 @@ class BloodhoundAnalyzer:
             context_parts.append(
                 f"File: {m['file']}\nLine: {m['line']}\nRule: {m['rule']}\nSnippet:\n{snippet}\n"
             )
-            
+
         if not context_parts:
             # If everything was filtered out, skip LLM call
             return VulnerabilityDossier(repo_url=repo_url, target_commit="unknown", vulnerabilities=[])
