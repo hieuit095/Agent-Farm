@@ -219,7 +219,7 @@ def _extract_core_payload(raw_text: str) -> str | None:
         pass
 
     # Rule 5: Last resort — return the stripped text and let caller handle.
-    return raw_text if raw_text.strip().startswith("{") else None
+    return raw_text if raw_text.strip().startswith(("{")) else None
 
 
 class ContributionGenerator:
@@ -233,7 +233,6 @@ class ContributionGenerator:
         self._max_patch_retries = getattr(pipeline_config, "max_patch_retries", 2) if pipeline_config else 2
         # Adversarial Reviewer — completely independent entity with its own LLM (qwen/qwen3.7-max)
         import copy
-
         from farm_agent.llm.provider import create_llm_provider
         reviewer_cfg = copy.copy(llm.config)
         reviewer_cfg.provider = "openrouter"

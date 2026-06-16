@@ -69,9 +69,7 @@ Agent-Farm provides a robust, pre-configured Docker setup that mounts the Docker
    Open the newly created `.env` file and configure your API tokens:
    ```env
    GITHUB_TOKEN=your_github_pat_here
-   MINIMAX_API_KEY=your_minimax_key_here
    OPENROUTER_API_KEY=your_openrouter_key_here
-   TELEGRAM_BOT_TOKEN=your_telegram_bot_token_here
    ```
 
 4. **Attach to the Agent CLI:**

@@ -356,24 +356,15 @@ Database file resides in `data/memory.db` and operates in **WAL (Write-Ahead Log
 │   │   ├── provider.py                 # OpenRouter integration handlers
 │   │   └── router.py                   # Task router mapping
 │   │
-│   ├── notifications/
-│   │   └── notifier.py                 # Notifications integration
-│   │
 │   ├── orchestrator/
 │   │   ├── memory.py                   # Persistence memory sqlite connection interface
 │   │   ├── pipeline.py                 # Pipeline (Standard & Circular pipelines implementation)
 │   │   └── human.py                    # SuperHumanLoop relentless daily scheduler
 │   │
-│   ├── plugins/
-│   │   └── ...                         # Agent-Farm plugins
-│   │
 │   ├── pr/
 │   │   ├── manager.py                  # Pull Request manager (forking, branches, commits)
 │   │   ├── patrol.py                   # PR Patrol (reviews comments, fixes CI errors)
 │   │   └── janitor.py                  # PR Janitor (sweeps and destroys garbage PRs)
-│   │
-│   ├── templates/
-│   │   └── ...                         # PR and issue templates
 │   │
 │   ├── agents/
 │   │   └── registry.py                 # Task agent configurations
