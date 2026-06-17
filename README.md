@@ -1,51 +1,36 @@
 # 🛠️ Agent-Farm (v4.0.0)
 
-**Autonomous Bounty-Hunting Security Researcher & Open Source Contributor — Human-like precision, zero friction.**
-
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-3776AB?logo=python&logoColor=white)](https://python.org)
 [![Docker Ready](https://img.shields.io/badge/docker-ready-2496ED?logo=docker&logoColor=white)](docker-compose.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Code Style: Ruff](https://img.shields.io/badge/code%20style-ruff-000000?logo=ruff)](https://github.com/astral-sh/ruff)
-
----
+[![Build Backend: Hatchling](https://img.shields.io/badge/build-hatchling-blue)](https://hatch.pypa.io/latest/)
 
 ## 🚀 Overview
 
-Agent-Farm is an autonomous AI agent ecosystem designed to crawl GitHub, pinpoint real security vulnerabilities or code flaws, generate high-quality patches, validate fixes dynamically in isolated sandboxes, and submit pull requests or private disclosures. Operating with human-like precision, it implements advanced self-correcting DEV-QA loops and maintainer vibe analysis to ensure every contribution is high-value, precise, and completely regression-free.
+Agent-Farm is an autonomous AI agent ecosystem designed to crawl GitHub, pinpoint real security vulnerabilities or code flaws, generate high-quality patches, and submit robust pull requests or private disclosures. By executing dynamic bug verification in isolated Docker sandboxes and enforcing strict multi-layer filter gates, it ensures that every contribution is precise, high-value, and regression-free.
 
----
+## 🔥 Key Features
 
-## 🔥 Key Features (v4.0.0 Upgrades)
+* **Omniscient Context Engine:** Uses Retrieval-Augmented Generation (RAG) powered by ChromaDB to ingest repository documentation and construct deep AST-based call graphs, injecting precise dependency links directly into the LLM context.
+* **Dynamic Bug Verification:** Before generating patches, the agent writes and executes self-contained Proof-of-Concept (PoC) exploit scripts in a strictly locked-down Docker sandbox to confirm vulnerabilities are genuine.
+* **Blast Radius & Regression Auditing:** Executes a dual-pass validation in the isolated sandbox, confirming both that the bug is resolved by the generated patch and that the project's native test suite still passes without regressions.
+* **Zero-Garbage PR Gatekeepers:** Employs multi-layer AI auditing (Layer 1: Qwen-3.7-Max, Layer 2: Gemini-3.5-Flash) to strictly filter out low-quality patches, typo-fixes, or modifications to deprecated code, eliminating maintainer spam.
+* **Super Human Mode:** A relentless 24/7 autonomous loop featuring built-in human-like delays, PR patrolling for comment replies and automated CI failure fixes, and intelligent context switching.
 
-### 🧠 Omniscient Context Engine
-Upgraded codebase intelligence using Retrieval-Augmented Generation (RAG) powered by ChromaDB. It recursively discovers internal documentation (`.md`, `.txt`, `.rst`), semantically chunks docs by headers, and indexes them to seed local knowledge. Concurrently, it builds AST-based call graphs (for Python, Rust, Go, TypeScript) to inject precise module dependency links ("imports", "calls", "dependents") directly into the prompt context.
+## 🏗️ System Architecture (High-Level)
 
-### 🛡️ Zero-Garbage PR Gatekeepers
-Zero tolerance for typo-fixes, formatting tweaks, or documentation-only PRs (README/doc contributions are strictly banned). Implements a two-layer filter system:
-* **Gate 1: EXPERT APPRAISAL (Qwen-3.7-Max):** Renders strict verdicts on findings to filter out false positives and theoretical edge cases.
-* **Gate 2: REAL-WORLD VALUE CHECK:** Vetoes patches targeting dead or deprecated code blocks to avoid sending low-effort spam to maintainers.
+The system orchestrates a "DeerFlow" architecture utilizing multiple discrete agent roles. The Pipeline discovers repositories and relies on Bloodhound Red Team rules to scan the codebase. When vulnerabilities are detected, a Generator engine creates dynamic PoC tests and proposes fixes. These fixes undergo rigorous sandbox isolation checks against the host application's test suite and strict LLM expert reviews before the PR Manager formulates a final, polished GitHub Pull Request or Security Advisory. State is continuously persisted into an idempotently managed SQLite database.
 
-### 🧪 Dynamic Bug Verification (PoC Execution)
-Before writing a fix, the agent generates a self-contained Proof-of-Concept (PoC) script using `deepseek-v4-pro` to dynamically trigger the vulnerability inside a locked-down container sandbox. If the PoC fails to trigger the bug, the finding is immediately classified as a False Positive and dropped.
-
-### 🔍 Blast Radius & Regression Auditing
-Validates generated patches in isolated Docker sandboxes through a double-pass check:
-* **Pass 1 (Efficacy):** Applies the patch and re-runs the PoC. The vulnerability must be completely resolved.
-* **Pass 2 (Regression):** Executes the project's native test suite to ensure the patch does not break any existing functionality. Also verifies that changes do not break downstream dependent modules.
-
----
-
-## 🛠️ Getting Started (1-Click Docker Quick-Start)
-
-Agent-Farm provides a robust, pre-configured Docker setup that mounts the Docker socket from the host to spawn sibling containers for isolated PoC and test execution.
+## 🛠️ Getting Started
 
 ### Prerequisites
-* **Docker Desktop** installed and running.
-* **Git** installed on the host machine.
-* A GitHub Personal Access Token (PAT) with `repo` scope.
-* An OpenRouter API Key configured with credits.
 
-### 1-Click Launch
+* **Python:** `>= 3.11`
+* **Docker:** `>= 7.1` (Required for isolated PoC and test execution)
+* **Git** installed locally.
+
+### Installation
 
 1. **Clone the Repository:**
    ```bash
@@ -53,81 +38,70 @@ Agent-Farm provides a robust, pre-configured Docker setup that mounts the Docker
    cd Agent-Farm
    ```
 
-2. **Run the Quick-Start Script:**
-   * **Windows:** Double-click `start.bat` or run:
+2. **Quick-Start via Docker (1-Click Launch):**
+   * **Windows:**
      ```cmd
      start.bat
      ```
-   * **Unix (Linux/macOS):**
+   * **Linux/macOS:**
      ```bash
      chmod +x start.sh
      ./start.sh
      ```
-   * *Note: The script will automatically pull the latest codebase, initialize your `.env` configuration file from `.env.example` if missing, build the Docker image, and launch the daemon in the background.*
+   This pulls the latest image, sets up your `.env` file, and launches the `agent-farm` daemon.
 
-3. **Configure Settings:**
-   Open the newly created `.env` file and configure your API tokens:
-   ```env
-   GITHUB_TOKEN=your_github_pat_here
-   OPENROUTER_API_KEY=your_openrouter_key_here
-   ```
-
-4. **Attach to the Agent CLI:**
+3. **Manual / Development Installation:**
    ```bash
-   docker exec -it agent-farm farm_agent superhuman
+   make install
    ```
 
----
+### Environment Variables
 
-## ⚙️ CLI Command Reference
+Configure these settings in your `.env` file (copied from `.env.example`):
 
-Agent-Farm provides a comprehensive suite of Click-based CLI utilities:
+* `GITHUB_TOKEN` (Required): Personal Access Token for creating PRs and interacting with repositories.
+* `MINIMAX_API_KEY`: Required if using Minimax as the default LLM provider.
+* `OPENROUTER_API_KEY`: API key for accessing models like `deepseek-v4-pro`, `qwen3.7-max`, and `gemini-3.5-flash` through OpenRouter.
+* `TELEGRAM_BOT_TOKEN`: (Optional) For automated project notifications.
+* `EXCLUDED_LANGUAGES`: (Optional) Comma-separated languages to bypass (e.g., `javascript,typescript`).
+
+## 💻 Usage
+
+Agent-Farm utilizes a comprehensive, Rich-powered Click CLI:
 
 ```bash
-# Start the full automated discovery, analysis, and contribution pipeline
-farm_agent run
+# Analyze a specific repository without contributing
+farm_agent analyze <repo_url>
 
-# Target a specific repository directly
+# Target a repository to discover issues and generate PRs
 farm_agent target <repo_url>
 
-# Solve open issues in a specific repository
+# Focus exclusively on solving open issues in a targeted repository
 farm_agent solve <repo_url>
 
-# Run in Hunt Mode: agresively discover repos and solve issues/bugs
-farm_agent hunt [--rounds N] [--mode analysis|issues|both]
+# Run in Hunt Mode: aggressively discover repositories and solve issues
+farm_agent hunt --rounds 5 --mode both
 
-# Run the Relentless 24/7 Super Human loop (patrols PRs and hunts targets)
+# Run the 24/7 Super Human loop (patrols PRs, hunts targets, acts human)
 farm_agent superhuman
 
-# Check open PRs for maintainer comments, answer queries, and push CI auto-fixes
+# Patrol open PRs to answer maintainer comments and fix CI pipelines
 farm_agent patrol
 
-# Scan and close low-quality/garbage PRs submitted on GitHub
-farm_agent janitor
-
-# Clean up forks where all PRs are closed or merged
-farm_agent cleanup
-
-# Query current PR queue, runtime statistics, and LLM allocations
-farm_agent status
+# View system configuration and runtime statistics
+farm_agent config
 farm_agent stats
-farm_agent models
-farm_agent leaderboard
-
-# Run with thorough, standard, or quick presets
-farm_agent profile <profile_name>
-
-# Clear run logs and start with a fresh target pipeline queue
-farm_agent reset-db
-
-# Run garbage collection to purge stale knowledge base entries
-farm_agent gc --days 90
 ```
 
----
+*For Docker users, run commands inside the container:*
+```bash
+docker exec -it agent-farm farm_agent superhuman
+```
 
-## 📜 Contributing & License
+## 🤝 Contributing
 
-We welcome white-hat security researchers and AI engineers to contribute! Please follow conventional commit formats and ensure all patches are validated locally using our test suites.
+Contributions are heavily encouraged from AI engineers and white-hat security researchers. Please ensure code complies with the project's Ruff style rules (`make lint`) and passes all tests (`make test`).
 
-Licensed under the [MIT License](LICENSE).
+## 📄 License
+
+This project is licensed under the [MIT License](LICENSE).
