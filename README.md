@@ -102,7 +102,7 @@ farm_agent superhuman
 # Check open PRs for maintainer comments, answer queries, and push CI auto-fixes
 farm_agent patrol
 
-# Scan and close low-quality/garbage PRs submitted on GitHub
+# Scan and close low-quality/garbage PRs submitted on GitHub (Currently disabled)
 farm_agent janitor
 
 # Clean up forks where all PRs are closed or merged

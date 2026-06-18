@@ -58,7 +58,7 @@ The CLI is Click-based and located in [main.py](file:///c:/Users/USER/Documents/
 | `farm_agent models` | `show_models()` | List the active LLM routing mappings. |
 | `farm_agent leaderboard` | `show_leaderboard()` | Show leaderboards of merged and submitted contributions. |
 | `farm_agent gc` | `gc()` | Purge knowledge base entries older than N days. |
-| `farm_agent janitor` | `SweepAndDestroy()` | Sweeps all open PRs and closes/deletes low-quality/garbage contributions. |
+| `farm_agent janitor` | `SweepAndDestroy()` | Sweeps all open PRs and closes/deletes low-quality/garbage contributions (Currently disabled). |
 
 ---
 
@@ -363,8 +363,7 @@ Database file resides in `data/memory.db` and operates in **WAL (Write-Ahead Log
 │   │
 │   ├── pr/
 │   │   ├── manager.py                  # Pull Request manager (forking, branches, commits)
-│   │   ├── patrol.py                   # PR Patrol (reviews comments, fixes CI errors)
-│   │   └── janitor.py                  # PR Janitor (sweeps and destroys garbage PRs)
+│   │   └── patrol.py                   # PR Patrol (reviews comments, fixes CI errors)
 │   │
 │   ├── agents/
 │   │   └── registry.py                 # Task agent configurations
