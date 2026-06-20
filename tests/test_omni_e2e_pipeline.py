@@ -48,10 +48,8 @@ sys.modules['docker'] = mock_docker
 sys.modules['docker.errors'] = mock_docker_errors
 sys.modules['docker.models.containers'] = mock_docker_models
 
-import asyncio
 import contextlib
 import json
-from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -69,15 +67,16 @@ from farm_agent.core.models import (
     Repository,
     Severity,
 )
+from farm_agent.core.notifier import TelegramNotifier
 from farm_agent.core.sandbox import DockerSandbox
 from farm_agent.generator.engine import ContributionGenerator, GenerationResult
 from farm_agent.github.client import GitHubClient
 from farm_agent.github.discovery import DatabaseTargetDiscovery
 from farm_agent.llm.provider import OpenRouterProvider
-from farm_agent.core.notifier import TelegramNotifier
 from farm_agent.orchestrator.memory import Memory
 from farm_agent.orchestrator.pipeline import FarmAgentPipeline
 from farm_agent.pr.manager import PRManager
+
 
 # ── Descriptor-based async mock that preserves ``self`` on instance methods ──
 class TrackedAsyncMock:
@@ -435,7 +434,7 @@ async def test_omni_e2e_pipeline(tmp_path):
 
     # 2. Strict model-routing assertions
     called_models = []
-    for instance, args, kwargs in tracker.call_args_list:
+    for instance, _args, _kwargs in tracker.call_args_list:
         model = getattr(instance, "_model", None) or getattr(
             getattr(instance, "config", None), "model", "unknown"
         )

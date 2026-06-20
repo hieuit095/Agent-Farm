@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Script to ingest architectural constraints from PROJECT_MAP.md into memory.db."""
 
-import os
 import re
 import sqlite3
 from pathlib import Path
+
 
 def ingest():
     project_root = Path(__file__).resolve().parent.parent

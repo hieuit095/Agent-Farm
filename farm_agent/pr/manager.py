@@ -49,11 +49,7 @@ def auto_check_pr_template(body: str, contrib_type: ContributionType | None = No
     lines = body.split("\n")
     for i, line in enumerate(lines):
         stripped = line.strip().lower()
-        if stripped.startswith(("- [ ]", "* [ ]")):
-            if any(term in stripped for term in allowed_terms):
-                # Only check if it safely avoids danger terms
-                if not any(danger in stripped for danger in ["breaking", "release", "deploy", "migration"]):
-                    # Replace the first unmet checkbox
+        if stripped.startswith(("- [ ]", "* [ ]")) and any(term in stripped for term in allowed_terms) and not any(danger in stripped for danger in ["breaking", "release", "deploy", "migration"]):
                     lines[i] = line.replace("[ ]", "[x]", 1)
     return "\n".join(lines)
 
