@@ -18,6 +18,7 @@ Expected routing table:
 """
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import copy
 import json
@@ -150,7 +151,7 @@ class RoutingTrap:
 
 def _build_patches(trap: RoutingTrap, cfg: MagicMock, fake_dossier, fake_gen_result):
     """Return a list of (target, kwargs) tuples that ExitStack will apply."""
-    from farm_agent.core.models import FileNode, Repository
+    from farm_agent.core.models import Repository, FileNode
 
     fake_repo = Repository(
         owner="testorg", name="testrepo",
@@ -241,14 +242,8 @@ async def test_run_circular_model_routing():
     asserts every phase routes to its designated model string.
     """
     from farm_agent.core.models import (
-        Contribution,
-        ContributionType,
-        FileChange,
-        Finding,
-        ImpactLevel,
-        Severity,
-        Vulnerability,
-        VulnerabilityDossier,
+        VulnerabilityDossier, Vulnerability,
+        Contribution, FileChange, Finding, ContributionType, Severity, ImpactLevel,
     )
     from farm_agent.generator.engine import GenerationResult
 
@@ -346,7 +341,7 @@ async def test_run_circular_model_routing():
 # ── Unit tests: factory maps each model correctly ─────────────────────────────
 
 def test_create_llm_provider_maps_deepseek():
-    from farm_agent.llm.provider import OpenRouterProvider, create_llm_provider
+    from farm_agent.llm.provider import create_llm_provider, OpenRouterProvider
 
     cfg          = MagicMock()
     cfg.provider = "openrouter"
@@ -363,7 +358,7 @@ def test_create_llm_provider_maps_deepseek():
 
 
 def test_create_llm_provider_maps_kimi_k26():
-    from farm_agent.llm.provider import OpenRouterProvider, create_llm_provider
+    from farm_agent.llm.provider import create_llm_provider, OpenRouterProvider
 
     base = MagicMock()
     base.provider  = "openrouter"
@@ -385,7 +380,7 @@ def test_create_llm_provider_maps_kimi_k26():
 
 
 def test_create_llm_provider_maps_kimi_k25():
-    from farm_agent.llm.provider import OpenRouterProvider, create_llm_provider
+    from farm_agent.llm.provider import create_llm_provider, OpenRouterProvider
 
     cfg          = MagicMock()
     cfg.provider = "openrouter"
@@ -402,7 +397,7 @@ def test_create_llm_provider_maps_kimi_k25():
 
 
 def test_create_llm_provider_maps_gemini():
-    from farm_agent.llm.provider import OpenRouterProvider, create_llm_provider
+    from farm_agent.llm.provider import create_llm_provider, OpenRouterProvider
 
     cfg          = MagicMock()
     cfg.provider = "openrouter"

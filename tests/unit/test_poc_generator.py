@@ -1,9 +1,9 @@
-import os
-import sys
-import tempfile
-from unittest.mock import AsyncMock, MagicMock, patch
-
 import pytest
+import sys
+import os
+import shutil
+import tempfile
+from unittest.mock import MagicMock, AsyncMock, patch
 
 # Ensure chromadb is mocked out
 mock_chromadb = MagicMock()
@@ -23,10 +23,9 @@ sys.modules['docker'] = mock_docker
 sys.modules['docker.errors'] = mock_docker_errors
 sys.modules['docker.models.containers'] = mock_docker_models
 
-from farm_agent.core.models import ContributionType, Finding, ImpactLevel, Severity
-from farm_agent.core.sandbox import DockerSandbox
+from farm_agent.core.models import Finding, ContributionType, Severity, ImpactLevel
 from farm_agent.generator.poc import PoCGenerator
-
+from farm_agent.core.sandbox import DockerSandbox
 
 @pytest.fixture
 def mock_llm():

@@ -2,25 +2,19 @@
 Ultimate End-to-End System Test & Protocol Verification
 Phase 3 & 4: Dynamic End-to-End Mocked Simulations
 """
+import asyncio
 import json
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, patch, MagicMock
 
 import pytest
 
-from farm_agent.analysis.analyzer import AnalysisResult
 from farm_agent.core.config import FarmAgentConfig
 from farm_agent.core.models import (
-    Contribution,
-    ContributionType,
-    FileChange,
-    Finding,
-    ImpactLevel,
-    PRResult,
-    Repository,
-    Severity,
+    Repository, Finding, Contribution, ImpactLevel, ContributionType,
+    Severity, FileChange, PRResult
 )
 from farm_agent.orchestrator.pipeline import FarmAgentPipeline
-
+from farm_agent.analysis.analyzer import AnalysisResult
 
 @pytest.fixture
 def config():
@@ -270,7 +264,7 @@ async def test_kimi_rejection(mock_clone, mock_guidelines, mock_create_llm, pipe
     pipeline._generator.generate.assert_not_called()
     # Confirm DB lesson recorded
     pipeline._memory.add_filter_lesson.assert_called_once()
-    args, _kwargs = pipeline._memory.add_filter_lesson.call_args
+    args, kwargs = pipeline._memory.add_filter_lesson.call_args
     assert args[1] == 1 # layer=1
     assert "Mocked hallucination" in args[3]
 

@@ -1,5 +1,5 @@
+import pytest
 from farm_agent.analysis.mapper import RepoMapper
-
 
 def test_python_dependencies():
     mapper = RepoMapper()

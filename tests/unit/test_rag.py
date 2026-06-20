@@ -5,10 +5,9 @@ from unittest.mock import MagicMock
 mock_chromadb = MagicMock()
 sys.modules['chromadb'] = mock_chromadb
 
-from unittest.mock import MagicMock, patch
-
-from farm_agent.core.rag import RepoIndexer, chunk_markdown
-
+import pytest
+from unittest.mock import patch, MagicMock
+from farm_agent.core.rag import CodeChunk, chunk_markdown, RepoIndexer
 
 def test_chunk_markdown_basic():
     markdown_content = """# Subsystem A

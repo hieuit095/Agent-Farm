@@ -1,23 +1,14 @@
-import sys
-from unittest.mock import AsyncMock, MagicMock, patch
-
 import pytest
+import sys
+from unittest.mock import MagicMock, AsyncMock, patch
 
 # Ensure chromadb is mocked out
 mock_chromadb = MagicMock()
 sys.modules['chromadb'] = mock_chromadb
 
-from farm_agent.core.config import FarmAgentConfig
-from farm_agent.core.models import (
-    AnalysisResult,
-    ContributionType,
-    Finding,
-    ImpactLevel,
-    Repository,
-    Severity,
-)
 from farm_agent.orchestrator.pipeline import FarmAgentPipeline
-
+from farm_agent.core.config import FarmAgentConfig
+from farm_agent.core.models import Repository, Finding, ContributionType, Severity, ImpactLevel, AnalysisResult
 
 @pytest.mark.asyncio
 @patch("farm_agent.orchestrator.pipeline.fetch_repo_guidelines")
@@ -122,7 +113,7 @@ async def test_process_repo_integration(mock_mapper_cls, mock_indexer_cls, mock_
         mock_to_thread.side_effect = lambda func, *args, **kwargs: func(*args, **kwargs)
 
         # Patch the file reading to return empty dict
-        with patch("farm_agent.orchestrator.pipeline._read_all_repo_files_sync", return_value={"src/main.py": "content"}):
+        with patch("farm_agent.orchestrator.pipeline._read_all_repo_files_sync", return_value={"src/main.py": "content"}) as mock_read_files:
             await pipeline._process_repo(repo, dry_run=True, max_prs=1)
 
             # Assert early clone occurred

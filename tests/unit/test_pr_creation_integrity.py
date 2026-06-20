@@ -14,6 +14,7 @@ import pytest
 from farm_agent.core.exceptions import GitHubAPIError, PRCreationError
 from farm_agent.core.models import Contribution, Finding, Repository
 from farm_agent.github.client import GitHubClient
+from farm_agent.pr.manager import PRManager
 
 
 @pytest.fixture
@@ -215,7 +216,7 @@ class TestHeadFormatValidation:
     async def test_manager_rejects_bare_branch(self):
         from farm_agent.core.models import ContributionType, Severity
 
-        Contribution(
+        contribution = Contribution(
             title="fix: vuln",
             commit_message="fix: vuln",
             contribution_type=ContributionType.SECURITY_FIX,
