@@ -1,7 +1,6 @@
-import sys
 import re
 
-with open('farm_agent/analysis/analyzer.py', 'r', encoding='utf-8') as f:
+with open('farm_agent/analysis/analyzer.py', encoding='utf-8') as f:
     content = f.read()
 
 # 1. Remove _check_sg_available
@@ -183,7 +182,7 @@ semgrep_new = '''    async def _run_semgrep(
                 logger.warning("Semgrep returned invalid JSON. Logging raw output for diagnostics:")
                 logger.warning("STDOUT (first 1000 chars): %s", stdout_text[:1000])
                 logger.warning("STDERR (first 1000 chars): %s", stderr_text[:1000])
-                
+
                 # Attempt to extract JSON from plain text warnings
                 start_idx = stdout_text.find('{')
                 end_idx = stdout_text.rfind('}')
