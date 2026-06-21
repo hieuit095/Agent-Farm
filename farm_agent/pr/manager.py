@@ -219,8 +219,11 @@ class PRManager:
             import random
             from datetime import UTC, datetime, timedelta
             author_name = user.get("name") or user.get("login", "Farm-Agent")
-            author_email = user.get("email") or f"{user.get('id', '9919')}+{user.get('login', 'farm_agent')}@users.noreply.github.com"
-            author_date = (datetime.now(UTC) - timedelta(minutes=random.randint(15, 45))).strftime("%Y-%m-%dT%H:%M:%SZ")
+            author_email = user.get("email") or \
+                f"{user.get('id', '9919')}+{user.get('login', 'farm_agent')}@users.noreply.github.com"
+            author_date = (datetime.now(UTC) - timedelta(minutes=random.randint(15, 45))).strftime(
+                "%Y-%m-%dT%H:%M:%SZ"
+            )
 
             # 4e. Create commit
             new_commit_sha = await self._github.create_git_commit(
@@ -248,16 +251,16 @@ class PRManager:
                 issue_number = await self._create_issue_for_finding(contribution, target_repo)
 
             # 4. Create PR body — Diplomat Protocol Task 3: LLM-powered template filling
-            from farm_agent.core.models import ContributionType as _CT2
+            from farm_agent.core.models import ContributionType as CT
 
             _type_info = {
-                _CT2.SECURITY_FIX: ("🔒", "Reliability Improvement"),
-                _CT2.CODE_QUALITY: ("✨", "Code Quality"),
-                _CT2.README_FIX: ("📝", "Documentation"),
-                _CT2.UI_UX_FIX: ("🎨", "UI/UX Improvement"),
-                _CT2.PERFORMANCE_OPT: ("⚡", "Performance"),
-                _CT2.FEATURE_ADD: ("🚀", "New Feature"),
-                _CT2.REFACTOR: ("♻️", "Refactoring"),
+                CT.SECURITY_FIX: ("🔒", "Reliability Improvement"),
+                CT.CODE_QUALITY: ("✨", "Code Quality"),
+                CT.README_FIX: ("📝", "Documentation"),
+                CT.UI_UX_FIX: ("🎨", "UI/UX Improvement"),
+                CT.PERFORMANCE_OPT: ("⚡", "Performance"),
+                CT.FEATURE_ADD: ("🚀", "New Feature"),
+                CT.REFACTOR: ("♻️", "Refactoring"),
             }
             pr_emoji, pr_label = _type_info.get(contribution.finding.type, ("🔧", "Fix"))
             pr_files_list = "\n".join(
