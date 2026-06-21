@@ -173,9 +173,7 @@ class PRPatrol:
         config = kwargs.get("config")
         pipeline_cfg = getattr(config, "pipeline", None) if config else None
         self.MAX_CI_RETRIES = getattr(pipeline_cfg, "max_ci_retries", 3) if pipeline_cfg else 3
-        self.MAX_DISCUSSION_REPLIES = getattr(
-            pipeline_cfg, "max_discussion_replies", 3
-        ) if pipeline_cfg else 3
+        self.MAX_DISCUSSION_REPLIES = getattr(pipeline_cfg, "max_discussion_replies", 3) if pipeline_cfg else 3
 
     def _create_sandbox(self) -> DockerSandbox:
         """Create a sandbox instance for local validation."""
@@ -1817,9 +1815,7 @@ class PRPatrol:
                 try:
                     content = await get_file_content(owner, repo, node_path, branch)
                 except Exception as e:
-                    logger.warning(
-                        "Validation file fetch failed for %s: %s — cannot validate", node_path, e
-                    )
+                    logger.warning("Validation file fetch failed for %s: %s — cannot validate", node_path, e)
                     continue
             except Exception:
                 continue

@@ -2716,9 +2716,7 @@ class FarmAgentPipeline:
             # Parse JSON response
             try:
                 response_text = response.strip()
-                fence_match = re.search(
-                r"```(?:json)?\s*(.*?)```", response_text, re.DOTALL | re.IGNORECASE
-            )
+                fence_match = re.search(r"```(?:json)?\s*(.*?)```", response_text, re.DOTALL | re.IGNORECASE)
                 if fence_match:
                     response_text = fence_match.group(1).strip()
                 brace_start = response_text.find("{")
@@ -2814,15 +2812,11 @@ class FarmAgentPipeline:
         )
 
         try:
-            response = await appraiser_provider.complete(
-                prompt, system=system_prompt, temperature=0.1
-            )
+            response = await appraiser_provider.complete(prompt, system=system_prompt, temperature=0.1)
             await appraiser_provider.close()
 
             response_text = response.strip()
-            fence_match = re.search(
-                r"```(?:json)?\s*(.*?)```", response_text, re.DOTALL | re.IGNORECASE
-            )
+            fence_match = re.search(r"```(?:json)?\s*(.*?)```", response_text, re.DOTALL | re.IGNORECASE)
             if fence_match:
                 response_text = fence_match.group(1).strip()
             brace_start = response_text.find("{")
@@ -2886,15 +2880,11 @@ class FarmAgentPipeline:
         )
 
         try:
-            response = await gem_provider.complete(
-                prompt, system=system_prompt, temperature=0.1
-            )
+            response = await gem_provider.complete(prompt, system=system_prompt, temperature=0.1)
             await gem_provider.close()
 
             response_text = response.strip()
-            fence_match = re.search(
-                r"```(?:json)?\s*(.*?)```", response_text, re.DOTALL | re.IGNORECASE
-            )
+            fence_match = re.search(r"```(?:json)?\s*(.*?)```", response_text, re.DOTALL | re.IGNORECASE)
             if fence_match:
                 response_text = fence_match.group(1).strip()
             brace_start = response_text.find("{")
