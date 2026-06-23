@@ -10,6 +10,8 @@ from farm_agent.orchestrator.pipeline import FarmAgentPipeline
 class TestAsyncIOPipeline(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.config = MagicMock()
+        self.config.pipeline = MagicMock()
+        self.config.llm = MagicMock()
         self.config.pipeline.llm_concurrency_cap = 10
         self.config.llm.provider_cap = 10
         self.config.llm.provider = "deepseek"
