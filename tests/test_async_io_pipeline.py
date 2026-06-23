@@ -10,6 +10,11 @@ from farm_agent.orchestrator.pipeline import FarmAgentPipeline
 class TestAsyncIOPipeline(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.config = MagicMock()
+        self.config.pipeline.llm_concurrency_cap = 10
+        self.config.llm.provider_cap = 10
+        self.config.llm.provider = "deepseek"
+        self.config.llm.model = "deepseek-coder"
+
         self.config.notifications.telegram_token = None
         self.config.notifications.telegram_chat_id = None
         self.pipeline = FarmAgentPipeline(self.config)

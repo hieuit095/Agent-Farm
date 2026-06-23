@@ -232,10 +232,10 @@ class QAHardcoreScorer:
 
     async def evaluate(
         self,
-        dossier: VulnerabilityDossier,  # noqa: F821
+        dossier: VulnerabilityDossier,
         contribution: Contribution,
         repo_style_guide: str | None = None,
-    ) -> QAResult:  # noqa: F821
+    ) -> QAResult:
         """Score a patch against its originating vulnerability dossier.
 
         Returns a QAResult with score (0.0-10.0), critiques, and approval status.
@@ -271,7 +271,7 @@ class QAHardcoreScorer:
                 score=0.0,
                 critiques=[
                     "Your Search block did not match the file. Copy the lines EXACTLY from the source including all whitespace."
-                ],  # noqa: E501
+                ],
                 approved=False,
             )
 
@@ -296,39 +296,39 @@ class QAHardcoreScorer:
             style_penalty_clause = (
                 "\n\n## REPO-SPECIFIC STYLE COMPLIANCE (MANDATORY)\n\n"
                 "You MUST also evaluate whether the patch follows these repo-specific rules. "
-                "Violations of these rules MUST be reflected in lower scores and called out as critiques.\n\n"  # noqa: E501
+                "Violations of these rules MUST be reflected in lower scores and called out as critiques.\n\n"
                 f"{repo_style_guide}\n\n"
-                "If the patch violates ANY of the above rules, deduct at least 1.0 point per violation "  # noqa: E501
+                "If the patch violates ANY of the above rules, deduct at least 1.0 point per violation "
                 "and add a critique describing the specific violation."
             )
 
         system_prompt = (
             "You are a grumpy, cynical Senior Open-Source Maintainer reviewing a pull request. "
             "Your job is to find reasons to REJECT the PR. "
-            "Only approve if the fix is critical, in production code, and has zero impact on project stability.\n\n"  # noqa: E501
+            "Only approve if the fix is critical, in production code, and has zero impact on project stability.\n\n"
             "CRITICAL RULE - ZERO COMPROMISE: You are the final gatekeeper. "
-            "1. NO LAZY CODE: If the patch uses placeholders (`...`, `pass`, `TODO`), strips necessary logic, or is invalid, REJECT. "  # noqa: E501
+            "1. NO LAZY CODE: If the patch uses placeholders (`...`, `pass`, `TODO`), strips necessary logic, or is invalid, REJECT. "
             "2. NO PARTIAL FIXES: If it leaves related flaws open, REJECT. "
-            "3. SCORING PENALTY: If violated, score below 5.0, set `Approved: False`, harsh critique mandatory.\n\n"  # noqa: E501
+            "3. SCORING PENALTY: If violated, score below 5.0, set `Approved: False`, harsh critique mandatory.\n\n"
             "CRITICAL RULE - NO GUESSWORK: You are strictly forbidden from hallucinating. "
             "EVERY critique MUST be backed by explicit evidence from the patch or original code. "
             "FAIL-CLOSED POLICY: If you cannot find evidence, APPROVE.\n\n"
             "## Mandatory Contextual Sanity Check\n\n"
             "Before grading, you MUST evaluate\n\n"
-            "1. **Path Relevance Check**: Is the patched file part of the project's core production logic? "  # noqa: E501
+            "1. **Path Relevance Check**: Is the patched file part of the project's core production logic? "
             "If the path contains 'test', 'example', 'demo', 'docs', 'fixture', 'benchmark', "
-            "'sample', or similar non-production directories, the score MUST be forced below 5.0.\n\n"  # noqa: E501
-            "2. **Impact Assessment**: Does fixing this vulnerability break the intended purpose of the file? "  # noqa: E501
-            "If the file is a deliberately-insecure example or test fixture (e.g., 'eval.py' in a security "  # noqa: E501
-            "linter's examples/), fixing it destroys the file's purpose. Score MUST be below 5.0.\n\n"  # noqa: E501
-            "3. **Production-Only Gate**: Only patches to genuine production source code should score >= 9.0. "  # noqa: E501
+            "'sample', or similar non-production directories, the score MUST be forced below 5.0.\n\n"
+            "2. **Impact Assessment**: Does fixing this vulnerability break the intended purpose of the file? "
+            "If the file is a deliberately-insecure example or test fixture (e.g., 'eval.py' in a security "
+            "linter's examples/), fixing it destroys the file's purpose. Score MUST be below 5.0.\n\n"
+            "3. **Production-Only Gate**: Only patches to genuine production source code should score >= 9.0. "
             "Patches to test helpers, example code, documentation snippets should score "
             "5.0 or below — they are noise PRs that waste maintainers' time.\n\n"
             "**CRITICAL EXCEPTION — CI/CD Infrastructure**: Security vulnerabilities in CI/CD "
             "infrastructure (e.g., .github/workflows, CI scripts, Dockerfiles, deployment configs) "
-            "such as shell injections, untrusted input deserialization, or compromised dependencies "  # noqa: E501
-            "ARE considered critical production fixes. Grade them highly (9.0+) if the fix correctly "  # noqa: E501
-            "sanitizes inputs, pins dependencies, or secures the pipeline. CI/CD compromise can lead "  # noqa: E501
+            "such as shell injections, untrusted input deserialization, or compromised dependencies "
+            "ARE considered critical production fixes. Grade them highly (9.0+) if the fix correctly "
+            "sanitizes inputs, pins dependencies, or secures the pipeline. CI/CD compromise can lead "
             "to supply-chain attacks and is production-critical.\n\n"
             "## Weighted Grading Criteria\n\n"
             "- Path Relevance (20%): Is this in production code?\n"
@@ -342,8 +342,8 @@ class QAHardcoreScorer:
             "The 'approved' boolean MUST be true ONLY if the score is >= 9.0.\n"
             "Be ruthless. A score of 9.0+ means the patch is production-ready "
             "with zero issues. Most patches should score 5-8.\n"
-            "If the file is in a test/example/demo/docs directory, the MAXIMUM score is 4.0 — NO EXCEPTIONS.\n"  # noqa: E501
-            "For CI/CD infrastructure files (.github/workflows, Dockerfile, etc.), the CI/CD exception above applies.\n\n"  # noqa: E501
+            "If the file is in a test/example/demo/docs directory, the MAXIMUM score is 4.0 — NO EXCEPTIONS.\n"
+            "For CI/CD infrastructure files (.github/workflows, Dockerfile, etc.), the CI/CD exception above applies.\n\n"
             "DO NOT include any text before or after the JSON object. "
             "DO NOT wrap it in markdown fences. "
             "Return ONLY the raw JSON."
@@ -354,7 +354,7 @@ class QAHardcoreScorer:
             f"## Repository: {dossier.repo_url}\n\n"
             f"## Vulnerability Report\n{vuln_str}\n\n"
             f"## Patched File Paths\n"
-            f"{', '.join(ch.path for ch in contribution.changes) if contribution.changes else 'N/A'}\n\n"  # noqa: E501
+            f"{', '.join(ch.path for ch in contribution.changes) if contribution.changes else 'N/A'}\n\n"
             f"## Proposed Patch (Diff)\n{diff_str}\n\n"
             f"## Commit Message\n{contribution.commit_message}\n\n"
             f"Grade this patch. Apply the Contextual Sanity Check FIRST. "

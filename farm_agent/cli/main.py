@@ -442,9 +442,9 @@ def superhuman(ctx, time_warp, dry_run, target_repo):
             for sig in (signal.SIGINT, signal.SIGTERM):
                 inner_loop.add_signal_handler(
                     sig, lambda s=sig: _handle_signal(s, shutdown_hook, inner_loop)
-                )  # noqa: E501
+                )
 
-        def _handle_signal(sig, hook, l):  # noqa: E741
+        def _handle_signal(sig, hook, l):
             console.print(f"[yellow]Received {sig.name} — initiating graceful shutdown...[/yellow]")
             loop.request_shutdown()  # Signal the terminator loop to drain gracefully
             l.create_task(hook())  # Fire the cleanup hook (DB flush + close)
@@ -454,7 +454,7 @@ def superhuman(ctx, time_warp, dry_run, target_repo):
         except (KeyboardInterrupt, asyncio.CancelledError):
             console.print(
                 "[yellow]\nKeyboardInterrupt received — initiating graceful shutdown...[/yellow]"
-            )  # noqa: E501
+            )
         finally:
             await shutdown_hook()
 

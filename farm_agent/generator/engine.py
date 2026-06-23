@@ -29,7 +29,7 @@ _SECURITY_REWRITE = [
     (
         re.compile(r"(?i)\bsecurity (issue|bug|vulnerability|flaw)\b", re.IGNORECASE),
         r"reliability concern",
-    ),  # noqa: E501
+    ),
     (re.compile(r"(?i)\bvulnerability\b", re.IGNORECASE), r"robustness gap"),
     (re.compile(r"(?i)\bsecurity fix\b", re.IGNORECASE), r"reliability improvement"),
     (re.compile(r"(?i)\bsecurity patch\b", re.IGNORECASE), r"robustness patch"),
@@ -38,7 +38,7 @@ _SECURITY_REWRITE = [
             r"(?i)\bfix(?:ed)? (?:the )?security (?:issue|bug|vulnerability)\b", re.IGNORECASE
         ),
         r"improve robustness",
-    ),  # noqa: E501
+    ),
     (re.compile(r"(?i)\binjection\b", re.IGNORECASE), r"input boundary issue"),
     (re.compile(r"(?i)\bexploit\b", re.IGNORECASE), r"edge case"),
     (re.compile(r"(?i)\bmalicious\b", re.IGNORECASE), r"unexpected"),
@@ -235,14 +235,14 @@ class ContributionGenerator:
 
     def __init__(
         self, llm: LLMProvider, config: ContributionConfig, *, memory=None, pipeline_config=None
-    ):  # noqa: E501
+    ):
         self._llm = llm
         self._config = config
         self._memory = memory  # Optional Memory for repo_preferences
         # Configurable patch retry limit (from PipelineConfig or default)
         self._max_patch_retries = (
             getattr(pipeline_config, "max_patch_retries", 2) if pipeline_config else 2
-        )  # noqa: E501
+        )
         # Adversarial Reviewer — completely independent entity with its own LLM (qwen/qwen3.7-max)
         import copy
 
@@ -335,7 +335,7 @@ class ContributionGenerator:
                         f"{style_guide}\n\n{repo_style_prompt}"
                         if style_guide
                         else repo_style_prompt
-                    )  # noqa: E501
+                    )
 
             # ── P0-1 GRACEFUL CONTEXT FALLBACK — 3-tier rescue before aborting ─────────
             # The generator MUST have the actual source file content. Without it,
@@ -440,10 +440,10 @@ class ContributionGenerator:
                 try:
                     filter_lessons = await self._memory.get_knowledge(
                         context.repo.full_name, "FILTER_REJECTION_LESSON"
-                    )  # noqa: E501
+                    )
                     if filter_lessons:
                         system += (
-                            f"\n\n### PREVIOUS MISTAKES TO AVOID ON THIS REPO:\n{filter_lessons}\n"  # noqa: E501
+                            f"\n\n### PREVIOUS MISTAKES TO AVOID ON THIS REPO:\n{filter_lessons}\n"
                         )
                 except Exception as exc:
                     logger.debug("Could not fetch filter lessons for generator: %s", exc)
@@ -563,7 +563,7 @@ class ContributionGenerator:
                 if review_attempt >= max_review_retries:
                     # All retries exhausted — discard this finding to protect the repo
                     logger.error(
-                        "🛑 Adversarial Review Failed for '%s' — discarding finding after %d attempts. "  # noqa: E501
+                        "🛑 Adversarial Review Failed for '%s' — discarding finding after %d attempts. "
                         "The patch was not good enough to pass our security audit.",
                         finding.title,
                         max_review_retries + 1,
@@ -591,13 +591,13 @@ class ContributionGenerator:
                 if not latest_changes:
                     logger.warning(
                         "Rewrite attempt produced no valid changes for: %s", finding.title
-                    )  # noqa: E501
+                    )
                     return None
 
                 # Regenerate commit message and branch name for the rewritten patch
                 new_commit_msg = await self._generate_commit_message(
                     finding, latest_changes, context
-                )  # noqa: E501
+                )
                 new_branch_name = self._generate_branch_name(finding)
 
                 latest_contribution = Contribution(
@@ -720,10 +720,10 @@ class ContributionGenerator:
             try:
                 filter_lessons = await self._memory.get_knowledge(
                     context.repo.full_name, "FILTER_REJECTION_LESSON"
-                )  # noqa: E501
+                )
                 if filter_lessons:
                     qa_lessons_section += (
-                        f"\n\n### PREVIOUS MISTAKES TO AVOID ON THIS REPO:\n{filter_lessons}\n"  # noqa: E501
+                        f"\n\n### PREVIOUS MISTAKES TO AVOID ON THIS REPO:\n{filter_lessons}\n"
                     )
             except Exception as exc:
                 logger.debug("Could not fetch filter lessons: %s", exc)
@@ -738,12 +738,12 @@ class ContributionGenerator:
             "2. Think about: root cause analysis, data flow, potential regressions, "
             "and how to neutralize the vulnerability without breaking the system.\n"
             "3. Every code block must be COMPLETE and FUNCTIONAL.\n"
-            "4. STRICT NO-PLACEHOLDER POLICY. You are FORBIDDEN from using `// ...`, `TODO`, or any comments implying 'code remains the same'. You MUST output the ENTIRE function or block you are modifying.\n"  # noqa: E501
+            "4. STRICT NO-PLACEHOLDER POLICY. You are FORBIDDEN from using `// ...`, `TODO`, or any comments implying 'code remains the same'. You MUST output the ENTIRE function or block you are modifying.\n"
             "5. SURGICAL PRECISION: make the SMALLEST change that fixes the issue.\n"
             "6. Match existing code style EXACTLY (indentation, naming, patterns).\n"
-            "7. Return ONLY the JSON object below. No prose, no markdown commentary, no \u0422\u0435\u0442\u0430\u0434\u0435 tags.\n"  # noqa: E501
-            "8. CRITICAL: ABSOLUTELY NO TRUNCATION. YOU MUST OUTPUT THE ENTIRE MODIFIED FUNCTION OR BLOCK. "  # noqa: E501
-            'NEVER USE "..." OR "# TODO". YOUR PATCH WILL BE AUTOMATICALLY REJECTED AND YOU WILL BE '  # noqa: E501
+            "7. Return ONLY the JSON object below. No prose, no markdown commentary, no \u0422\u0435\u0442\u0430\u0434\u0435 tags.\n"
+            "8. CRITICAL: ABSOLUTELY NO TRUNCATION. YOU MUST OUTPUT THE ENTIRE MODIFIED FUNCTION OR BLOCK. "
+            'NEVER USE "..." OR "# TODO". YOUR PATCH WILL BE AUTOMATICALLY REJECTED AND YOU WILL BE '
             "PENALIZED IF YOU OMIT ANY ORIGINAL CODE.\n"
         )
 
@@ -851,7 +851,7 @@ class ContributionGenerator:
             f"## Output Format\n"
             f"You MUST respond strictly in the following JSON format. "
             f"The `coding_plan` MUST appear first.\n"
-            f'```json\n{{\n  "coding_plan": "1. Root cause analysis\\n2. Step-by-step fix strategy\\n3. Edge cases to handle",\n'  # noqa: E501
+            f'```json\n{{\n  "coding_plan": "1. Root cause analysis\\n2. Step-by-step fix strategy\\n3. Edge cases to handle",\n'
             f'  "changes": [\n    {{\n      "path": "{vuln.file}",\n'
             f'      "is_new_file": false,\n      "edits": [\n        {{\n'
             f'          "search": "exact text to find in the file",\n'
@@ -1129,7 +1129,7 @@ class ContributionGenerator:
                 val = item.get(field, "") or ""
                 if _GHOST_DISCLOSURE_RE.search(val):
                     raise GenerationError(
-                        f"Gag Order: corrected patch contains AI disclosure in '{field}' — aborting."  # noqa: E501
+                        f"Gag Order: corrected patch contains AI disclosure in '{field}' — aborting."
                     )
         # ─────────────────────────────────────────────────────────────────
 
@@ -1613,7 +1613,7 @@ class ContributionGenerator:
 
     def _replace_function_block(
         self, source_code: str, function_name: str, replacement: str, path: str
-    ) -> str | None:  # noqa: E501
+    ) -> str | None:
         """Replace an entire function/method block using AST or regex fallback.
 
         Uses Python's ``ast`` module for .py files to precisely locate
@@ -1663,13 +1663,13 @@ class ContributionGenerator:
                     (target.end_lineno - 1)
                     if hasattr(target, "end_lineno") and target.end_lineno
                     else len(lines) - 1
-                )  # noqa: E501
+                )
 
                 orig_indent = (
                     lines[start_line][: len(lines[start_line]) - len(lines[start_line].lstrip())]
                     if start_line < len(lines) and lines[start_line].strip()
                     else ""
-                )  # noqa: E501
+                )
                 reindented_lines = []
                 for rline in replacement.split("\n"):
                     if rline.strip():
@@ -1690,7 +1690,7 @@ class ContributionGenerator:
             except SyntaxError:
                 logger.debug(
                     "AST fallback: source has syntax errors, using regex fallback for %s", path
-                )  # noqa: E501
+                )
 
         # Regex/heuristic fallback for non-Python files or broken Python
         # Matches: (async )?(def|function|fn|func|sub|proc|method)\s+FUNC_NAME
@@ -1943,7 +1943,7 @@ class ContributionGenerator:
                             )
                         else:
                             logger.warning(
-                                "No original content for %s (finding file not fetched), skipping edits",  # noqa: E501
+                                "No original content for %s (finding file not fetched), skipping edits",
                                 path,
                             )
                         continue
@@ -1968,10 +1968,10 @@ class ContributionGenerator:
                         if not matched:
                             norm_search = "\n".join(
                                 line.rstrip().replace("\t", "    ") for line in search.split("\n")
-                            )  # noqa: E501
+                            )
                             norm_content = "\n".join(
                                 line.rstrip().replace("\t", "    ")
-                                for line in new_content.split("\n")  # noqa: E501
+                                for line in new_content.split("\n")
                             )
                             if norm_search in norm_content:
                                 idx = norm_content.index(norm_search)
@@ -2006,14 +2006,14 @@ class ContributionGenerator:
                         if not matched:
                             search_lines = search.split("\n")
                             content_lines = new_content.split("\n")
-                            stripped_search_lines = [l.lstrip() for l in search_lines]  # noqa: E741
+                            stripped_search_lines = [l.lstrip() for l in search_lines]
 
                             # Slide a window of len(search_lines) over content
                             window = len(search_lines)
                             if window >= 2:  # Require at least 2 lines for safety
                                 for start_idx in range(len(content_lines) - window + 1):
                                     candidate = content_lines[start_idx : start_idx + window]
-                                    candidate_stripped = [l.lstrip() for l in candidate]  # noqa: E741
+                                    candidate_stripped = [l.lstrip() for l in candidate]
                                     if candidate_stripped == stripped_search_lines:
                                         # Match found — re-indent replacement
                                         # using the original file's leading whitespace
@@ -2024,7 +2024,7 @@ class ContributionGenerator:
                                                 # Borrow indent from the corresponding original line
                                                 orig_indent = candidate[j][
                                                     : len(candidate[j]) - len(candidate[j].lstrip())
-                                                ]  # noqa: E501
+                                                ]
                                             elif candidate:
                                                 # Extra lines: use indent of the last matched line
                                                 last = candidate[-1]
@@ -2049,13 +2049,13 @@ class ContributionGenerator:
                         if not matched:
                             search_lines = search.split("\n")
                             content_lines = new_content.split("\n")
-                            stripped_search_lines = [l.strip() for l in search_lines]  # noqa: E741
+                            stripped_search_lines = [l.strip() for l in search_lines]
 
                             window = len(search_lines)
                             if window >= 1:
                                 for start_idx in range(len(content_lines) - window + 1):
                                     candidate = content_lines[start_idx : start_idx + window]
-                                    candidate_stripped = [l.strip() for l in candidate]  # noqa: E741
+                                    candidate_stripped = [l.strip() for l in candidate]
                                     if candidate_stripped == stripped_search_lines:
                                         # Match found
                                         replace_lines = replace.split("\n")
@@ -2065,7 +2065,7 @@ class ContributionGenerator:
                                                 # Borrow indent from the corresponding original line
                                                 orig_indent = candidate[j][
                                                     : len(candidate[j]) - len(candidate[j].lstrip())
-                                                ]  # noqa: E501
+                                                ]
                                             elif candidate:
                                                 last = candidate[-1]
                                                 orig_indent = last[: len(last) - len(last.lstrip())]
@@ -2077,7 +2077,7 @@ class ContributionGenerator:
                                         new_content = "\n".join(content_lines)
                                         matched = True
                                         logger.debug(
-                                            "Aggressive indent normalization match for %s (lines %d-%d)",  # noqa: E501
+                                            "Aggressive indent normalization match for %s (lines %d-%d)",
                                             path,
                                             start_idx + 1,
                                             start_idx + window,
@@ -2094,20 +2094,20 @@ class ContributionGenerator:
 
                             nonblank_search = [
                                 (i, l) for i, l in enumerate(search_lines) if l.strip()
-                            ]  # noqa: E501, E741
+                            ]
                             nonblank_content = [
                                 (i, l) for i, l in enumerate(content_lines) if l.strip()
-                            ]  # noqa: E501, E741
+                            ]
 
-                            nb_search_stripped = [l.strip() for _, l in nonblank_search]  # noqa: E741
-                            nb_content_stripped = [l.strip() for _, l in nonblank_content]  # noqa: E741
+                            nb_search_stripped = [l.strip() for _, l in nonblank_search]
+                            nb_content_stripped = [l.strip() for _, l in nonblank_content]
 
                             window_nb = len(nb_search_stripped)
                             if window_nb >= 2:
                                 for start_nb in range(len(nb_content_stripped) - window_nb + 1):
                                     nb_candidate = nb_content_stripped[
                                         start_nb : start_nb + window_nb
-                                    ]  # noqa: E501
+                                    ]
                                     if nb_candidate == nb_search_stripped:
                                         orig_start = nonblank_content[start_nb][0]
                                         orig_end = nonblank_content[start_nb + window_nb - 1][0]
@@ -2120,12 +2120,12 @@ class ContributionGenerator:
                                             ]
                                             if content_lines[orig_start].strip()
                                             else ""
-                                        )  # noqa: E501
+                                        )
                                         reindented: list[str] = []
                                         for j, rline in enumerate(replace_lines):
                                             if j < (
                                                 orig_end - orig_start + 1
-                                            ) and orig_start + j < len(content_lines):  # noqa: E501
+                                            ) and orig_start + j < len(content_lines):
                                                 src_line = content_lines[orig_start + j]
                                                 orig_indent = (
                                                     src_line[
@@ -2133,14 +2133,14 @@ class ContributionGenerator:
                                                     ]
                                                     if src_line.strip()
                                                     else base_indent
-                                                )  # noqa: E501
+                                                )
                                             else:
                                                 orig_indent = base_indent
                                             reindented.append(
                                                 orig_indent + rline.lstrip()
                                                 if rline.strip()
                                                 else ""
-                                            )  # noqa: E501
+                                            )
 
                                         content_lines[orig_start : orig_end + 1] = reindented
                                         new_content = "\n".join(content_lines)
@@ -2182,9 +2182,9 @@ class ContributionGenerator:
                                 search_line_count > 0
                                 and (replace_line_count / search_line_count)
                                 > MAX_REPLACE_TO_SEARCH_RATIO
-                            ):  # noqa: E501
+                            ):
                                 logger.info(
-                                    "Diff Minimizer: replace/search ratio %.1f exceeds limit %.1f in %s",  # noqa: E501
+                                    "Diff Minimizer: replace/search ratio %.1f exceeds limit %.1f in %s",
                                     replace_line_count / search_line_count,
                                     MAX_REPLACE_TO_SEARCH_RATIO,
                                     path,
@@ -2207,10 +2207,10 @@ class ContributionGenerator:
 
                             match_info = (
                                 ", ".join(closest_matches[:3]) if closest_matches else "none"
-                            )  # noqa: E501
+                            )
 
                             logger.warning(
-                                "Search text not found in %s (tried exact + fuzzy + indent-agnostic + aggressive). "  # noqa: E501
+                                "Search text not found in %s (tried exact + fuzzy + indent-agnostic + aggressive). "
                                 "Search line 1: '%s'. Closest matches in file: %s",
                                 path,
                                 first_search_line,

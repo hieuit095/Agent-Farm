@@ -104,7 +104,7 @@ class TelegramNotifier:
         on_update_callback=None,
         on_clean_callback=None,
         on_accept_callback=None,
-    ) -> None:  # noqa: E501
+    ) -> None:
         """Run long-polling loop to receive Telegram commands.
 
         Args:
@@ -142,7 +142,7 @@ class TelegramNotifier:
                     if chat_id != self.chat_id:
                         logger.warning(
                             "Ignoring Telegram command from unauthorized chat: %s", chat_id
-                        )  # noqa: E501
+                        )
                         continue
 
                     text = message.get("text", "").strip()
@@ -161,7 +161,7 @@ class TelegramNotifier:
             except Exception:
                 logger.critical(
                     "All notification channels failed — persisted to %s", FAILED_ALERTS_FILE
-                )  # noqa: E501
+                )
                 await asyncio.sleep(delay)
                 delay = min(delay * 2, max_delay)  # double backoff, cap at 60s
 
@@ -172,7 +172,7 @@ class TelegramNotifier:
         on_update_callback=None,
         on_clean_callback=None,
         on_accept_callback=None,
-    ) -> None:  # noqa: E501
+    ) -> None:
         """Handle incoming C2 commands from Telegram."""
         import time
         from datetime import UTC, datetime
@@ -234,7 +234,7 @@ class TelegramNotifier:
 
             await self.send_message(
                 f"📈 <b>Minimax Quota Usage:</b>\nLast 5h: {count_5h}/1000\nLast 7d: {count_7d}/10000"
-            )  # noqa: E501
+            )
 
         elif command == "/update":
             # Notify user immediately that sync has started

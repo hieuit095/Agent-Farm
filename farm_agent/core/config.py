@@ -135,7 +135,7 @@ class AnalysisConfig(BaseModel):
             "p/golang",
             "p/rust",
             "p/smart-contracts",
-        ]  # noqa: E501
+        ]
     )
 
 

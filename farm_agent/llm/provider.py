@@ -280,7 +280,7 @@ class OpenRouterProvider(LLMProvider):
                 if not choices:
                     last_error = LLMError(
                         f"OpenRouter returned empty choices (attempt {attempt + 1}/3)"
-                    )  # noqa: E501
+                    )
                     if attempt < 2:
                         import asyncio as _asyncio
 

@@ -191,7 +191,7 @@ class SuperHumanLoop:
                 "critical_spared": 0,
                 "errors": 1,
                 "details": [],
-            }  # noqa: E501
+            }
 
         janitor = PRJanitor(self._pipeline._github, username, self._pipeline.config.llm)
         logger.info("[TERMINATOR] Janitor sweep triggered.")
@@ -286,7 +286,7 @@ class SuperHumanLoop:
             if open_prs:
                 logger.info(
                     "[TERMINATOR] %d PR(s) with open feedback — prioritizing patrol.", len(open_prs)
-                )  # noqa: E501
+                )
                 return True
             return False
         except Exception:
@@ -342,7 +342,7 @@ class SuperHumanLoop:
             if self._is_shutting_down:
                 logger.info(
                     "[TERMINATOR] Shutdown signal received — finishing current iteration then exiting."
-                )  # noqa: E501
+                )
                 self._daily_log.log_shutdown(self._iteration)
                 logger.info("[TERMINATOR] Graceful shutdown complete. Data secured.")
                 break
@@ -354,7 +354,7 @@ class SuperHumanLoop:
                 logger.info(
                     "[TERMINATOR] TIME-WARP: Completed %d iterations — exiting.",
                     WARP_MAX_ITERATIONS,
-                )  # noqa: E501
+                )
                 break
 
             # ── Daily reset & KB GC ──

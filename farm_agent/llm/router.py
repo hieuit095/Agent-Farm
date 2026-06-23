@@ -67,13 +67,13 @@ class TaskRouter:
             task_type in light_tasks
             and complexity <= 3
             and self._strategy != CostStrategy.PERFORMANCE
-        ):  # noqa: E501
+        ):
             model = DEEPSEEK_V4_FLASH
             reason = f"Light task ({task_type.value}, complexity={complexity}) routed to default."
         elif task_type in heavy_tasks and complexity >= 7:
             model = DEEPSEEK_V4_PRO
             reason = (
-                f"Heavy task ({task_type.value}, complexity={complexity}) routed to flagship model."  # noqa: E501
+                f"Heavy task ({task_type.value}, complexity={complexity}) routed to flagship model."
             )
         elif token_estimate > 100_000:
             model = DEEPSEEK_V4_PRO

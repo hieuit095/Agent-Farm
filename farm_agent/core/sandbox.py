@@ -30,7 +30,7 @@ LANGUAGE_ENVIRONMENTS: dict[str, dict[str, str]] = {
     },
     "typescript": {
         "image": "node:20-alpine",
-        "test_cmd": "npm install --silent 2>/dev/null && npm test 2>/dev/null || npx tsc --noEmit || true",  # noqa: E501
+        "test_cmd": "npm install --silent 2>/dev/null && npm test 2>/dev/null || npx tsc --noEmit || true",
         "install_cmd": "npm install --silent 2>/dev/null || true",
     },
     "rust": {
@@ -45,7 +45,7 @@ LANGUAGE_ENVIRONMENTS: dict[str, dict[str, str]] = {
     },
     "java": {
         "image": "eclipse-temurin:21-jdk-alpine",
-        "test_cmd": "mvn test -q 2>&1 || gradle test -q 2>&1 || ./gradlew test -q 2>&1 || mvn compile -q 2>&1",  # noqa: E501
+        "test_cmd": "mvn test -q 2>&1 || gradle test -q 2>&1 || ./gradlew test -q 2>&1 || mvn compile -q 2>&1",
         "install_cmd": "mvn dependencyresolve 2>/dev/null || true",
     },
     "ruby": {
@@ -55,18 +55,18 @@ LANGUAGE_ENVIRONMENTS: dict[str, dict[str, str]] = {
     },
     "php": {
         "image": "php:8.2-cli-alpine",
-        "test_cmd": "composer install --quiet 2>/dev/null && ./vendor/bin/phpunit 2>&1 || php --version",  # noqa: E501
+        "test_cmd": "composer install --quiet 2>/dev/null && ./vendor/bin/phpunit 2>&1 || php --version",
         "install_cmd": "composer install --quiet 2>/dev/null || true",
     },
     "c": {
         "image": "gcc:14-bookworm",
-        "test_cmd": "ls *.c Makefile 2>/dev/null && make test 2>&1 || (gcc --version && echo 'no Makefile')",  # noqa: E501
+        "test_cmd": "ls *.c Makefile 2>/dev/null && make test 2>&1 || (gcc --version && echo 'no Makefile')",
         "install_cmd": "apt-get update -qq && apt-get install -qq -y make gcc 2>/dev/null || true",
     },
     "cpp": {
         "image": "gcc:14-bookworm",
-        "test_cmd": "ls *.cpp CMakeLists.txt 2>/dev/null && make test 2>&1 || (g++ --version && echo 'no Makefile')",  # noqa: E501
-        "install_cmd": "apt-get update -qq && apt-get install -qq -y make g++ cmake 2>/dev/null || true",  # noqa: E501
+        "test_cmd": "ls *.cpp CMakeLists.txt 2>/dev/null && make test 2>&1 || (g++ --version && echo 'no Makefile')",
+        "install_cmd": "apt-get update -qq && apt-get install -qq -y make g++ cmake 2>/dev/null || true",
     },
     "csharp": {
         "image": "mcr.microsoft.com/dotnet/sdk:8.0-alpine",
@@ -159,7 +159,7 @@ def detect_language_from_extensions(repo_path: str | Path) -> str:
         ".venv",
         ".pytest_cache",
         ".mypy_cache",
-    }  # noqa: E501
+    }
     try:
         for _root, dirs, files in os.walk(repo_dir):
             # Prune skip dirs in-place to avoid descending into them
@@ -483,14 +483,14 @@ class DockerSandbox:
                 await self._wait_for_container_removal(run_id)
             if "temp_dir_obj" in locals():
                 # tempfile cleanup can sometimes raise if files are in use, but usually safe.
-                # However, tempfile.TemporaryDirectory's cleanup may fail on Windows if files are read-only.  # noqa: E501
+                # However, tempfile.TemporaryDirectory's cleanup may fail on Windows if files are read-only.
                 # We'll just call it and ignore exceptions or let it throw.
                 try:
-                    temp_dir_obj.cleanup()  # noqa: F821
+                    temp_dir_obj.cleanup()
                 except Exception as cleanup_exc:
                     logger.debug(
                         "Failed to clean up temp dir %s: %s", temp_dir_obj.name, cleanup_exc
-                    )  # noqa: E501, F821
+                    )
 
     async def _start_container(
         self,
@@ -679,7 +679,7 @@ class DockerSandbox:
         except TimeoutError:
             logger.warning(
                 "Sandbox output stream did not close before cleanup grace period expired"
-            )  # noqa: E501
+            )
             return "", ""
         except (APIError, NotFound) as exc:
             logger.warning("Sandbox output stream closed unexpectedly: %s", exc)
@@ -777,7 +777,7 @@ class DockerSandbox:
             "foundry.toml",
             "hardhat.config.js",
             "hardhat.config.ts",
-        ]  # noqa: E501
+        ]
 
         # Check if any folder/file exists
         for ind in test_indicators:

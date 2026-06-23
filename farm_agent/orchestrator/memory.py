@@ -638,7 +638,7 @@ class Memory:
         try:
             await self._db.execute(
                 """INSERT OR REPLACE INTO knowledge_base (repo_name, entry_type, content, created_at)
-                   VALUES (?, 'qa_lesson', ?, ?)""",  # noqa: E501
+                   VALUES (?, 'qa_lesson', ?, ?)""",
                 (repo_name, content, datetime.now(UTC).isoformat()),
             )
             await self._db.commit()
@@ -647,17 +647,17 @@ class Memory:
 
     async def add_filter_lesson(
         self, repo: str, layer: int, snippet_or_fix: str, critique: str
-    ) -> None:  # noqa: E501
+    ) -> None:
         """Record a rejection lesson from Layer 1 or Layer 2 filters."""
         if self._db is None:
             return
 
         # Replace tricky quotes to avoid JSON issues, truncation.
-        content = f"[Layer {layer}] Rejected due to: {critique}\nSnippet/Fix context:\n{snippet_or_fix[:500]}..."  # noqa: E501
+        content = f"[Layer {layer}] Rejected due to: {critique}\nSnippet/Fix context:\n{snippet_or_fix[:500]}..."
         try:
             await self._db.execute(
                 """INSERT OR REPLACE INTO knowledge_base (repo_name, entry_type, content, created_at)
-                   VALUES (?, 'FILTER_REJECTION_LESSON', ?, ?)""",  # noqa: E501
+                   VALUES (?, 'FILTER_REJECTION_LESSON', ?, ?)""",
                 (repo, content, datetime.now(UTC).isoformat()),
             )
             await self._db.commit()
@@ -702,7 +702,7 @@ class Memory:
             deleted = cursor.rowcount
             if deleted > 0:
                 logger.info(
-                    "Garbage Collection: purged %d stale knowledge base entries (older than %d days)",  # noqa: E501
+                    "Garbage Collection: purged %d stale knowledge base entries (older than %d days)",
                     deleted,
                     days,
                 )
@@ -782,7 +782,7 @@ class Memory:
         try:
             raw = json_path.read_text(encoding="utf-8")
             entries = _json.loads(raw)
-        except (json.JSONDecodeError, OSError) as exc:  # noqa: F821
+        except (json.JSONDecodeError, OSError) as exc:
             logger.error("Failed to read target_repo.json for seeding: %s", exc)
             return 0
 
@@ -849,13 +849,13 @@ class Memory:
             query = f"""UPDATE target_repos
                SET scanned_at = ?
                WHERE repo_url = (SELECT repo_url FROM target_repos WHERE LOWER(language) NOT IN ({placeholders}) ORDER BY COALESCE(scanned_at, 0) ASC, rowid ASC LIMIT 1)
-               RETURNING *"""  # noqa: E501
+               RETURNING *"""
             params = (now_ts, *[lang.lower() for lang in excluded_languages])
         else:
             query = """UPDATE target_repos
                SET scanned_at = ?
                WHERE repo_url = (SELECT repo_url FROM target_repos ORDER BY COALESCE(scanned_at, 0) ASC, rowid ASC LIMIT 1)
-               RETURNING *"""  # noqa: E501
+               RETURNING *"""
             params = (now_ts,)
 
         cursor = await self._db.execute(query, params)
@@ -869,7 +869,7 @@ class Memory:
         result = dict(zip(cols, row, strict=False))
         logger.info(
             f"[TARGET ACQUIRED] Repo: {result.get('repo_url')} | Language: {result.get('language')} | Bounty: {result.get('bounty_amount')} | Diamond: {result.get('diamond_target')}"
-        )  # noqa: E501
+        )
         return result
 
     async def mark_target_status(
@@ -1107,7 +1107,7 @@ class Memory:
         if self._db is None:
             return None
         cursor = await self._db.execute(
-            "SELECT repo, style_summary, contributing_md, pr_template FROM repo_style_guides WHERE repo = ?",  # noqa: E501
+            "SELECT repo, style_summary, contributing_md, pr_template FROM repo_style_guides WHERE repo = ?",
             (repo,),
         )
         row = await cursor.fetchone()

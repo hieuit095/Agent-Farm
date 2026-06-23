@@ -330,7 +330,7 @@ class DatabaseTargetDiscovery:
 
     async def get_next_target(
         self, excluded_languages: list[str] | None = None
-    ) -> TargetRepoEntry | None:  # noqa: E501
+    ) -> TargetRepoEntry | None:
         """Return the target with the oldest scanned_at (or NULL first).
 
         Atomically reserves the target and reads from the target_repos SQLite
@@ -354,7 +354,7 @@ class DatabaseTargetDiscovery:
             language=row.get("language"),
             bounty_amount=str(row.get("bounty_amount"))
             if row.get("bounty_amount") is not None
-            else None,  # noqa: E501
+            else None,
             diamond_target=bool(row.get("diamond_target", 0)),
         )
 

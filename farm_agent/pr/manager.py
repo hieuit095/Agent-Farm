@@ -55,7 +55,7 @@ def auto_check_pr_template(body: str, contrib_type: ContributionType | None = No
                 # Only check if it safely avoids danger terms
                 if not any(
                     danger in stripped for danger in ["breaking", "release", "deploy", "migration"]
-                ):  # noqa: E501
+                ):
                     # Replace the first unmet checkbox
                     lines[i] = line.replace("[ ]", "[x]", 1)
     return "\n".join(lines)
@@ -72,7 +72,7 @@ class PRManager:
         "status",
         "error_details",
         "vulnerability_type",
-    ]  # noqa: E501
+    ]
 
     def __init__(self, github: GitHubClient, llm=None):
         self._github = github
@@ -237,10 +237,10 @@ class PRManager:
             author_email = (
                 user.get("email")
                 or f"{user.get('id', '9919')}+{user.get('login', 'farm_agent')}@users.noreply.github.com"
-            )  # noqa: E501
+            )
             author_date = (datetime.now(UTC) - timedelta(minutes=random.randint(15, 45))).strftime(
                 "%Y-%m-%dT%H:%M:%SZ"
-            )  # noqa: E501
+            )
 
             # 4e. Create commit
             new_commit_sha = await self._github.create_git_commit(

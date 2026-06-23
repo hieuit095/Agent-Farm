@@ -582,7 +582,7 @@ class CodeAnalyzer:
         if self._memory:
             lessons = await self._memory.get_knowledge(
                 context.repo.full_name, "FILTER_REJECTION_LESSON"
-            )  # noqa: E501
+            )
             if lessons:
                 system += f"\n\n### PREVIOUS MISTAKES TO AVOID ON THIS REPO:\n{lessons}\n"
 
@@ -1021,7 +1021,7 @@ class BloodhoundAnalyzer:
         if not api_key:
             logger.debug(
                 "No OpenRouter API key configured — will use default LLM for Red Team audit"
-            )  # noqa: E501
+            )
             return None
 
         red_team_model = getattr(self._config, "red_team_model", "deepseek/deepseek-v4-flash")
@@ -1149,7 +1149,7 @@ class BloodhoundAnalyzer:
                     except json.JSONDecodeError:
                         logger.error(
                             "Clean JSON extraction failed. Could not parse Semgrep output."
-                        )  # noqa: E501
+                        )
                         return []
                 else:
                     return []
@@ -1184,7 +1184,7 @@ class BloodhoundAnalyzer:
         except TimeoutError:
             logger.warning(
                 "Semgrep scan timed out (%ds) for %s", self.SEMGREP_TIMEOUT, repo_path.name
-            )  # noqa: E501
+            )
             return []
         except json.JSONDecodeError:
             logger.warning("Semgrep returned invalid JSON for %s", repo_path.name)
@@ -1201,7 +1201,7 @@ class BloodhoundAnalyzer:
             getattr(self._llm.config, "max_snippet_chars", 15000)
             if hasattr(self, "_llm") and hasattr(self._llm, "config")
             else 15000
-        )  # noqa: E501
+        )
 
         for m in matches:
             severity = m.get("severity", "UNKNOWN").upper()
@@ -1231,7 +1231,7 @@ class BloodhoundAnalyzer:
             # If everything was filtered out, skip LLM call
             return VulnerabilityDossier(
                 repo_url=repo_url, target_commit="unknown", vulnerabilities=[]
-            )  # noqa: E501
+            )
 
         context_str = "\n---\n".join(context_parts)
 
@@ -1261,7 +1261,7 @@ You MUST respond strictly in the following JSON array format. No markdown, no co
         "fix": "The architectural patch to kill this attack vector.",
         "impact": "CRITICAL: Remote Code Execution via..."
     }
-]"""  # noqa: E501
+]"""
 
         user_prompt = (
             f"Repository: {repo_url}\n\n"
@@ -1288,7 +1288,7 @@ You MUST respond strictly in the following JSON array format. No markdown, no co
                     else:
                         logger.info(
                             "OpenRouter Red Team audit (%d/%d today)", usage + 1, daily_limit
-                        )  # noqa: E501
+                        )
 
             if client is not None:
                 response = await client.complete(user_prompt, system=system_prompt, temperature=0.1)
@@ -1298,11 +1298,11 @@ You MUST respond strictly in the following JSON array format. No markdown, no co
                 logger.info("No OpenRouter provider — using default LLM for White-Hat audit")
                 response = await self._llm.complete(
                     user_prompt, system=system_prompt, temperature=0.1
-                )  # noqa: E501
+                )
 
             return self._parse_audit_response(
                 response, repo_url, forbidden_paths=self._forbidden_paths()
-            )  # noqa: E501
+            )
         except Exception as exc:
             # ── Universal LLM fallback for ANY provider error ──────────────────
             # If OpenRouter fails for ANY reason (402 Payment Required,
@@ -1313,37 +1313,37 @@ You MUST respond strictly in the following JSON array format. No markdown, no co
 
             if isinstance(exc, LLMRateLimitError):
                 logger.warning(
-                    "[RED TEAM OFFLINE] OpenRouter rate limit hit. Initiating Fallback to Minimax M2.7."  # noqa: E501
+                    "[RED TEAM OFFLINE] OpenRouter rate limit hit. Initiating Fallback to Minimax M2.7."
                 )
             elif isinstance(exc, LLMError):
                 status_str = str(exc)
                 if "402" in status_str:
                     logger.warning(
-                        "[RED TEAM OFFLINE] OpenRouter 402 Payment Required. Initiating Fallback to Minimax M2.7."  # noqa: E501
+                        "[RED TEAM OFFLINE] OpenRouter 402 Payment Required. Initiating Fallback to Minimax M2.7."
                     )
                 else:
                     logger.warning(
-                        "[RED TEAM OFFLINE] OpenRouter LLM error — initiating Fallback to Minimax M2.7: %s",  # noqa: E501
+                        "[RED TEAM OFFLINE] OpenRouter LLM error — initiating Fallback to Minimax M2.7: %s",
                         exc,
                     )
             else:
                 logger.warning(
-                    "[RED TEAM OFFLINE] Unexpected error from OpenRouter — initiating Fallback to Minimax M2.7: %s",  # noqa: E501
+                    "[RED TEAM OFFLINE] Unexpected error from OpenRouter — initiating Fallback to Minimax M2.7: %s",
                     exc,
                 )
 
             try:
                 response = await self._llm.complete(
                     user_prompt, system=system_prompt, temperature=0.1
-                )  # noqa: E501
+                )
                 return self._parse_audit_response(
                     response, repo_url, forbidden_paths=self._forbidden_paths()
-                )  # noqa: E501
+                )
             except Exception as fallback_exc:
                 logger.error("White-Hat audit fallback LLM also failed: %s", fallback_exc)
                 return VulnerabilityDossier(
                     repo_url=repo_url, target_commit="unknown", vulnerabilities=[]
-                )  # noqa: E501
+                )
 
     def _classify_context(self, file_path: str, forbidden_paths: list[str] | None = None) -> str:
         """Classify a file path as PRODUCTION or LOW_PRIORITY_CONTEXT.
@@ -1372,7 +1372,7 @@ You MUST respond strictly in the following JSON array format. No markdown, no co
         - Has fewer than 10 characters, OR
         - Does not contain ANY structural programming characters:
           braces {}, parentheses (), brackets [], operators =, ==, !=, >, <, >=, <=, ->, +=, -=, *=, /=, semicolon ;
-        """  # noqa: E501
+        """
         if not snippet or not isinstance(snippet, str):
             return False
 
@@ -1397,12 +1397,12 @@ You MUST respond strictly in the following JSON array format. No markdown, no co
             "!",
             ";",
             ":",
-        }  # noqa: E501
+        }
         return any(ch in stripped for ch in structural_chars)
 
     def _parse_audit_response(
         self, response: str, repo_url: str, forbidden_paths: list[str] | None = None
-    ) -> VulnerabilityDossier:  # noqa: E501
+    ) -> VulnerabilityDossier:
         import re as _re
 
         text = response.strip()
@@ -1422,13 +1422,13 @@ You MUST respond strictly in the following JSON array format. No markdown, no co
             logger.warning("Failed to parse LLM audit response as JSON")
             return VulnerabilityDossier(
                 repo_url=repo_url, target_commit="unknown", vulnerabilities=[]
-            )  # noqa: E501
+            )
 
         if not isinstance(parsed, list):
             logger.warning("LLM audit response is not a JSON array")
             return VulnerabilityDossier(
                 repo_url=repo_url, target_commit="unknown", vulnerabilities=[]
-            )  # noqa: E501
+            )
 
         vulns = []
         for item in parsed:
@@ -1456,7 +1456,7 @@ You MUST respond strictly in the following JSON array format. No markdown, no co
                     " Maybe ",
                     " Possibly ",
                     " Probably ",
-                }  # noqa: E501
+                }
                 is_lazy = (
                     len(evidence_chain) < 20
                     or evidence_chain.lower().count("if") > 2
@@ -1464,7 +1464,7 @@ You MUST respond strictly in the following JSON array format. No markdown, no co
                 )
                 if is_lazy:
                     logger.info(
-                        "Evidence chain too lazy (< 20 chars or contains hallucination words) for %s:%s — filtering out. evidence=%s",  # noqa: E501
+                        "Evidence chain too lazy (< 20 chars or contains hallucination words) for %s:%s — filtering out. evidence=%s",
                         file_path,
                         item.get("line", 0),
                         (evidence_chain[:50] + "...") if evidence_chain else "<empty>",
@@ -1481,7 +1481,7 @@ You MUST respond strictly in the following JSON array format. No markdown, no co
                 if impact.upper().startswith("CRITICAL") or impact.upper().startswith("HIGH"):  # noqa: SIM102
                     if not poc or not fix:
                         logger.warning(
-                            "LLM returned CRITICAL/HIGH finding with empty poc/fix for %s:%s — filtering out",  # noqa: E501
+                            "LLM returned CRITICAL/HIGH finding with empty poc/fix for %s:%s — filtering out",
                             file_path,
                             item.get("line", 0),
                         )
@@ -1504,7 +1504,7 @@ You MUST respond strictly in the following JSON array format. No markdown, no co
 
         return VulnerabilityDossier(
             repo_url=repo_url, target_commit="unknown", vulnerabilities=vulns
-        )  # noqa: E501
+        )
 
     async def run_bloodhound(self, repo: Repository) -> VulnerabilityDossier:
         """Execute the full Bloodhound pipeline for a repository.
@@ -1547,7 +1547,7 @@ You MUST respond strictly in the following JSON array format. No markdown, no co
             if not tasks:
                 logger.warning(
                     "No radar tools available for %s — skipping bloodhound", repo.full_name
-                )  # noqa: E501
+                )
                 return empty_dossier
 
             results = await asyncio.gather(*tasks)

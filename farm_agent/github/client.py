@@ -34,7 +34,7 @@ class GitHubClient:
 
     def __init__(
         self, token: str, rate_limit_buffer: int = 3, secondary_tokens: list[str] | None = None
-    ):  # noqa: E501
+    ):
         self._primary_token = token
         self._rate_limit_buffer = rate_limit_buffer
 
@@ -49,7 +49,7 @@ class GitHubClient:
                 "Accept": "application/vnd.github+json",
                 "X-GitHub-Api-Version": "2022-11-28",
                 # Sanitized — browser-like UA avoids GitHub abuse detection
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",  # noqa: E501
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
             },
             # P0-FIX: Granular timeouts prevent infinite hangs on TLS handshakes
             # and slow reads.  A flat timeout=30.0 does NOT cap the connect phase
@@ -88,7 +88,7 @@ class GitHubClient:
         use_primary_only: bool = False,
         is_graphql: bool = False,
         **kwargs,
-    ) -> Any:  # noqa: E501
+    ) -> Any:
         """Make an authenticated GitHub API request with error handling and retry.
 
         Handles GitHub Secondary Rate Limits (abuse detection) by retrying
@@ -127,7 +127,7 @@ class GitHubClient:
             try:
                 response = await self._client.request(
                     method, url, headers=request_headers, **kwargs
-                )  # noqa: E501
+                )
             except httpx.HTTPError as e:
                 network_attempts += 1
                 # P0-FIX: Use repr(e) — str(e) for ConnectTimeout, ReadError, etc.
@@ -157,7 +157,7 @@ class GitHubClient:
                         old_index = self._current_token_index
                         self._current_token_index = (self._current_token_index + 1) % len(
                             self._pool_tokens
-                        )  # noqa: E501
+                        )
                         if self._current_token_index != old_index:
                             logger.info(
                                 "Token rotation: rate-limit-remaining=%d (< 50), "
@@ -617,7 +617,7 @@ class GitHubClient:
 
             author_name = self._cached_user.get("name") or self._cached_user.get(
                 "login", author_name
-            )  # noqa: E501
+            )
             author_email = self._cached_user.get("email")
             if not author_email:
                 # Use the real user ID + login to match GitHub's internal privacy pattern
@@ -627,7 +627,7 @@ class GitHubClient:
 
             author_date = (datetime.now(UTC) - timedelta(minutes=random.randint(15, 45))).strftime(
                 "%Y-%m-%dT%H:%M:%SZ"
-            )  # noqa: E501
+            )
             payload["author"] = {"name": author_name, "email": author_email, "date": author_date}
         except Exception as e:
             logger.error("Failed to get authenticated user: %s", e)
@@ -825,7 +825,7 @@ class GitHubClient:
                 "fetch_user_merged_prs: could not validate username via GET /user: %s — "
                 "using provided '%s'",
                 exc,
-                username,  # noqa: F821
+                username,
             )
 
         if not username or not username.strip():
@@ -1141,7 +1141,7 @@ class GitHubClient:
             )
             return ""
         except Exception:
-            logger.warning("Failed to download CI log for job %d: %s", check_run_id, exc)  # noqa: F821
+            logger.warning("Failed to download CI log for job %d: %s", check_run_id, exc)
             return ""
 
     async def delete_branch(self, owner: str, repo: str, branch_name: str) -> None:

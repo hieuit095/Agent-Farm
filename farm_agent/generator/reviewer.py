@@ -91,7 +91,7 @@ OUTPUT STRICT JSON — no markdown, no explanation outside the JSON:
 {"decision": "APPROVE", "critique": ""}
 {"decision": "REJECT", "critique": "Line 42: variable 'token' is referenced but never defined in scope. The fix assumes it exists but the original code shows it is conditionally set. This will cause a NameError at runtime."}
 {"decision": "REJECT", "critique": "HALLUCINATED API: patch calls 'obj.validate()' but 'obj' has no 'validate' method in the original file. This will cause AttributeError at runtime."}
-"""  # noqa: E501
+"""
 
     def __init__(self, llm: LLMProvider, max_review_tokens: int = 800):
         self._llm = llm
@@ -201,14 +201,14 @@ you MUST REJECT and provide a detailed, specific critique.
             return {
                 "decision": "REJECT",
                 "critique": f"[Fail-Closed — JSON parse failed, raw: {response[:200]}]",
-            }  # noqa: E501
+            }
 
         decision = parsed.get("decision", "REJECT").strip().upper()
         if decision not in ("APPROVE", "REJECT"):
             logger.warning(
                 "ReviewerAgent: unknown decision '%s' — defaulting to REJECT (Fail-Closed)",
                 decision,
-            )  # noqa: E501
+            )
             decision = "REJECT"
 
         return {
