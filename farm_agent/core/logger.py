@@ -66,8 +66,7 @@ def setup_daily_logger(config: LogConfig) -> logging.Logger:
         return logging.getLogger()
     except OSError as exc:
         print(
-            f"[WARN] Cannot create log directory '{log_dir}': {exc}. "
-            "File logging disabled.",
+            f"[WARN] Cannot create log directory '{log_dir}': {exc}. File logging disabled.",
             file=sys.stderr,
         )
         return logging.getLogger()
@@ -102,8 +101,7 @@ def setup_daily_logger(config: LogConfig) -> logging.Logger:
 
     except PermissionError:
         print(
-            f"[WARN] Cannot write to '{log_file}': permission denied. "
-            "File logging disabled.",
+            f"[WARN] Cannot write to '{log_file}': permission denied. File logging disabled.",
             file=sys.stderr,
         )
         return logging.getLogger()

@@ -30,7 +30,7 @@ LANGUAGE_ENVIRONMENTS: dict[str, dict[str, str]] = {
     },
     "typescript": {
         "image": "node:20-alpine",
-        "test_cmd": "npm install --silent 2>/dev/null && npm test 2>/dev/null || npx tsc --noEmit || true",
+        "test_cmd": "npm install --silent 2>/dev/null && npm test 2>/dev/null || npx tsc --noEmit || true",  # noqa: E501
         "install_cmd": "npm install --silent 2>/dev/null || true",
     },
     "rust": {
@@ -45,7 +45,7 @@ LANGUAGE_ENVIRONMENTS: dict[str, dict[str, str]] = {
     },
     "java": {
         "image": "eclipse-temurin:21-jdk-alpine",
-        "test_cmd": "mvn test -q 2>&1 || gradle test -q 2>&1 || ./gradlew test -q 2>&1 || mvn compile -q 2>&1",
+        "test_cmd": "mvn test -q 2>&1 || gradle test -q 2>&1 || ./gradlew test -q 2>&1 || mvn compile -q 2>&1",  # noqa: E501
         "install_cmd": "mvn dependencyresolve 2>/dev/null || true",
     },
     "ruby": {
@@ -55,18 +55,18 @@ LANGUAGE_ENVIRONMENTS: dict[str, dict[str, str]] = {
     },
     "php": {
         "image": "php:8.2-cli-alpine",
-        "test_cmd": "composer install --quiet 2>/dev/null && ./vendor/bin/phpunit 2>&1 || php --version",
+        "test_cmd": "composer install --quiet 2>/dev/null && ./vendor/bin/phpunit 2>&1 || php --version",  # noqa: E501
         "install_cmd": "composer install --quiet 2>/dev/null || true",
     },
     "c": {
         "image": "gcc:14-bookworm",
-        "test_cmd": "ls *.c Makefile 2>/dev/null && make test 2>&1 || (gcc --version && echo 'no Makefile')",
+        "test_cmd": "ls *.c Makefile 2>/dev/null && make test 2>&1 || (gcc --version && echo 'no Makefile')",  # noqa: E501
         "install_cmd": "apt-get update -qq && apt-get install -qq -y make gcc 2>/dev/null || true",
     },
     "cpp": {
         "image": "gcc:14-bookworm",
-        "test_cmd": "ls *.cpp CMakeLists.txt 2>/dev/null && make test 2>&1 || (g++ --version && echo 'no Makefile')",
-        "install_cmd": "apt-get update -qq && apt-get install -qq -y make g++ cmake 2>/dev/null || true",
+        "test_cmd": "ls *.cpp CMakeLists.txt 2>/dev/null && make test 2>&1 || (g++ --version && echo 'no Makefile')",  # noqa: E501
+        "install_cmd": "apt-get update -qq && apt-get install -qq -y make g++ cmake 2>/dev/null || true",  # noqa: E501
     },
     "csharp": {
         "image": "mcr.microsoft.com/dotnet/sdk:8.0-alpine",
@@ -126,9 +126,9 @@ def detect_language_from_extensions(repo_path: str | Path) -> str:
         return "rust"
 
     if (
-        (repo_dir / "requirements.txt").exists() or
-        (repo_dir / "pyproject.toml").exists() or
-        (repo_dir / "setup.py").exists()
+        (repo_dir / "requirements.txt").exists()
+        or (repo_dir / "pyproject.toml").exists()
+        or (repo_dir / "setup.py").exists()
     ):
         return "python"
 
@@ -147,9 +147,21 @@ def detect_language_from_extensions(repo_path: str | Path) -> str:
     # ── 2. Fallback to Extension Counting ──
     counts: dict[str, int] = {}
 
-    skip_dirs = {"node_modules", "target", ".git", "dist", "build", "__pycache__", "vendor", "venv", ".venv", ".pytest_cache", ".mypy_cache"}
+    skip_dirs = {
+        "node_modules",
+        "target",
+        ".git",
+        "dist",
+        "build",
+        "__pycache__",
+        "vendor",
+        "venv",
+        ".venv",
+        ".pytest_cache",
+        ".mypy_cache",
+    }  # noqa: E501
     try:
-        for root, dirs, files in os.walk(repo_dir):
+        for _root, dirs, files in os.walk(repo_dir):
             # Prune skip dirs in-place to avoid descending into them
             dirs[:] = [d for d in dirs if d not in skip_dirs]
             for file in files:
@@ -194,7 +206,6 @@ def get_environment_for_language(language: str) -> dict[str, str]:
     return LANGUAGE_ENVIRONMENTS.get(language.lower(), DEFAULT_ENV)
 
 
-
 class DockerSandbox:
     """Run commands inside ephemeral Docker containers with strict isolation.
 
@@ -235,7 +246,7 @@ class DockerSandbox:
 
         if (repo_path / "tox.ini").exists():
             return "tox"
-        
+
         makefile = repo_path / "Makefile"
         if makefile.exists():
             try:
@@ -243,26 +254,27 @@ class DockerSandbox:
                     return "make test"
             except Exception:
                 pass
-                
+
         package_json = repo_path / "package.json"
         if package_json.exists():
             try:
                 import json
+
                 data = json.loads(package_json.read_text(errors="ignore"))
                 if "test" in data.get("scripts", {}):
                     return "npm test"
             except Exception:
                 pass
-                
+
         if (repo_path / "pytest.ini").exists() or (repo_path / "tests").is_dir():
             return "pytest"
-            
+
         if (repo_path / "Cargo.toml").exists():
             return "cargo test"
-            
+
         if (repo_path / "go.mod").exists():
             return "go test ./..."
-            
+
         return fallback_cmd
 
     async def run_in_sandbox(
@@ -328,7 +340,7 @@ class DockerSandbox:
             raise FileNotFoundError(f"Sandbox repository path does not exist: {repo_dir}")
         if not repo_dir.is_dir():
             raise NotADirectoryError(f"Sandbox repository path is not a directory: {repo_dir}")
-            
+
         resolved_command = self._determine_test_command(repo_dir, fallback_cmd=base_command)
 
         logger.info(
@@ -356,9 +368,6 @@ class DockerSandbox:
         timed_out = False
         exit_code: int | None = None
 
-        import shutil
-        import tempfile
-        
         logger.info("Starting sandbox container %s for %s", container_name, repo_dir)
 
         try:
@@ -378,6 +387,7 @@ class DockerSandbox:
             # _EXECUTION_TIMEOUT_SECONDS, we kill the container and return
             # a timeout result.
             try:
+
                 async def _execute_and_collect() -> dict[str, Any]:
                     output_task = asyncio.create_task(
                         asyncio.to_thread(self._capture_output, container.id)
@@ -394,7 +404,7 @@ class DockerSandbox:
                             break
 
                         if loop.time() >= deadline:
-                            raise asyncio.TimeoutError()
+                            raise TimeoutError()
 
                         try:
                             await asyncio.to_thread(container.reload)
@@ -428,19 +438,21 @@ class DockerSandbox:
                 if len(stdout) > self._MAX_STDOUT_CHARS:
                     logger.info(
                         "Sandbox stdout truncated: %d -> %d chars",
-                        len(stdout), self._MAX_STDOUT_CHARS,
+                        len(stdout),
+                        self._MAX_STDOUT_CHARS,
                     )
-                    stdout = stdout[:self._MAX_STDOUT_CHARS]
+                    stdout = stdout[: self._MAX_STDOUT_CHARS]
                 if len(stderr) > self._MAX_STDERR_CHARS:
                     logger.info(
                         "Sandbox stderr truncated: %d -> %d chars (tail preserved)",
-                        len(stderr), self._MAX_STDERR_CHARS,
+                        len(stderr),
+                        self._MAX_STDERR_CHARS,
                     )
-                    stderr = stderr[-self._MAX_STDERR_CHARS:]
+                    stderr = stderr[-self._MAX_STDERR_CHARS :]
 
                 timed_out = False
 
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 timed_out = True
                 logger.warning(
                     "Sandbox container %s exceeded hard execution timeout (%ds); "
@@ -469,14 +481,16 @@ class DockerSandbox:
             if container is not None:
                 await self._force_remove_container(container)
                 await self._wait_for_container_removal(run_id)
-            if 'temp_dir_obj' in locals():
+            if "temp_dir_obj" in locals():
                 # tempfile cleanup can sometimes raise if files are in use, but usually safe.
-                # However, tempfile.TemporaryDirectory's cleanup may fail on Windows if files are read-only.
+                # However, tempfile.TemporaryDirectory's cleanup may fail on Windows if files are read-only.  # noqa: E501
                 # We'll just call it and ignore exceptions or let it throw.
                 try:
-                    temp_dir_obj.cleanup()
+                    temp_dir_obj.cleanup()  # noqa: F821
                 except Exception as cleanup_exc:
-                    logger.debug("Failed to clean up temp dir %s: %s", temp_dir_obj.name, cleanup_exc)
+                    logger.debug(
+                        "Failed to clean up temp dir %s: %s", temp_dir_obj.name, cleanup_exc
+                    )  # noqa: E501, F821
 
     async def _start_container(
         self,
@@ -524,8 +538,8 @@ class DockerSandbox:
             import tarfile
 
             tar_stream = io.BytesIO()
-            with tarfile.open(fileobj=tar_stream, mode='w') as tar:
-                tar.add(str(repo_dir), arcname='.')
+            with tarfile.open(fileobj=tar_stream, mode="w") as tar:
+                tar.add(str(repo_dir), arcname=".")
             tar_stream.seek(0)
 
             self.client.api.put_archive(container.id, self._WORKSPACE_PATH, tar_stream)
@@ -632,7 +646,9 @@ class DockerSandbox:
         logger.warning(
             "Container %s did not exit within %ds (timeout). "
             "The shell `timeout` wrapper will kill it at %ds.",
-            container_id, timeout, timeout,
+            container_id,
+            timeout,
+            timeout,
         )
         return self._TIMEOUT_EXIT_CODE
 
@@ -661,7 +677,9 @@ class DockerSandbox:
         try:
             return await asyncio.wait_for(output_task, timeout=self._REMOVAL_GRACE_SECONDS)
         except TimeoutError:
-            logger.warning("Sandbox output stream did not close before cleanup grace period expired")
+            logger.warning(
+                "Sandbox output stream did not close before cleanup grace period expired"
+            )  # noqa: E501
             return "", ""
         except (APIError, NotFound) as exc:
             logger.warning("Sandbox output stream closed unexpectedly: %s", exc)
@@ -717,7 +735,7 @@ class DockerSandbox:
         try:
             with open(poc_file_path, "w", encoding="utf-8") as f:
                 f.write(poc_content)
-            
+
             # Execute sandbox
             result = await self.run_in_sandbox(
                 repo_path=repo_path,
@@ -746,21 +764,31 @@ class DockerSandbox:
         from pathlib import Path
 
         repo_dir = Path(repo_path).expanduser().resolve()
-        
+
         # Check if tests exist
         has_tests = False
-        test_indicators = ["test", "tests", "spec", "specs", "pytest.ini", "tox.ini", "foundry.toml", "hardhat.config.js", "hardhat.config.ts"]
-        
+        test_indicators = [
+            "test",
+            "tests",
+            "spec",
+            "specs",
+            "pytest.ini",
+            "tox.ini",
+            "foundry.toml",
+            "hardhat.config.js",
+            "hardhat.config.ts",
+        ]  # noqa: E501
+
         # Check if any folder/file exists
         for ind in test_indicators:
             if (repo_dir / ind).exists():
                 has_tests = True
                 break
-                
+
         # Also check for files with _test.go or test/spec in name
         if not has_tests:
             try:
-                for root, dirs, files in os.walk(repo_dir):
+                for root, _dirs, files in os.walk(repo_dir):
                     if any(d in root for d in [".git", "node_modules", "venv", ".venv"]):
                         continue
                     if any("test" in f.lower() or "spec" in f.lower() for f in files):
@@ -768,7 +796,7 @@ class DockerSandbox:
                         break
             except Exception:
                 pass
-                
+
         if not has_tests:
             logger.info("No native test suite detected in %s", repo_path)
             return {
@@ -776,7 +804,7 @@ class DockerSandbox:
                 "exit_code": 0,
                 "stdout": "",
                 "stderr": "No native tests found in repository.",
-                "timed_out": False
+                "timed_out": False,
             }
 
         # Otherwise, run native tests using run_in_sandbox
@@ -794,7 +822,7 @@ class DockerSandbox:
                 "exit_code": 0,
                 "stdout": "",
                 "stderr": f"Error running tests: {e}",
-                "timed_out": False
+                "timed_out": False,
             }
 
     def _list_run_containers(self, run_id: str) -> list[Container]:

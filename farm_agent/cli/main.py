@@ -70,10 +70,10 @@ def setup_logging(verbose: bool = False, config=None):
 def print_banner():
     banner = f"""[bold cyan]
      _                    _     _____
-    / \   __ _  ___ _ __ | |_  |  ___|_ _ _ __ _ __ ___
-   / _ \ / _` |/ _ \ '_ \| __| | |_ / _` | '__| '_ ` _ \\
-  / ___ \ (_| |  __/ | | | |_  |  _| (_| | |  | | | | | |
- /_/   \_\__, |\___|_| |_|\__| |_|  \__,_|_|  |_| |_| |_|
+    / \\   __ _  ___ _ __ | |_  |  ___|_ _ _ __ _ __ ___
+   / _ \\ / _` |/ _ \\ '_ \\| __| | |_ / _` | '__| '_ ` _ \\
+  / ___ \\ (_| |  __/ | | | |_  |  _| (_| | |  | | | | | |
+ /_/   \\_\\__, |\\___|_| |_|\\__| |_|  \\__,_|_|  |_| |_| |_|
          |___/
 
   [dim]Autonomous Agent Orchestration v{__version__}[/dim]
@@ -275,9 +275,7 @@ def hunt_circular(ctx, json_path, mode, dry_run):
     from farm_agent.orchestrator.pipeline import FarmAgentPipeline
 
     pipeline = FarmAgentPipeline(config)
-    result = asyncio.run(
-        pipeline.run_circular(json_path=json_path, dry_run=dry_run, mode=mode)
-    )
+    result = asyncio.run(pipeline.run_circular(json_path=json_path, dry_run=dry_run, mode=mode))
     _print_result(result, dry_run)
 
 
@@ -325,6 +323,7 @@ def patrol(ctx, dry_run, pr_number):
         await memory.init()
         github = GitHubClient(token=config.github.token)
         import copy
+
         patrol_cfg = copy.copy(config.llm)
         patrol_cfg.provider = "openrouter"
         patrol_cfg.model = "google/gemini-3.5-flash"
@@ -438,11 +437,14 @@ def superhuman(ctx, time_warp, dry_run, target_repo):
 
         inner_loop = asyncio.get_running_loop()
         import sys
+
         if sys.platform != "win32":
             for sig in (signal.SIGINT, signal.SIGTERM):
-                inner_loop.add_signal_handler(sig, lambda s=sig: _handle_signal(s, shutdown_hook, inner_loop))
+                inner_loop.add_signal_handler(
+                    sig, lambda s=sig: _handle_signal(s, shutdown_hook, inner_loop)
+                )  # noqa: E501
 
-        def _handle_signal(sig, hook, l):
+        def _handle_signal(sig, hook, l):  # noqa: E741
             console.print(f"[yellow]Received {sig.name} — initiating graceful shutdown...[/yellow]")
             loop.request_shutdown()  # Signal the terminator loop to drain gracefully
             l.create_task(hook())  # Fire the cleanup hook (DB flush + close)
@@ -450,7 +452,9 @@ def superhuman(ctx, time_warp, dry_run, target_repo):
         try:
             await loop.run_daily_routine(time_warp=time_warp)
         except (KeyboardInterrupt, asyncio.CancelledError):
-            console.print("[yellow]\nKeyboardInterrupt received — initiating graceful shutdown...[/yellow]")
+            console.print(
+                "[yellow]\nKeyboardInterrupt received — initiating graceful shutdown...[/yellow]"
+            )  # noqa: E501
         finally:
             await shutdown_hook()
 
@@ -490,6 +494,7 @@ def janitor(ctx):
 
     async def _fetch_username() -> str:
         from farm_agent.github.client import GitHubClient
+
         gh = GitHubClient(config.github.token)
         try:
             user_data = await gh.get_authenticated_user()
@@ -575,9 +580,7 @@ def gc(ctx, days):
                     f"(older than {days} days)."
                 )
             else:
-                console.print(
-                    f"[dim]🧹 No stale entries found older than {days} days.[/dim]"
-                )
+                console.print(f"[dim]🧹 No stale entries found older than {days} days.[/dim]")
         finally:
             await memory.close()
 
@@ -963,13 +966,13 @@ def reset_db(ctx, yes):
 
     try:
         import sqlite3
+
         conn = sqlite3.connect(db_path)
         cur = conn.cursor()
 
         cur.execute("DELETE FROM run_log")
         cur.execute("DELETE FROM analyzed_repos")
         conn.commit()
-        affected = cur.rowcount
         conn.close()
 
         console.print("[green]✅ Reset complete.[/green]")
@@ -1127,9 +1130,7 @@ def vips(ctx, no_sync):
         console.print(table)
 
         total_prs = sum(r[1] for r in rows)
-        console.print(
-            f"\n[dim]Total: {len(rows)} repos, {total_prs} merged PRs[/dim]"
-        )
+        console.print(f"\n[dim]Total: {len(rows)} repos, {total_prs} merged PRs[/dim]")
 
         await memory.close()
 

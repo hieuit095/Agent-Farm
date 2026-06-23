@@ -119,9 +119,7 @@ class RepoDiscovery:
             random_sort = random.choices(sort_choices, weights=sort_weights, k=1)[0]
 
             # ── Entropy 3: Randomize order ────────────────────────────
-            random_order = random.choices(
-                ["desc", "asc"], weights=[0.8, 0.2], k=1
-            )[0]
+            random_order = random.choices(["desc", "asc"], weights=[0.8, 0.2], k=1)[0]
 
             # ── Entropy 4: Pagination jitter ──────────────────────────
             random_page = random.randint(1, 5)
@@ -129,9 +127,14 @@ class RepoDiscovery:
             logger.info(
                 "🎲 Stochastic search: lang=%s, ★ %d-%d (window from %d-%d), "
                 "sort=%s, order=%s, page=%d",
-                language, window_start, window_end,
-                criteria.stars_min, criteria.stars_max,
-                random_sort, random_order, random_page,
+                language,
+                window_start,
+                window_end,
+                criteria.stars_min,
+                criteria.stars_max,
+                random_sort,
+                random_order,
+                random_page,
             )
 
             repos = await self._client.search_repositories(
@@ -325,7 +328,9 @@ class DatabaseTargetDiscovery:
         """
         return await self._memory.seed_targets_from_json(Path(json_path))
 
-    async def get_next_target(self, excluded_languages: list[str] | None = None) -> TargetRepoEntry | None:
+    async def get_next_target(
+        self, excluded_languages: list[str] | None = None
+    ) -> TargetRepoEntry | None:  # noqa: E501
         """Return the target with the oldest scanned_at (or NULL first).
 
         Atomically reserves the target and reads from the target_repos SQLite
@@ -347,7 +352,9 @@ class DatabaseTargetDiscovery:
             status=row.get("status", "PENDING"),
             scanned_at=scanned_at_value,
             language=row.get("language"),
-            bounty_amount=str(row.get("bounty_amount")) if row.get("bounty_amount") is not None else None,
+            bounty_amount=str(row.get("bounty_amount"))
+            if row.get("bounty_amount") is not None
+            else None,  # noqa: E501
             diamond_target=bool(row.get("diamond_target", 0)),
         )
 
