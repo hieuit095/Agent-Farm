@@ -363,8 +363,7 @@ Database file resides in `data/memory.db` and operates in **WAL (Write-Ahead Log
 │   │
 │   ├── pr/
 │   │   ├── manager.py                  # Pull Request manager (forking, branches, commits)
-│   │   ├── patrol.py                   # PR Patrol (reviews comments, fixes CI errors)
-│   │   └── janitor.py                  # PR Janitor (sweeps and destroys garbage PRs)
+│   │   └── patrol.py                   # PR Patrol (reviews comments, fixes CI errors)
 │   │
 │   ├── agents/
 │   │   └── registry.py                 # Task agent configurations
@@ -373,9 +372,28 @@ Database file resides in `data/memory.db` and operates in **WAL (Write-Ahead Log
 │       └── protocol.py                 # CLI tool protocols
 ```
 
+## 9. Core Module Dependency Graph
+
+```mermaid
+graph TD
+    A[CLI Command / farm_agent] --> B(FarmAgentPipeline)
+    A --> C(SuperHumanLoop / Patrol)
+    B --> D[GitHubClient]
+    B --> E[CodeAnalyzer & Mapper]
+    B --> F[Memory / SQLite]
+    E --> G{Context Engine & RAG}
+    B --> H[ContributionGenerator]
+    H --> I(Docker Sandbox)
+    I --> J{Validation Success?}
+    J -- Yes --> K[Layer 2 Audit / Security Gate]
+    J -- No --> L[Self-Correct Loop]
+    K --> M[PRManager]
+    M --> N((GitHub PR/Fork))
+```
+
 ---
 
-## 9. Error Handling & Fallback Matrix
+## 10. Error Handling & Fallback Matrix
 
 | Scenario | Behavior |
 |----------|----------|

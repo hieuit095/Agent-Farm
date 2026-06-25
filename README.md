@@ -35,13 +35,18 @@ Validates generated patches in isolated Docker sandboxes through a double-pass c
 
 ---
 
+## 🏛️ System Architecture (High-Level)
+Agent-Farm orchestrates an autonomous issue-first or PR-direct contribution cycle. It starts by locating high-value targets via Discovery heuristics. A Context Engine constructs robust structural mapping (ASTs) before submitting to parallel LLM CodeAnalyzers utilizing Bloodhound Semgrep rulesets. Findings undergo strict two-layer filtering: Layer 1 (Qwen) for validity, and Layer 2 (Gemini) for value/impact. A fix is synthesized alongside a testable PoC, executed inside an isolated `docker` sandbox. If successful, PRManager safely delegates Git commands to open PRs, while PRPatrol actively reads comments to address code-review requests directly.
+
+---
+
 ## 🛠️ Getting Started (1-Click Docker Quick-Start)
 
 Agent-Farm provides a robust, pre-configured Docker setup that mounts the Docker socket from the host to spawn sibling containers for isolated PoC and test execution.
 
 ### Prerequisites
-* **Docker Desktop** installed and running.
-* **Git** installed on the host machine.
+* **Python** >= 3.11
+* **Docker** >= 7.1
 * A GitHub Personal Access Token (PAT) with `repo` scope.
 * An OpenRouter API Key configured with credits.
 
@@ -66,7 +71,7 @@ Agent-Farm provides a robust, pre-configured Docker setup that mounts the Docker
    * *Note: The script will automatically pull the latest codebase, initialize your `.env` configuration file from `.env.example` if missing, build the Docker image, and launch the daemon in the background.*
 
 3. **Configure Settings:**
-   Open the newly created `.env` file and configure your API tokens:
+   Open the newly created `.env` file and configure your essential API tokens:
    ```env
    GITHUB_TOKEN=your_github_pat_here
    OPENROUTER_API_KEY=your_openrouter_key_here
@@ -79,7 +84,7 @@ Agent-Farm provides a robust, pre-configured Docker setup that mounts the Docker
 
 ---
 
-## ⚙️ CLI Command Reference
+## ⚙️ CLI Command Reference & Usage
 
 Agent-Farm provides a comprehensive suite of Click-based CLI utilities:
 
@@ -93,7 +98,7 @@ farm_agent target <repo_url>
 # Solve open issues in a specific repository
 farm_agent solve <repo_url>
 
-# Run in Hunt Mode: agresively discover repos and solve issues/bugs
+# Run in Hunt Mode: aggressively discover repos and solve issues/bugs
 farm_agent hunt [--rounds N] [--mode analysis|issues|both]
 
 # Run the Relentless 24/7 Super Human loop (patrols PRs and hunts targets)
@@ -101,9 +106,6 @@ farm_agent superhuman
 
 # Check open PRs for maintainer comments, answer queries, and push CI auto-fixes
 farm_agent patrol
-
-# Scan and close low-quality/garbage PRs submitted on GitHub
-farm_agent janitor
 
 # Clean up forks where all PRs are closed or merged
 farm_agent cleanup
@@ -124,10 +126,12 @@ farm_agent reset-db
 farm_agent gc --days 90
 ```
 
+*(Note: The `janitor` command has been deprecated and disabled in v4.0.0).*
+
 ---
 
 ## 📜 Contributing & License
 
-We welcome white-hat security researchers and AI engineers to contribute! Please follow conventional commit formats and ensure all patches are validated locally using our test suites.
+We welcome white-hat security researchers and AI engineers to contribute! Please follow conventional commit formats and ensure all patches are validated locally using our test suites (`make test`) and formatters (`make lint`).
 
 Licensed under the [MIT License](LICENSE).
