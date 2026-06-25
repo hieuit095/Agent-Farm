@@ -138,7 +138,7 @@ def chunk_markdown(content: str, file_path: str) -> list[CodeChunk]:
         return chunk_file(content, file_path)
 
     chunks: list[CodeChunk] = []
-    
+
     # Helper to clean header title (strip trailing spaces, symbols)
     def clean_title(title: str) -> str:
         return title.strip().rstrip("#").strip()
@@ -167,7 +167,7 @@ def chunk_markdown(content: str, file_path: str) -> list[CodeChunk]:
     for i, match in enumerate(matches):
         header_title = clean_title(match.group(2))
         start_pos = match.start()
-        
+
         # End position is the start of the next header, or end of file
         end_pos = matches[i + 1].start() if i + 1 < len(matches) else len(content)
         chunk_text = content[start_pos:end_pos].strip()
