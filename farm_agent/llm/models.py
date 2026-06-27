@@ -149,7 +149,7 @@ KIMI_K2_APPRAISER = ModelSpec(
     tier=ModelTier.PRO,
     context_window=200_000,
     max_output=16_384,
-    description="Layer 1 Expert Appraiser"
+    description="Layer 1 Expert Appraiser",
 )
 
 GEMINI_31_AUDITOR = ModelSpec(
@@ -158,7 +158,7 @@ GEMINI_31_AUDITOR = ModelSpec(
     tier=ModelTier.PRO,
     context_window=1_000_000,
     max_output=16_384,
-    description="Layer 2 Supreme Auditor"
+    description="Layer 2 Supreme Auditor",
 )
 
 QWEN_37_MAX = ModelSpec(
@@ -167,7 +167,7 @@ QWEN_37_MAX = ModelSpec(
     tier=ModelTier.PRO,
     context_window=200_000,
     max_output=16_384,
-    description="Hardcore strict QA, Adversarial Review"
+    description="Hardcore strict QA, Adversarial Review",
 )
 
 GEMINI_35_FLASH = ModelSpec(
@@ -176,7 +176,7 @@ GEMINI_35_FLASH = ModelSpec(
     tier=ModelTier.FLASH,
     context_window=1_000_000,
     max_output=16_384,
-    description="Massive context, CI logs, diplomatic communication"
+    description="Massive context, CI logs, diplomatic communication",
 )
 
 

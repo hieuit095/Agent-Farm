@@ -3,11 +3,12 @@ from unittest.mock import MagicMock
 
 # Mock chromadb module before importing it anywhere
 mock_chromadb = MagicMock()
-sys.modules['chromadb'] = mock_chromadb
+sys.modules["chromadb"] = mock_chromadb
 
-import pytest
-from unittest.mock import patch, MagicMock
-from farm_agent.core.rag import CodeChunk, chunk_markdown, RepoIndexer
+from unittest.mock import MagicMock, patch
+
+from farm_agent.core.rag import RepoIndexer, chunk_markdown
+
 
 def test_chunk_markdown_basic():
     markdown_content = """# Subsystem A
@@ -24,7 +25,7 @@ This is subsystem B documentation.
 
     # We expect 3 chunks: H1 (Subsystem A), H2 (Subsystem A Detail), H1 (Subsystem B)
     assert len(chunks) == 3
-    
+
     # Check folder path metadata
     assert all(c.metadata["folder_path"] == "docs/architecture" for c in chunks)
 
@@ -41,7 +42,7 @@ This is subsystem B documentation.
 
 def test_chunk_markdown_with_preamble():
     markdown_content = """Preamble content before headers.
-    
+
 # Subsystem A
 This is subsystem A.
 """
@@ -59,9 +60,11 @@ This is subsystem A.
 
 def test_chunk_markdown_fallback():
     # Test fallback to sliding window chunking when no headers are present
-    content = "Some document that doesn't have any markdown headers. It just has normal paragraph text."
+    content = (
+        "Some document that doesn't have any markdown headers. It just has normal paragraph text."
+    )
     file_path = "docs/plain.md"
-    
+
     chunks = chunk_markdown(content, file_path)
     assert len(chunks) == 1
     assert chunks[0].file_path == file_path
@@ -75,24 +78,24 @@ def test_repo_indexer_metadata(mock_persistent_client):
     mock_client.get_or_create_collection.return_value = mock_collection
 
     indexer = RepoIndexer()
-    
+
     file_contents = {
         "docs/subsystem_a.md": "# Subsystem A\nContent description.",
-        "src/main.py": "def main():\n    pass"
+        "src/main.py": "def main():\n    pass",
     }
 
     indexer.index_repo("test/repo", file_contents)
 
     # Verify get_or_create_collection was called
     mock_client.get_or_create_collection.assert_called_once()
-    
+
     # Verify collection.add was called
     mock_collection.add.assert_called_once()
     kwargs = mock_collection.add.call_args[1]
 
     # Verify metadata contains custom fields for the markdown file
     metadatas = kwargs["metadatas"]
-    
+
     md_meta = [m for m in metadatas if m["file_path"] == "docs/subsystem_a.md"]
     assert len(md_meta) > 0
     assert md_meta[0]["header_title"] == "Subsystem A"
