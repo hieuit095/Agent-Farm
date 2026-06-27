@@ -11,6 +11,7 @@ import contextlib
 import logging
 import random
 import re
+import re as _re
 from datetime import UTC
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -1417,7 +1418,6 @@ class PRPatrol:
 
         Returns a safe, ASCII-only check name suitable for commits/PR bodies.
         """
-        import re as _re
 
         # Strip emojis and non-ASCII (keep alphanumeric, spaces, hyphens, underscores, dots, slashes)
         sanitized = _re.sub(r"[^\x20-\x7E]", "", raw_name)
