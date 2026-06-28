@@ -35,12 +35,28 @@ Validates generated patches in isolated Docker sandboxes through a double-pass c
 
 ---
 
+## 🏗️ System Architecture (High-Level)
+
+Agent-Farm leverages an event-driven pipeline orchestration (`_process_repo`). For every target, it:
+1. Performs a pristine native checkout.
+2. Checks AI contribution policies and filters targets with hostile maintainer histories.
+3. Builds context: Recursively indexes subsystem documentation into ChromaDB and maps dependency ASTs.
+4. Uses the "Bloodhound" Red Team (Semgrep + LLM) to discover vulnerabilities.
+5. Employs a Hybrid Router: High/Critical severity issues enter **Route A (Direct PR)**, while performance/feature tasks go to **Route B (Issue-First)**.
+6. Executes **Dynamic Bug Verification** via DockerSandbox to prove exploitability.
+7. Iterates in a **3-Cycle DEV-QA Bounty Loop** using Qwen-3.7-Max for rigorous evaluation.
+8. Undergoes a final review by the **Layer 2 Supreme Auditor** (Gemini-3.5-Flash).
+9. Merges, creates PRs, or complies with **Private Security Disclosures**.
+
+---
+
 ## 🛠️ Getting Started (1-Click Docker Quick-Start)
 
 Agent-Farm provides a robust, pre-configured Docker setup that mounts the Docker socket from the host to spawn sibling containers for isolated PoC and test execution.
 
 ### Prerequisites
-* **Docker Desktop** installed and running.
+* **Docker** >= 7.1
+* **Python** >= 3.11
 * **Git** installed on the host machine.
 * A GitHub Personal Access Token (PAT) with `repo` scope.
 * An OpenRouter API Key configured with credits.
@@ -65,8 +81,8 @@ Agent-Farm provides a robust, pre-configured Docker setup that mounts the Docker
      ```
    * *Note: The script will automatically pull the latest codebase, initialize your `.env` configuration file from `.env.example` if missing, build the Docker image, and launch the daemon in the background.*
 
-3. **Configure Settings:**
-   Open the newly created `.env` file and configure your API tokens:
+3. **Environment Variables:**
+   Required in `.env` (loaded automatically by `docker-compose`):
    ```env
    GITHUB_TOKEN=your_github_pat_here
    OPENROUTER_API_KEY=your_openrouter_key_here
@@ -77,9 +93,18 @@ Agent-Farm provides a robust, pre-configured Docker setup that mounts the Docker
    docker exec -it agent-farm farm_agent superhuman
    ```
 
+### Development Setup (Local)
+If you prefer to run it without the Dockerized daemon:
+```bash
+make install      # Runs `pip install -e ".[dev]"`
+make lint         # Runs Ruff formatting
+make test         # Runs pytest suite
+farm_agent --help # Shows CLI commands
+```
+
 ---
 
-## ⚙️ CLI Command Reference
+## ⚙️ Usage (CLI Command Reference)
 
 Agent-Farm provides a comprehensive suite of Click-based CLI utilities:
 
@@ -93,7 +118,7 @@ farm_agent target <repo_url>
 # Solve open issues in a specific repository
 farm_agent solve <repo_url>
 
-# Run in Hunt Mode: agresively discover repos and solve issues/bugs
+# Run in Hunt Mode: aggressively discover repos and solve issues/bugs
 farm_agent hunt [--rounds N] [--mode analysis|issues|both]
 
 # Run the Relentless 24/7 Super Human loop (patrols PRs and hunts targets)
@@ -114,8 +139,11 @@ farm_agent stats
 farm_agent models
 farm_agent leaderboard
 
-# Run with thorough, standard, or quick presets
-farm_agent profile <profile_name>
+# View VIP friendly repository radar list
+farm_agent vips
+
+# View configuration profile
+farm_agent profile list
 
 # Clear run logs and start with a fresh target pipeline queue
 farm_agent reset-db
@@ -128,6 +156,6 @@ farm_agent gc --days 90
 
 ## 📜 Contributing & License
 
-We welcome white-hat security researchers and AI engineers to contribute! Please follow conventional commit formats and ensure all patches are validated locally using our test suites.
+We welcome white-hat security researchers and AI engineers to contribute! Please follow conventional commit formats and ensure all patches are validated locally using our test suites (`make test`).
 
 Licensed under the [MIT License](LICENSE).
