@@ -11,7 +11,7 @@
 
 ## 🚀 Overview
 
-Agent-Farm is an autonomous AI agent ecosystem designed to crawl GitHub, pinpoint real security vulnerabilities or code flaws, generate high-quality patches, validate fixes dynamically in isolated sandboxes, and submit pull requests or private disclosures. Operating with human-like precision, it implements advanced self-correcting DEV-QA loops and maintainer vibe analysis to ensure every contribution is high-value, precise, and completely regression-free.
+Agent-Farm is an autonomous AI agent ecosystem designed to crawl GitHub, pinpoint real security vulnerabilities or code flaws, generate high-quality patches, validate fixes dynamically in isolated sandboxes, and submit pull requests or private disclosures. Operating with precision, it implements advanced self-correcting DEV-QA loops and maintainer vibe analysis to ensure every contribution is high-value, precise, and completely regression-free.
 
 ---
 
@@ -40,10 +40,11 @@ Validates generated patches in isolated Docker sandboxes through a double-pass c
 Agent-Farm provides a robust, pre-configured Docker setup that mounts the Docker socket from the host to spawn sibling containers for isolated PoC and test execution.
 
 ### Prerequisites
-* **Docker Desktop** installed and running.
+* **Docker Desktop** installed and running (version 7.1+).
 * **Git** installed on the host machine.
 * A GitHub Personal Access Token (PAT) with `repo` scope.
 * An OpenRouter API Key configured with credits.
+* **Python 3.11+** (if running locally without Docker).
 
 ### 1-Click Launch
 
@@ -96,14 +97,11 @@ farm_agent solve <repo_url>
 # Run in Hunt Mode: agresively discover repos and solve issues/bugs
 farm_agent hunt [--rounds N] [--mode analysis|issues|both]
 
-# Run the Relentless 24/7 Super Human loop (patrols PRs and hunts targets)
+# Run Terminator Mode: a relentless 24/7 continuous execution loop (patrols PRs and hunts targets)
 farm_agent superhuman
 
 # Check open PRs for maintainer comments, answer queries, and push CI auto-fixes
 farm_agent patrol
-
-# Scan and close low-quality/garbage PRs submitted on GitHub
-farm_agent janitor
 
 # Clean up forks where all PRs are closed or merged
 farm_agent cleanup
