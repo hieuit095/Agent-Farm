@@ -44,7 +44,7 @@ The CLI is Click-based and located in [main.py](file:///c:/Users/USER/Documents/
 | `farm_agent hunt` | `FarmAgentPipeline.hunt()` | Run multi-round search and analysis (analysis, issues, or both). |
 | `farm_agent hunt-circular` | `FarmAgentPipeline.run_circular()` | Deterministic round-robin target loop from `target_repo.json`. |
 | `farm_agent patrol` | `PRPatrol.patrol()` | Check open PRs for maintainer review comments, reply to questions, and auto-fix CI failures. |
-| `farm_agent superhuman` | `SuperHumanLoop.run_daily_routine()` | 24/7 relentless loop cycling through circular target hunt and patrol operations. |
+| `farm_agent superhuman` | `SuperHumanLoop.run_daily_routine()` | Terminator Mode: 24/7 relentless loop cycling through circular target hunt and patrol operations. |
 | `farm_agent solve <url>` | `IssueSolver` flow | Proactively search for solvable issues in a repo, construct deep fixes, and generate PRs. |
 | `farm_agent analyze <url>` | `FarmAgentPipeline.analyze_only()` | Perform code analysis pass only; do not generate contributions or open issues. |
 | `farm_agent status` | `_show()` | Show targets queue statuses from `target_repos` table. |
@@ -52,13 +52,12 @@ The CLI is Click-based and located in [main.py](file:///c:/Users/USER/Documents/
 | `farm_agent cleanup` | `_cleanup()` | Purge local temporary files and cleanup stale forks. |
 | `farm_agent reset-db` | `reset_db()` | Recreate database tables and reset memory database. |
 | `farm_agent config` | `show_config()` | Output the current loaded runtime settings. |
-| `farm_agent vips` | `vips()` | Monitor and synchronize VIP repository radar list. |
+| `farm_agent vips` | `vips()` | Monitor and synchronize Alumni Sync + Full Friendly Repo List. |
 | `farm_agent templates` | `list_templates()` | Display formatting templates for PR descriptions. |
 | `farm_agent profile` | `run_profile()` | Run the pipeline pre-loaded with quick, standard, or thorough presets. |
 | `farm_agent models` | `show_models()` | List the active LLM routing mappings. |
 | `farm_agent leaderboard` | `show_leaderboard()` | Show leaderboards of merged and submitted contributions. |
 | `farm_agent gc` | `gc()` | Purge knowledge base entries older than N days. |
-| `farm_agent janitor` | `SweepAndDestroy()` | Sweeps all open PRs and closes/deletes low-quality/garbage contributions. |
 
 ---
 
@@ -363,8 +362,13 @@ Database file resides in `data/memory.db` and operates in **WAL (Write-Ahead Log
 │   │
 │   ├── pr/
 │   │   ├── manager.py                  # Pull Request manager (forking, branches, commits)
-│   │   ├── patrol.py                   # PR Patrol (reviews comments, fixes CI errors)
-│   │   └── janitor.py                  # PR Janitor (sweeps and destroys garbage PRs)
+│   │   └── patrol.py                   # PR Patrol (reviews comments, fixes CI errors)
+│   │
+│   ├── plugins/
+│   │
+│   ├── templates/
+│   │
+│   ├── notifications/
 │   │
 │   ├── agents/
 │   │   └── registry.py                 # Task agent configurations
