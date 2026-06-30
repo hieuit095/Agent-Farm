@@ -70,6 +70,8 @@ Agent-Farm provides a robust, pre-configured Docker setup that mounts the Docker
    ```env
    GITHUB_TOKEN=your_github_pat_here
    OPENROUTER_API_KEY=your_openrouter_key_here
+   TELEGRAM_BOT_TOKEN=your_telegram_bot_token_here
+   MINIMAX_API_KEY=your_minimax_api_key_here
    ```
 
 4. **Attach to the Agent CLI:**
@@ -96,14 +98,11 @@ farm_agent solve <repo_url>
 # Run in Hunt Mode: agresively discover repos and solve issues/bugs
 farm_agent hunt [--rounds N] [--mode analysis|issues|both]
 
-# Run the Relentless 24/7 Super Human loop (patrols PRs and hunts targets)
+# Run the Relentless 24/7 Terminator Mode loop (patrols PRs and hunts targets)
 farm_agent superhuman
 
 # Check open PRs for maintainer comments, answer queries, and push CI auto-fixes
 farm_agent patrol
-
-# Scan and close low-quality/garbage PRs submitted on GitHub
-farm_agent janitor
 
 # Clean up forks where all PRs are closed or merged
 farm_agent cleanup
