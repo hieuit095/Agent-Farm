@@ -7,12 +7,12 @@ discover → analyze → generate → PR.
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import os
-import re
 import subprocess
 import tempfile
+import json
+import re
 from dataclasses import dataclass, field
 
 from farm_agent.agents.registry import create_default_registry
@@ -32,6 +32,7 @@ from farm_agent.core.models import (
     RepoContext,
     Repository,
     Severity,
+    VulnerabilityDossier,
 )
 from farm_agent.generator.engine import ContributionGenerator, GenerationResult
 from farm_agent.generator.scorer import QAHardcoreScorer
@@ -188,7 +189,6 @@ def _titles_similar(title_a: str, title_b: str) -> bool:
 
 def _read_all_repo_files_sync(repo_path: str) -> dict[str, str]:
     import os
-
     from farm_agent.analysis.mapper import CODE_EXTENSIONS
     file_contents = {}
     if not os.path.exists(repo_path):
@@ -202,7 +202,7 @@ def _read_all_repo_files_sync(repo_path: str) -> dict[str, str]:
                     full_path = os.path.join(root, file)
                     rel_path = os.path.relpath(full_path, repo_path).replace("\\", "/")
                     try:
-                        with open(full_path, encoding="utf-8", errors="ignore") as f:
+                        with open(full_path, "r", encoding="utf-8", errors="ignore") as f:
                             file_contents[rel_path] = f.read()
                     except Exception:
                         pass
@@ -981,7 +981,6 @@ class FarmAgentPipeline:
             failure_context = ""  # Accumulates sandbox/QA failure traces across cycles
 
             import copy
-
             from farm_agent.llm.provider import create_llm_provider
             qa_cfg = copy.deepcopy(self.config.llm)
             qa_cfg.provider = "openrouter"
@@ -1760,10 +1759,9 @@ class FarmAgentPipeline:
             # ── Phase 3: Dynamic Bug Verification Gate ─────────────────────
             logger.info("🧪 [Phase 3] Generating PoC for: %s", finding.title)
             try:
-                import copy
-
                 from farm_agent.generator.poc import PoCGenerator
                 from farm_agent.llm.provider import create_llm_provider
+                import copy
                 poc_cfg = copy.copy(self.config.llm)
                 poc_cfg.provider = "openrouter"
                 poc_cfg.model = "deepseek/deepseek-v4-pro"
@@ -2490,7 +2488,6 @@ class FarmAgentPipeline:
                             )
                             return result
 
-                        import random
                         logger.info("⏳ Chuẩn bị push code... (Taking a deep breath)")
                         await asyncio.sleep(random.randint(15, 45))
 
@@ -2782,11 +2779,10 @@ class FarmAgentPipeline:
         if not file_content:
             return True, ""  # Bypass if no code (or handle differently)
 
+        from farm_agent.llm.provider import create_llm_provider
         import copy
         import json
         import re
-
-        from farm_agent.llm.provider import create_llm_provider
 
         try:
             appraiser_cfg = copy.copy(self.config.llm)
@@ -2844,11 +2840,10 @@ class FarmAgentPipeline:
         sandbox_logs: str,
     ) -> tuple[bool, str]:
         """Layer 2: The Supreme Auditor. Final gate before PR or writing to secret_findings."""
+        from farm_agent.llm.provider import create_llm_provider
         import copy
         import json
         import re
-
-        from farm_agent.llm.provider import create_llm_provider
 
         try:
             gem_cfg = copy.copy(self.config.llm)

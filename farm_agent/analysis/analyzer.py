@@ -9,12 +9,13 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import json
 import logging
 import re
 import time
 import uuid
 from fnmatch import fnmatch
+
+import json
 from pathlib import Path
 
 from farm_agent.core.config import AnalysisConfig
@@ -896,6 +897,7 @@ class CodeAnalyzer:
 
     def _filter_severity(self, findings: list[Finding]) -> list[Finding]:
         """Filter findings by minimum severity threshold."""
+        order = [Severity.LOW, Severity.MEDIUM, Severity.HIGH, Severity.CRITICAL]
         # Define a mapping from Severity enum to an integer order for comparison
         severity_order = {
             Severity.LOW.value: 0,
@@ -1160,8 +1162,10 @@ class BloodhoundAnalyzer:
             for result in results:
                 file_path = result.get("path", "")
                 if file_path:
-                    with contextlib.suppress(ValueError):
+                    try:
                         file_path = str(Path(file_path).relative_to(repo_path))
+                    except ValueError:
+                        pass
 
                 line_num = result.get("start", {}).get("line", 0)
                 lines_text = result.get("extra", {}).get("lines", "")
@@ -1179,7 +1183,7 @@ class BloodhoundAnalyzer:
             logger.info("Semgrep found %d matches for %s", len(matches), repo_path.name)
             return matches
 
-        except TimeoutError:
+        except asyncio.TimeoutError:
             logger.warning("Semgrep scan timed out (%ds) for %s", self.SEMGREP_TIMEOUT, repo_path.name)
             return []
         except json.JSONDecodeError:
@@ -1359,7 +1363,10 @@ You MUST respond strictly in the following JSON array format. No markdown, no co
             return False
 
         structural_chars = {"{", "}", "(", ")", "[", "]", "=", ">", "<", "+", "-", "*", "/", "!", ";", ":"}
-        return any(ch in stripped for ch in structural_chars)
+        if not any(ch in stripped for ch in structural_chars):
+            return False
+
+        return True
 
     def _parse_audit_response(self, response: str, repo_url: str, forbidden_paths: list[str] | None = None) -> VulnerabilityDossier:
         import re as _re

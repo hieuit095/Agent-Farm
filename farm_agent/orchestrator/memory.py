@@ -724,10 +724,11 @@ class Memory:
         if self._db is None:
             return 0
 
+        import time as _time
         try:
             # Compute UTC midnight as Unix timestamp for today
             import datetime as _dt
-            now_utc = _dt.datetime.now(_dt.UTC)
+            now_utc = _dt.datetime.now(_dt.timezone.utc)
             midnight_utc = now_utc.replace(hour=0, minute=0, second=0, microsecond=0)
             day_start_ts = midnight_utc.timestamp()
 
@@ -781,7 +782,7 @@ class Memory:
         try:
             raw = json_path.read_text(encoding="utf-8")
             entries = _json.loads(raw)
-        except (_json.JSONDecodeError, OSError) as exc:
+        except (json.JSONDecodeError, OSError) as exc:
             logger.error("Failed to read target_repo.json for seeding: %s", exc)
             return 0
 

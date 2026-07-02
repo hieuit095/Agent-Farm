@@ -70,10 +70,10 @@ def setup_logging(verbose: bool = False, config=None):
 def print_banner():
     banner = f"""[bold cyan]
      _                    _     _____
-    / \\   __ _  ___ _ __ | |_  |  ___|_ _ _ __ _ __ ___
-   / _ \\ / _` |/ _ \\ '_ \\| __| | |_ / _` | '__| '_ ` _ \\
-  / ___ \\ (_| |  __/ | | | |_  |  _| (_| | |  | | | | | |
- /_/   \\_\\__, |\\___|_| |_|\\__| |_|  \\__,_|_|  |_| |_| |_|
+    / \   __ _  ___ _ __ | |_  |  ___|_ _ _ __ _ __ ___
+   / _ \ / _` |/ _ \ '_ \| __| | |_ / _` | '__| '_ ` _ \\
+  / ___ \ (_| |  __/ | | | |_  |  _| (_| | |  | | | | | |
+ /_/   \_\__, |\___|_| |_|\__| |_|  \__,_|_|  |_| |_| |_|
          |___/
 
   [dim]Autonomous Agent Orchestration v{__version__}[/dim]
@@ -969,6 +969,7 @@ def reset_db(ctx, yes):
         cur.execute("DELETE FROM run_log")
         cur.execute("DELETE FROM analyzed_repos")
         conn.commit()
+        affected = cur.rowcount
         conn.close()
 
         console.print("[green]✅ Reset complete.[/green]")

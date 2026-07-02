@@ -89,7 +89,7 @@ GITHUB_REPLIES: dict[str, list[str]] = {
     ],
     # Surrender: max discussion retries reached
     "SURRENDER": [
-        "Can't seem to get this right after a few tries. Closing so I don't pile on. Thanks for the reviews.",
+        "Can't seem to get this right after a few tries. Closing so I don't pile on. Thanks for the reviews.",  # noqa: E501
         "Taking this as a signal I'm off base here. Closing — thanks for the feedback.",
     ],
     # Commit messages for CI fixes

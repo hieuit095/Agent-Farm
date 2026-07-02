@@ -51,7 +51,10 @@ class CodeChunk:
 
 def _should_index_file(path: str) -> bool:
     """Return False for files that should be excluded from RAG indexing."""
-    return all(not pattern.search(path) for pattern in EXCLUDE_PATTERNS)
+    for pattern in EXCLUDE_PATTERNS:
+        if pattern.search(path):
+            return False
+    return True
 
 
 def chunk_file(content: str, file_path: str, chunk_size: int = DEFAULT_CHUNK_SIZE, overlap: int = DEFAULT_CHUNK_OVERLAP) -> list[CodeChunk]:
