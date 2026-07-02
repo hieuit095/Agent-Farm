@@ -40,8 +40,9 @@ Validates generated patches in isolated Docker sandboxes through a double-pass c
 Agent-Farm provides a robust, pre-configured Docker setup that mounts the Docker socket from the host to spawn sibling containers for isolated PoC and test execution.
 
 ### Prerequisites
-* **Docker Desktop** installed and running.
+* **Docker Desktop** installed and running (Docker >= 7.1).
 * **Git** installed on the host machine.
+* Python >= 3.11 (if running natively).
 * A GitHub Personal Access Token (PAT) with `repo` scope.
 * An OpenRouter API Key configured with credits.
 
@@ -66,10 +67,12 @@ Agent-Farm provides a robust, pre-configured Docker setup that mounts the Docker
    * *Note: The script will automatically pull the latest codebase, initialize your `.env` configuration file from `.env.example` if missing, build the Docker image, and launch the daemon in the background.*
 
 3. **Configure Settings:**
-   Open the newly created `.env` file and configure your API tokens:
+   Open the newly created `.env` file and configure your core API tokens:
    ```env
    GITHUB_TOKEN=your_github_pat_here
    OPENROUTER_API_KEY=your_openrouter_key_here
+   # Optional configurations based on requirements (see config.example.yaml):
+   # TELEGRAM_BOT_TOKEN=...
    ```
 
 4. **Attach to the Agent CLI:**
@@ -77,11 +80,18 @@ Agent-Farm provides a robust, pre-configured Docker setup that mounts the Docker
    docker exec -it agent-farm farm_agent superhuman
    ```
 
+### Native Installation
+If you prefer not to use Docker for the daemon (though you still need it for the Sandbox):
+```bash
+make install
+```
+This runs `pip install -e '.[dev]'`.
+
 ---
 
 ## ⚙️ CLI Command Reference
 
-Agent-Farm provides a comprehensive suite of Click-based CLI utilities:
+Agent-Farm provides a comprehensive suite of Click-based CLI utilities. Access them via the `farm_agent` command:
 
 ```bash
 # Start the full automated discovery, analysis, and contribution pipeline
@@ -93,17 +103,17 @@ farm_agent target <repo_url>
 # Solve open issues in a specific repository
 farm_agent solve <repo_url>
 
-# Run in Hunt Mode: agresively discover repos and solve issues/bugs
+# Run in Hunt Mode: agressively discover repos and solve issues/bugs
 farm_agent hunt [--rounds N] [--mode analysis|issues|both]
+
+# Circular Target Loop: deterministic round-robin target loop from target_repo.json
+farm_agent hunt-circular
 
 # Run the Relentless 24/7 Super Human loop (patrols PRs and hunts targets)
 farm_agent superhuman
 
 # Check open PRs for maintainer comments, answer queries, and push CI auto-fixes
 farm_agent patrol
-
-# Scan and close low-quality/garbage PRs submitted on GitHub
-farm_agent janitor
 
 # Clean up forks where all PRs are closed or merged
 farm_agent cleanup
@@ -122,12 +132,21 @@ farm_agent reset-db
 
 # Run garbage collection to purge stale knowledge base entries
 farm_agent gc --days 90
+
+# Output the current loaded runtime settings
+farm_agent config
+
+# Monitor and synchronize VIP repository radar list
+farm_agent vips
 ```
+*(Note: The `janitor` command has been fully deprecated and disabled).*
 
 ---
 
 ## 📜 Contributing & License
 
 We welcome white-hat security researchers and AI engineers to contribute! Please follow conventional commit formats and ensure all patches are validated locally using our test suites.
+
+Code Style enforces Ruff with a 100-character line limit. Always run `make lint` before pushing changes.
 
 Licensed under the [MIT License](LICENSE).
