@@ -360,10 +360,7 @@ class RepoMapper:
                 continue
 
             signatures = self._extract_signatures(path, content)
-            if signatures:
-                block = f"{path}\n" + "\n".join(f"  {s}" for s in signatures)
-            else:
-                block = path
+            block = f"{path}\n" + "\n".join(f"  {s}" for s in signatures) if signatures else path
 
             output_parts.append(block)
             total_chars += len(block)
@@ -463,12 +460,11 @@ class RepoMapper:
             if isinstance(node, ast.Import):
                 for alias in node.names:
                     modules.append(alias.name)
-            elif isinstance(node, ast.ImportFrom):
-                if node.module:
-                    # node.level > 0 means relative import (from . import …)
-                    # We still record the module name; relative resolution
-                    # happens in _resolve_module_to_path.
-                    modules.append(node.module)
+            elif isinstance(node, ast.ImportFrom) and node.module:
+                # node.level > 0 means relative import (from . import …)
+                # We still record the module name; relative resolution
+                # happens in _resolve_module_to_path.
+                modules.append(node.module)
         return modules
 
     def _extract_js_ts_imports(self, content: str) -> list[str]:
@@ -552,7 +548,7 @@ class RepoMapper:
             module_clean = module.replace("crate::", "").replace("::", "/")
             parts = module_clean.split("/")
             module_clean_parent = "/".join(parts[:-1]) if len(parts) > 1 else ""
-            
+
             rust_candidates = []
             for m in [module_clean, module_clean_parent]:
                 if m:
@@ -616,15 +612,12 @@ class RepoMapper:
                 pass
 
         # Regex fallback — covers JS/TS and failed Python parse
-        for mv in module_variants:
-            if re.search(rf"""["'`]{re.escape(mv)}["'`]""", content):
-                return True
-        return False
+        return any(re.search(rf"""["'`]{re.escape(mv)}["'`]""", content) for mv in module_variants)
 
     def get_module_dependencies(
         self,
         filepath: str,
-        file_contents: dict[str, str] = None,
+        file_contents: dict[str, str] | None = None,
     ) -> dict[str, list[str]]:
         """Construct a lightweight dependency graph for the target file.
 
@@ -679,7 +672,7 @@ class RepoMapper:
                     resolved_call_path = self._resolve_module_to_path(imp, filepath, contents)
                     if resolved_call_path:
                         break
-            
+
             if resolved_call_path:
                 if resolved_call_path != filepath and resolved_call_path not in resolved_calls:
                     resolved_calls.append(resolved_call_path)
