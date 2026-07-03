@@ -387,8 +387,6 @@ class Memory:
         cols = [d[0] for d in cursor.description]
         return [dict(zip(cols, row, strict=False)) for row in rows]
 
-
-
     # ── CI Fix Attempts ───────────────────────────────────────────────────
 
     async def get_ci_fix_attempts(self, repo: str, pr_number: int) -> int:
@@ -647,7 +645,9 @@ class Memory:
         except Exception as exc:
             logger.debug("Could not record QA lesson for %s: %s", repo_name, exc)
 
-    async def add_filter_lesson(self, repo: str, layer: int, snippet_or_fix: str, critique: str) -> None:
+    async def add_filter_lesson(
+        self, repo: str, layer: int, snippet_or_fix: str, critique: str
+    ) -> None:
         """Record a rejection lesson from Layer 1 or Layer 2 filters."""
         if self._db is None:
             return
@@ -671,7 +671,7 @@ class Memory:
 
         if "://" in repo_name:
             repo_name = repo_name.split("/")[-2] + "/" + repo_name.split("/")[-1]
-        
+
         try:
             cursor = await self._db.execute(
                 """SELECT content FROM knowledge_base
@@ -724,11 +724,11 @@ class Memory:
         if self._db is None:
             return 0
 
-        import time as _time
         try:
             # Compute UTC midnight as Unix timestamp for today
             import datetime as _dt
-            now_utc = _dt.datetime.now(_dt.timezone.utc)
+
+            now_utc = _dt.datetime.now(_dt.UTC)
             midnight_utc = now_utc.replace(hour=0, minute=0, second=0, microsecond=0)
             day_start_ts = midnight_utc.timestamp()
 
@@ -782,7 +782,7 @@ class Memory:
         try:
             raw = json_path.read_text(encoding="utf-8")
             entries = _json.loads(raw)
-        except (json.JSONDecodeError, OSError) as exc:
+        except (_json.JSONDecodeError, OSError) as exc:
             logger.error("Failed to read target_repo.json for seeding: %s", exc)
             return 0
 
@@ -841,32 +841,35 @@ class Memory:
             return None
 
         import time
+
         now_ts = time.time()
 
         if excluded_languages:
             placeholders = ",".join(["?"] * len(excluded_languages))
-            query = f"""UPDATE target_repos 
-               SET scanned_at = ? 
-               WHERE repo_url = (SELECT repo_url FROM target_repos WHERE LOWER(language) NOT IN ({placeholders}) ORDER BY COALESCE(scanned_at, 0) ASC, rowid ASC LIMIT 1) 
+            query = f"""UPDATE target_repos
+               SET scanned_at = ?
+               WHERE repo_url = (SELECT repo_url FROM target_repos WHERE LOWER(language) NOT IN ({placeholders}) ORDER BY COALESCE(scanned_at, 0) ASC, rowid ASC LIMIT 1)
                RETURNING *"""
             params = (now_ts, *[lang.lower() for lang in excluded_languages])
         else:
-            query = """UPDATE target_repos 
-               SET scanned_at = ? 
-               WHERE repo_url = (SELECT repo_url FROM target_repos ORDER BY COALESCE(scanned_at, 0) ASC, rowid ASC LIMIT 1) 
+            query = """UPDATE target_repos
+               SET scanned_at = ?
+               WHERE repo_url = (SELECT repo_url FROM target_repos ORDER BY COALESCE(scanned_at, 0) ASC, rowid ASC LIMIT 1)
                RETURNING *"""
             params = (now_ts,)
 
         cursor = await self._db.execute(query, params)
         row = await cursor.fetchone()
         await self._db.commit()
-        
+
         if row is None:
             return None
 
         cols = [d[0] for d in cursor.description]
         result = dict(zip(cols, row, strict=False))
-        logger.info(f"[TARGET ACQUIRED] Repo: {result.get('repo_url')} | Language: {result.get('language')} | Bounty: {result.get('bounty_amount')} | Diamond: {result.get('diamond_target')}")
+        logger.info(
+            f"[TARGET ACQUIRED] Repo: {result.get('repo_url')} | Language: {result.get('language')} | Bounty: {result.get('bounty_amount')} | Diamond: {result.get('diamond_target')}"
+        )
         return result
 
     async def mark_target_status(
@@ -965,7 +968,7 @@ class Memory:
 
     async def check_and_record_llm_quota(self, provider: str = "openrouter") -> None:
         """Sliding-window quota checker and recorder for LLM providers.
-        
+
         Hardcoded safety limits: 1000 requests per 5 hours, 10000 per 7 days.
         Uses a 5% safety buffer (950 / 9500) to prevent overshoot.
 
@@ -1112,4 +1115,3 @@ class Memory:
             return None
         cols = [d[0] for d in cursor.description]
         return dict(zip(cols, row, strict=False))
-
