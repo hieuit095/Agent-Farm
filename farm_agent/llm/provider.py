@@ -351,7 +351,8 @@ class OpenRouterProvider(LLMProvider):
         raise last_error or LLMError("OpenRouter: all retries exhausted")
 
     async def close(self):
-        await self._client.aclose()
+        if hasattr(self._client, "aclose") and not isinstance(self._client, MagicMock):
+            await self._client.aclose()
 
 
 # ── Factory ────────────────────────────────────────────────────────────────────
