@@ -94,10 +94,7 @@ class RepoMapper:
                 continue
 
             signatures = self._extract_signatures(node.path, content)
-            if signatures:
-                block = f"{node.path}\n" + "\n".join(f"  {s}" for s in signatures)
-            else:
-                block = node.path
+            block = f"{node.path}\n" + "\n".join(f"  {s}" for s in signatures) if signatures else node.path
 
             output_parts.append(block)
             total_chars += len(block)
@@ -398,10 +395,7 @@ class RepoMapper:
         target_ext = self._get_ext(target_path)
 
         # ── Step 1: what does target_path import? ──────────────────────────
-        if target_ext == ".py":
-            imported_modules = self._extract_python_imports(target_content)
-        else:
-            imported_modules = self._extract_js_ts_imports(target_content)
+        imported_modules = self._extract_python_imports(target_content) if target_ext == ".py" else self._extract_js_ts_imports(target_content)
 
         for mod in imported_modules:
             resolved = self._resolve_module_to_path(mod, target_path, all_file_contents)
@@ -415,9 +409,8 @@ class RepoMapper:
         for path, content in all_file_contents.items():
             if path == target_path:
                 continue
-            if self._file_imports_module(content, target_module_variants, self._get_ext(path)):
-                if path not in callers:
-                    callers.append(path)
+            if self._file_imports_module(content, target_module_variants, self._get_ext(path)) and path not in callers:
+                callers.append(path)
             if len(callers) >= 5:
                 break
 
@@ -602,12 +595,11 @@ class RepoMapper:
                                 for mv in module_variants
                             ):
                                 return True
-                    elif isinstance(node, ast.ImportFrom):
-                        if node.module and any(
-                            node.module == mv or node.module.startswith(mv + ".")
-                            for mv in module_variants
-                        ):
-                            return True
+                    elif isinstance(node, ast.ImportFrom) and node.module and any(
+                        node.module == mv or node.module.startswith(mv + ".")
+                        for mv in module_variants
+                    ):
+                        return True
             except SyntaxError:
                 pass
 
@@ -728,10 +720,9 @@ class RepoMapper:
                         is_dep = True
                         break
                     for imp in o_imports:
-                        if imp.endswith("::" + call) or imp.endswith("." + call) or imp == call:
-                            if self._resolve_module_to_path(imp, other_path, contents) == filepath:
-                                is_dep = True
-                                break
+                        if (imp.endswith("::" + call) or imp.endswith("." + call) or imp == call) and self._resolve_module_to_path(imp, other_path, contents) == filepath:
+                            is_dep = True
+                            break
                     if is_dep:
                         break
 
@@ -772,9 +763,8 @@ class RepoMapper:
                             calls.add(from_import_map[caller_name])
                         else:
                             calls.add(caller_name)
-                elif isinstance(node.func, ast.Name):
-                    if node.func.id in from_import_map:
-                        calls.add(from_import_map[node.func.id])
+                elif isinstance(node.func, ast.Name) and node.func.id in from_import_map:
+                    calls.add(from_import_map[node.func.id])
 
         return imports, calls
 

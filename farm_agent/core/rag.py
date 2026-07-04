@@ -324,10 +324,7 @@ class RepoIndexer:
                 logger.debug("RAG: skipping oversized file %s (%d bytes)", fpath, len(content))
                 continue
 
-            if fpath.lower().endswith(".md"):
-                file_chunks = chunk_markdown(content, fpath)
-            else:
-                file_chunks = chunk_file(content, fpath, self._chunk_size, self._overlap)
+            file_chunks = chunk_markdown(content, fpath) if fpath.lower().endswith(".md") else chunk_file(content, fpath, self._chunk_size, self._overlap)
             chunks.extend(file_chunks)
             self._indexed_files.add(fpath)
 

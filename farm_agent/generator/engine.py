@@ -1588,10 +1588,7 @@ class ContributionGenerator:
                         function_name, path,
                     )
                 target = func_nodes[0]
-                if hasattr(target, 'decorator_list') and target.decorator_list:
-                    start_line = target.decorator_list[0].lineno - 1
-                else:
-                    start_line = target.lineno - 1
+                start_line = target.decorator_list[0].lineno - 1 if hasattr(target, 'decorator_list') and target.decorator_list else target.lineno - 1
 
                 lines = source_code.split("\n")
 
@@ -1654,10 +1651,9 @@ class ContributionGenerator:
             if "{" in stripped or ":" in stripped:
                 found_open = True
 
-            if i > func_start and found_open and brace_depth <= 0 and paren_depth <= 0:
-                if current_indent <= indent_level and stripped:
-                    func_end = i - 1
-                    break
+            if i > func_start and found_open and brace_depth <= 0 and paren_depth <= 0 and current_indent <= indent_level and stripped:
+                func_end = i - 1
+                break
 
         # Re-indent replacement to match original function indent
         reindented_lines = []

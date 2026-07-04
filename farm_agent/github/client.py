@@ -170,10 +170,7 @@ class GitHubClient:
 
                 # Secondary rate limit (abuse detection) — retry with backoff
                 retry_after = response.headers.get("retry-after")
-                if retry_after:
-                    wait = int(retry_after)
-                else:
-                    wait = _403_backoff[min(network_attempts, len(_403_backoff) - 1)]
+                wait = int(retry_after) if retry_after else _403_backoff[min(network_attempts, len(_403_backoff) - 1)]
 
                 logger.warning(
                     "GitHub Secondary Rate Limit hit (403). "
@@ -1190,10 +1187,7 @@ class GitHubClient:
         """
         import base64
 
-        if encoding == "base64":
-            encoded = content
-        else:
-            encoded = base64.b64encode(content.encode("utf-8")).decode("utf-8")
+        encoded = content if encoding == "base64" else base64.b64encode(content.encode("utf-8")).decode("utf-8")
 
         payload = {
             "content": encoded,
@@ -1336,10 +1330,7 @@ class GitHubClient:
         Returns:
             The reaction response dict, or None if the API call fails.
         """
-        if is_review_comment:
-            url = f"/repos/{owner}/{repo}/pulls/comments/{comment_id}/reactions"
-        else:
-            url = f"/repos/{owner}/{repo}/issues/comments/{comment_id}/reactions"
+        url = f"/repos/{owner}/{repo}/pulls/comments/{comment_id}/reactions" if is_review_comment else f"/repos/{owner}/{repo}/issues/comments/{comment_id}/reactions"
 
         try:
             async with self._sem:

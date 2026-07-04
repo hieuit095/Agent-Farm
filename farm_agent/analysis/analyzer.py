@@ -1426,14 +1426,13 @@ You MUST respond strictly in the following JSON array format. No markdown, no co
                 poc = str(item.get("poc", ""))
                 fix = str(item.get("fix", ""))
 
-                if impact.upper().startswith("CRITICAL") or impact.upper().startswith("HIGH"):
-                    if not poc or not fix:
-                        logger.warning(
-                            "LLM returned CRITICAL/HIGH finding with empty poc/fix for %s:%s — filtering out",
-                            file_path,
-                            item.get("line", 0),
-                        )
-                        continue
+                if (impact.upper().startswith("CRITICAL") or impact.upper().startswith("HIGH")) and (not poc or not fix):
+                    logger.warning(
+                        "LLM returned CRITICAL/HIGH finding with empty poc/fix for %s:%s — filtering out",
+                        file_path,
+                        item.get("line", 0),
+                    )
+                    continue
 
                 vulns.append(Vulnerability(
                     file=file_path,
