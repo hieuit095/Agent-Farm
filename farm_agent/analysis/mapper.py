@@ -94,10 +94,7 @@ class RepoMapper:
                 continue
 
             signatures = self._extract_signatures(node.path, content)
-            if signatures:
-                block = f"{node.path}\n" + "\n".join(f"  {s}" for s in signatures)
-            else:
-                block = node.path
+            block = f"{node.path}\n" + "\n".join(f"  {s}" for s in signatures) if signatures else node.path
 
             output_parts.append(block)
             total_chars += len(block)
@@ -360,10 +357,7 @@ class RepoMapper:
                 continue
 
             signatures = self._extract_signatures(path, content)
-            if signatures:
-                block = f"{path}\n" + "\n".join(f"  {s}" for s in signatures)
-            else:
-                block = path
+            block = f"{path}\n" + "\n".join(f"  {s}" for s in signatures) if signatures else path
 
             output_parts.append(block)
             total_chars += len(block)
@@ -401,10 +395,7 @@ class RepoMapper:
         target_ext = self._get_ext(target_path)
 
         # ── Step 1: what does target_path import? ──────────────────────────
-        if target_ext == ".py":
-            imported_modules = self._extract_python_imports(target_content)
-        else:
-            imported_modules = self._extract_js_ts_imports(target_content)
+        imported_modules = self._extract_python_imports(target_content) if target_ext == ".py" else self._extract_js_ts_imports(target_content)
 
         for mod in imported_modules:
             resolved = self._resolve_module_to_path(mod, target_path, all_file_contents)
@@ -418,9 +409,8 @@ class RepoMapper:
         for path, content in all_file_contents.items():
             if path == target_path:
                 continue
-            if self._file_imports_module(content, target_module_variants, self._get_ext(path)):
-                if path not in callers:
-                    callers.append(path)
+            if self._file_imports_module(content, target_module_variants, self._get_ext(path)) and path not in callers:
+                callers.append(path)
             if len(callers) >= 5:
                 break
 
@@ -463,12 +453,11 @@ class RepoMapper:
             if isinstance(node, ast.Import):
                 for alias in node.names:
                     modules.append(alias.name)
-            elif isinstance(node, ast.ImportFrom):
-                if node.module:
-                    # node.level > 0 means relative import (from . import …)
-                    # We still record the module name; relative resolution
-                    # happens in _resolve_module_to_path.
-                    modules.append(node.module)
+            elif isinstance(node, ast.ImportFrom) and node.module:
+                # node.level > 0 means relative import (from . import …)
+                # We still record the module name; relative resolution
+                # happens in _resolve_module_to_path.
+                modules.append(node.module)
         return modules
 
     def _extract_js_ts_imports(self, content: str) -> list[str]:
@@ -552,7 +541,7 @@ class RepoMapper:
             module_clean = module.replace("crate::", "").replace("::", "/")
             parts = module_clean.split("/")
             module_clean_parent = "/".join(parts[:-1]) if len(parts) > 1 else ""
-            
+
             rust_candidates = []
             for m in [module_clean, module_clean_parent]:
                 if m:
@@ -606,25 +595,21 @@ class RepoMapper:
                                 for mv in module_variants
                             ):
                                 return True
-                    elif isinstance(node, ast.ImportFrom):
-                        if node.module and any(
-                            node.module == mv or node.module.startswith(mv + ".")
-                            for mv in module_variants
-                        ):
-                            return True
+                    elif isinstance(node, ast.ImportFrom) and node.module and any(
+                        node.module == mv or node.module.startswith(mv + ".")
+                        for mv in module_variants
+                    ):
+                        return True
             except SyntaxError:
                 pass
 
         # Regex fallback — covers JS/TS and failed Python parse
-        for mv in module_variants:
-            if re.search(rf"""["'`]{re.escape(mv)}["'`]""", content):
-                return True
-        return False
+        return any(re.search(rf"""["'`]{re.escape(mv)}["'`]""", content) for mv in module_variants)
 
     def get_module_dependencies(
         self,
         filepath: str,
-        file_contents: dict[str, str] = None,
+        file_contents: dict[str, str] | None = None,
     ) -> dict[str, list[str]]:
         """Construct a lightweight dependency graph for the target file.
 
@@ -679,7 +664,7 @@ class RepoMapper:
                     resolved_call_path = self._resolve_module_to_path(imp, filepath, contents)
                     if resolved_call_path:
                         break
-            
+
             if resolved_call_path:
                 if resolved_call_path != filepath and resolved_call_path not in resolved_calls:
                     resolved_calls.append(resolved_call_path)
@@ -735,10 +720,9 @@ class RepoMapper:
                         is_dep = True
                         break
                     for imp in o_imports:
-                        if imp.endswith("::" + call) or imp.endswith("." + call) or imp == call:
-                            if self._resolve_module_to_path(imp, other_path, contents) == filepath:
-                                is_dep = True
-                                break
+                        if (imp.endswith("::" + call) or imp.endswith("." + call) or imp == call) and self._resolve_module_to_path(imp, other_path, contents) == filepath:
+                            is_dep = True
+                            break
                     if is_dep:
                         break
 
@@ -779,9 +763,8 @@ class RepoMapper:
                             calls.add(from_import_map[caller_name])
                         else:
                             calls.add(caller_name)
-                elif isinstance(node.func, ast.Name):
-                    if node.func.id in from_import_map:
-                        calls.add(from_import_map[node.func.id])
+                elif isinstance(node.func, ast.Name) and node.func.id in from_import_map:
+                    calls.add(from_import_map[node.func.id])
 
         return imports, calls
 

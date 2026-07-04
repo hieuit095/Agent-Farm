@@ -51,10 +51,7 @@ class CodeChunk:
 
 def _should_index_file(path: str) -> bool:
     """Return False for files that should be excluded from RAG indexing."""
-    for pattern in EXCLUDE_PATTERNS:
-        if pattern.search(path):
-            return False
-    return True
+    return all(not pattern.search(path) for pattern in EXCLUDE_PATTERNS)
 
 
 def chunk_file(content: str, file_path: str, chunk_size: int = DEFAULT_CHUNK_SIZE, overlap: int = DEFAULT_CHUNK_OVERLAP) -> list[CodeChunk]:
@@ -138,7 +135,7 @@ def chunk_markdown(content: str, file_path: str) -> list[CodeChunk]:
         return chunk_file(content, file_path)
 
     chunks: list[CodeChunk] = []
-    
+
     # Helper to clean header title (strip trailing spaces, symbols)
     def clean_title(title: str) -> str:
         return title.strip().rstrip("#").strip()
@@ -167,7 +164,7 @@ def chunk_markdown(content: str, file_path: str) -> list[CodeChunk]:
     for i, match in enumerate(matches):
         header_title = clean_title(match.group(2))
         start_pos = match.start()
-        
+
         # End position is the start of the next header, or end of file
         end_pos = matches[i + 1].start() if i + 1 < len(matches) else len(content)
         chunk_text = content[start_pos:end_pos].strip()
@@ -327,10 +324,7 @@ class RepoIndexer:
                 logger.debug("RAG: skipping oversized file %s (%d bytes)", fpath, len(content))
                 continue
 
-            if fpath.lower().endswith(".md"):
-                file_chunks = chunk_markdown(content, fpath)
-            else:
-                file_chunks = chunk_file(content, fpath, self._chunk_size, self._overlap)
+            file_chunks = chunk_markdown(content, fpath) if fpath.lower().endswith(".md") else chunk_file(content, fpath, self._chunk_size, self._overlap)
             chunks.extend(file_chunks)
             self._indexed_files.add(fpath)
 
