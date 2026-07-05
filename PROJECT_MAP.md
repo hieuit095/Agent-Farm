@@ -33,7 +33,68 @@ Version 4.0.0 introduces the **Omniscient Context Engine**, which recursively di
 
 ---
 
-## 2. CLI Commands
+## 2. Directory Structure
+
+```
+.
+├── docker-compose.yml           # Docker services definition (agent-farm, networks, volumes)
+├── Dockerfile                   # Docker build instructions
+├── LICENSE
+├── Makefile                     # Helper commands (install, test, lint, docker)
+├── PROJECT_MAP.md               # Architecture documentation
+├── pyproject.toml               # Python project configuration (Hatchling, dependencies, Ruff, pytest)
+├── README.md                    # Project overview and getting started instructions
+├── requirements.txt             # Core dependency limits
+├── start.bat                    # Windows 1-Click Launch script
+├── start.sh                     # Unix 1-Click Launch script
+├── farm_agent/                  # Core Python Package Root
+│   ├── __init__.py
+│   ├── agents/                  # Task agent configurations
+│   ├── analysis/                # Analyzers (Bloodhound) & RepoMapper
+│   ├── cli/                     # Click-based CLI entry points (main.py)
+│   ├── core/                    # Core configs, logger, memory DB interfaces, Sandbox logic
+│   ├── generator/               # ContributionGenerator, PoCGenerator, QA Reviewers
+│   ├── github/                  # GitHub clients, crawlers, and PR integrations
+│   ├── issues/                  # IssueSolver for processing open issues
+│   ├── llm/                     # LLM Provider interfaces and Task Routers
+│   ├── notifications/           # Slack/Discord/Telegram integrations
+│   ├── orchestrator/            # Pipeline (Standard & Circular), SuperHumanLoop
+│   ├── plugins/                 # Extensible plugin system
+│   ├── pr/                      # PR Patrol (reviews comments, fixes CI errors)
+│   ├── templates/               # PR descriptions and formatting templates
+│   └── tools/                   # CLI tool protocols
+├── scripts/                     # Helper or deployment scripts
+├── tests/                       # Pytest test suite
+└── secret_findings/             # Local storage for private security disclosures
+```
+
+---
+
+## 3. Core Module Dependency Graph
+
+```mermaid
+graph TD
+    CLI(CLI Entry Points) --> Pipeline(Pipeline Orchestrator)
+    Pipeline --> GithubClient(GitHub Client)
+    Pipeline --> CodeAnalyzer(Code Analyzer / Bloodhound)
+    Pipeline --> RAG(Omniscient Context Engine RAG)
+    CodeAnalyzer --> RAG
+    Pipeline --> ContributionGen(Contribution Generator)
+    ContributionGen --> PoC(PoC Generator)
+    ContributionGen --> Sandbox(Docker Sandbox Validator)
+    Sandbox --> LLM_Pass1(Qwen / Layer 1 Appraisal)
+    Sandbox --> LLM_Pass2(Gemini / Layer 2 Audit)
+    LLM_Pass1 --> PRManager(PR Manager)
+    LLM_Pass2 --> PRManager
+    PRManager --> GithubClient
+    CLI --> PRPatrol(PR Patrol Daemon)
+    PRPatrol --> GithubClient
+    PRPatrol --> Sandbox
+```
+
+---
+
+## 4. CLI Commands
 
 The CLI is Click-based and located in [main.py](file:///c:/Users/USER/Documents/GitHub/Agent-Farm/farm_agent/cli/main.py).
 
@@ -58,13 +119,12 @@ The CLI is Click-based and located in [main.py](file:///c:/Users/USER/Documents/
 | `farm_agent models` | `show_models()` | List the active LLM routing mappings. |
 | `farm_agent leaderboard` | `show_leaderboard()` | Show leaderboards of merged and submitted contributions. |
 | `farm_agent gc` | `gc()` | Purge knowledge base entries older than N days. |
-| `farm_agent janitor` | `SweepAndDestroy()` | Sweeps all open PRs and closes/deletes low-quality/garbage contributions. |
 
 ---
 
-## 3. Core Execution Pipelines
+## 5. Core Execution Pipelines
 
-### 3A. Standard Pipeline — `_process_repo()` ([pipeline.py:1172](file:///c:/Users/USER/Documents/GitHub/Agent-Farm/farm_agent/orchestrator/pipeline.py#L1172))
+### 5A. Standard Pipeline — `_process_repo()` ([pipeline.py:1172](file:///c:/Users/USER/Documents/GitHub/Agent-Farm/farm_agent/orchestrator/pipeline.py#L1172))
 
 Processes a single repository through the full contribution pipeline:
 
@@ -161,7 +221,7 @@ _process_repo(repo)
 
 ---
 
-### 3B. Circular target pipeline — `run_circular()` ([pipeline.py:834](file:///c:/Users/USER/Documents/GitHub/Agent-Farm/farm_agent/orchestrator/pipeline.py#L834))
+### 5B. Circular target pipeline — `hunt-circular` (`run_circular()`) ([pipeline.py:834](file:///c:/Users/USER/Documents/GitHub/Agent-Farm/farm_agent/orchestrator/pipeline.py#L834))
 
 Circular target pipeline loop extracting target repos from the local SQLite queue:
 
@@ -207,7 +267,7 @@ run_circular()
 
 ---
 
-## 4. Adaptive Concurrency & Throttling
+## 6. Adaptive Concurrency & Throttling
 
 To prevent LLM rate limit exhaustion (HTTP 429 thundering herd) during parallel executions, the system utilizes the `AdaptiveConcurrencyManager` ([pipeline.py:214](file:///c:/Users/USER/Documents/GitHub/Agent-Farm/farm_agent/orchestrator/pipeline.py#L214)):
 
@@ -219,7 +279,7 @@ To prevent LLM rate limit exhaustion (HTTP 429 thundering herd) during parallel 
 
 ---
 
-## 5. PR Patrol Daemon & CI Auto-Fix Loop
+## 7. PR Patrol Daemon & CI Auto-Fix Loop
 
 The `PRPatrol` module ([patrol.py:152](file:///c:/Users/USER/Documents/GitHub/Agent-Farm/farm_agent/pr/patrol.py#L152)) runs continuously to manage active contributions:
 
@@ -241,7 +301,7 @@ The `PRPatrol` module ([patrol.py:152](file:///c:/Users/USER/Documents/GitHub/Ag
 
 ---
 
-## 6. Omniscient Context Engine & Subsystems
+## 8. Omniscient Context Engine & Subsystems
 
 Version 4.0.0 upgrades the system's codebase understanding from superficial file scans to deep documentation and linkage maps:
 
@@ -260,7 +320,7 @@ Version 4.0.0 upgrades the system's codebase understanding from superficial file
 
 ---
 
-## 7. SQLite Schema & Persistence
+## 9. SQLite Schema & Persistence
 
 Database file resides in `data/memory.db` and operates in **WAL (Write-Ahead Logging)** mode. Composite indices prevent full table scans.
 
@@ -300,82 +360,7 @@ Database file resides in `data/memory.db` and operates in **WAL (Write-Ahead Log
 
 ---
 
-## 8. Directory & Module Architecture
-
-```
-.                                       # Workspace Root (v4.0.0)
-├── Dockerfile                          # Stage 1 builder (wheel creation) + Stage 2 lean runtime v4.0.0
-├── docker-compose.yml                  # agent-farm service definition with volumes (data/, logs/, secret_findings/)
-├── start.sh                            # Unix quick start wrapper script
-├── start.bat                           # Windows quick start wrapper script
-│
-├── farm_agent/                         # Package root (version = "4.0.0")
-│   ├── __init__.py
-│   │
-│   ├── cli/
-│   │   └── main.py                     # Click CLI — command registrations
-│   │
-│   ├── core/
-│   │   ├── config.py                   # Pydantic v2 config and YAML loading
-│   │   ├── daily_log.py                # Formats daily markdown activity logs
-│   │   ├── exceptions.py               # System exception types hierarchy
-│   │   ├── leaderboard.py              # Leaderboard stat collections
-│   │   ├── logger.py                   # Rotating file logging system setup
-│   │   ├── middleware.py               # Context middleware chain layers
-│   │   ├── models.py                   # Core Pydantic data structures definitions
-│   │   ├── notifier.py                 # Telegram notifications integration
-│   │   ├── profiles.py                 # Thorough, quick, and standard run configurations
-│   │   ├── quotas.py                   # OpenRouter usage quota controllers
-│   │   ├── rag.py                      # ChromaDB vector DB context loaders (with semantic markdown header chunking)
-│   │   ├── retry.py                    # Retry decorators for GitHub/LLM interfaces
-│   │   └── sandbox.py                  # DockerSandbox engine with Polyglot Guillotine, PoC execution context mapping
-│   │
-│   ├── analysis/
-│   │   ├── analyzer.py                 # CodeAnalyzer (parallelized security, quality, UX scanners) & BloodhoundAnalyzer
-│   │   └── mapper.py                   # RepoMapper (AST/regex dependency graphing)
-│   │
-│   ├── generator/
-│   │   ├── engine.py                   # ContributionGenerator (Patch and file correction)
-│   │   ├── poc.py                      # PoCGenerator (PoC validation & LLM evaluation)
-│   │   ├── reviewer.py                 # ReviewerAgent (Self-reflective code auditor with Blast Radius checks)
-│   │   └── scorer.py                   # QAHardcoreScorer (Qwen-based QA grader)
-│   │
-│   ├── github/
-│   │   ├── client.py                   # Async-retrying GitHub REST and GraphQL Client
-│   │   ├── discovery.py                # Target network search and crawler discoverers
-│   │   ├── guidelines.py               # Guidelines, PR templates, and subsystem doc discovery
-│   │   └── security_gate.py            # Identifies private security disclosure files
-│   │
-│   ├── issues/
-│   │   └── solver.py                   # IssueSolver (solves issues, multi-file deep planner)
-│   │
-│   ├── llm/
-│   │   ├── agents.py                   # LLM agent prompts and routing models
-│   │   ├── context.py                  # Generator system instruction builders
-│   │   ├── models.py                   # Model registry definitions
-│   │   ├── provider.py                 # OpenRouter integration handlers
-│   │   └── router.py                   # Task router mapping
-│   │
-│   ├── orchestrator/
-│   │   ├── memory.py                   # Persistence memory sqlite connection interface
-│   │   ├── pipeline.py                 # Pipeline (Standard & Circular pipelines implementation)
-│   │   └── human.py                    # SuperHumanLoop relentless daily scheduler
-│   │
-│   ├── pr/
-│   │   ├── manager.py                  # Pull Request manager (forking, branches, commits)
-│   │   ├── patrol.py                   # PR Patrol (reviews comments, fixes CI errors)
-│   │   └── janitor.py                  # PR Janitor (sweeps and destroys garbage PRs)
-│   │
-│   ├── agents/
-│   │   └── registry.py                 # Task agent configurations
-│   │
-│   └── tools/
-│       └── protocol.py                 # CLI tool protocols
-```
-
----
-
-## 9. Error Handling & Fallback Matrix
+## 10. Error Handling & Fallback Matrix
 
 | Scenario | Behavior |
 |----------|----------|
