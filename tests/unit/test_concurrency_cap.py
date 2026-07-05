@@ -31,6 +31,7 @@ def test_get_max_concurrency_provider_capped():
     pipeline = FarmAgentPipeline(config)
     assert pipeline._get_max_concurrency() == 5
 
+
 def test_get_max_concurrency_under_cap():
     config = MagicMock()
     config.pipeline.max_concurrent_repos = 3

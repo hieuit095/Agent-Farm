@@ -21,26 +21,27 @@ logger = logging.getLogger(__name__)
 # Exclude patterns: auto-generated, binary, or massive files
 EXCLUDE_PATTERNS = [
     re.compile(r"node_modules|\.git|__pycache__|\.pytest_cache"),
-    re.compile(r"\.min\.(js|css|ts)"),          # minified files
-    re.compile(r"\.map\.js$"),                   # source maps
-    re.compile(r"\.pyc$|\.pyo$"),               # compiled python
+    re.compile(r"\.min\.(js|css|ts)"),  # minified files
+    re.compile(r"\.map\.js$"),  # source maps
+    re.compile(r"\.pyc$|\.pyo$"),  # compiled python
     re.compile(r"dist/|build/|target/|vendor/"),  # build artifacts
-    re.compile(r"\.lock$"),                       # lock files
+    re.compile(r"\.lock$"),  # lock files
     re.compile(r"package-lock|package\.json$"),  # package files themselves
-    re.compile(r"\.wasm$|\.bin$|\.so$|\.dll$"), # binary
+    re.compile(r"\.wasm$|\.bin$|\.so$|\.dll$"),  # binary
 ]
 
 # Max file size to index (skip files larger than 200KB to save embedding time)
 MAX_FILE_SIZE_BYTES = 200 * 1024
 
 # Chunking
-DEFAULT_CHUNK_SIZE = 1200        # characters per chunk
-DEFAULT_CHUNK_OVERLAP = 200     # sliding window overlap
+DEFAULT_CHUNK_SIZE = 1200  # characters per chunk
+DEFAULT_CHUNK_OVERLAP = 200  # sliding window overlap
 
 
 @dataclass
 class CodeChunk:
     """A single code chunk with metadata."""
+
     content: str
     file_path: str
     chunk_index: int
@@ -51,13 +52,15 @@ class CodeChunk:
 
 def _should_index_file(path: str) -> bool:
     """Return False for files that should be excluded from RAG indexing."""
-    for pattern in EXCLUDE_PATTERNS:
-        if pattern.search(path):
-            return False
-    return True
+    return all(not pattern.search(path) for pattern in EXCLUDE_PATTERNS)
 
 
-def chunk_file(content: str, file_path: str, chunk_size: int = DEFAULT_CHUNK_SIZE, overlap: int = DEFAULT_CHUNK_OVERLAP) -> list[CodeChunk]:
+def chunk_file(
+    content: str,
+    file_path: str,
+    chunk_size: int = DEFAULT_CHUNK_SIZE,
+    overlap: int = DEFAULT_CHUNK_OVERLAP,
+) -> list[CodeChunk]:
     """Split a file's content into overlapping sliding-window chunks.
 
     Uses a simple character-based sliding window with fixed stride.
@@ -130,7 +133,7 @@ def chunk_markdown(content: str, file_path: str) -> list[CodeChunk]:
     folder_path = "/".join(file_path.split("/")[:-1])
 
     # Find headers (H1, H2, H3)
-    header_pattern = re.compile(r'^(#{1,3})\s+(.+)$', re.MULTILINE)
+    header_pattern = re.compile(r"^(#{1,3})\s+(.+)$", re.MULTILINE)
     matches = list(header_pattern.finditer(content))
 
     if not matches:
@@ -138,7 +141,7 @@ def chunk_markdown(content: str, file_path: str) -> list[CodeChunk]:
         return chunk_file(content, file_path)
 
     chunks: list[CodeChunk] = []
-    
+
     # Helper to clean header title (strip trailing spaces, symbols)
     def clean_title(title: str) -> str:
         return title.strip().rstrip("#").strip()
@@ -160,14 +163,14 @@ def chunk_markdown(content: str, file_path: str) -> list[CodeChunk]:
                 metadata={
                     "folder_path": folder_path,
                     "header_title": "Preamble",
-                }
+                },
             )
         )
 
     for i, match in enumerate(matches):
         header_title = clean_title(match.group(2))
         start_pos = match.start()
-        
+
         # End position is the start of the next header, or end of file
         end_pos = matches[i + 1].start() if i + 1 < len(matches) else len(content)
         chunk_text = content[start_pos:end_pos].strip()
@@ -184,7 +187,7 @@ def chunk_markdown(content: str, file_path: str) -> list[CodeChunk]:
                 metadata={
                     "folder_path": folder_path,
                     "header_title": header_title,
-                }
+                },
             )
         )
 
@@ -251,6 +254,7 @@ def _embed_texts_fallback(texts: list[str]) -> list[list[float]]:
 
 # ── ChromaDB integration ──────────────────────────────────────────────────────
 
+
 class RepoIndexer:
     """Persistent RAG indexer for a single repository.
 
@@ -278,6 +282,7 @@ class RepoIndexer:
     def _ensure_persistent_path(self) -> None:
         """Ensure the persistent storage directory exists."""
         import os
+
         os.makedirs(self.PERSISTENT_PATH, exist_ok=True)
 
     def _init_chroma(self) -> None:
@@ -287,15 +292,23 @@ class RepoIndexer:
 
         try:
             import chromadb
+
             self._ensure_persistent_path()
             self._chroma = chromadb.PersistentClient(path=self.PERSISTENT_PATH)
             self._collection = self._chroma.get_or_create_collection(
                 name=self._repo_name.replace("/", "_").replace("-", "_")[:64],
                 metadata={"hnsw:space": "cosine"},
             )
-            logger.info("ChromaDB persistent collection '%s' initialized at %s", self._repo_name, self.PERSISTENT_PATH)
+            logger.info(
+                "ChromaDB persistent collection '%s' initialized at %s",
+                self._repo_name,
+                self.PERSISTENT_PATH,
+            )
         except (ImportError, Exception) as e:
-            logger.warning("ChromaDB not installed or failed to initialize (%s) — using regex fallback for cross-file search", e)
+            logger.warning(
+                "ChromaDB not installed or failed to initialize (%s) — using regex fallback for cross-file search",
+                e,
+            )
             self._chroma = None
             self._collection = None
 
@@ -406,14 +419,18 @@ class RepoIndexer:
             for i, doc in enumerate(doc_list):
                 meta = meta_list[i] if i < len(meta_list) else {}
                 dist = dist_list[i] if i < len(dist_list) else 1.0
-                output.append({
-                    "content": doc,
-                    "file_path": meta.get("file_path", "unknown"),
-                    "distance": float(dist),
-                    "chunk_index": meta.get("chunk_index", 0),
-                })
+                output.append(
+                    {
+                        "content": doc,
+                        "file_path": meta.get("file_path", "unknown"),
+                        "distance": float(dist),
+                        "chunk_index": meta.get("chunk_index", 0),
+                    }
+                )
 
-            logger.info("RAG query '%s' → %d results from %s", query[:60], len(output), self._repo_name)
+            logger.info(
+                "RAG query '%s' → %d results from %s", query[:60], len(output), self._repo_name
+            )
             return output
 
         except Exception as exc:
@@ -423,7 +440,11 @@ class RepoIndexer:
     def destroy(self) -> None:
         """Clear in-memory references (collection persists on disk for next run)."""
         if self._chroma is not None and self._collection is not None:
-            logger.info("RAG: collection '%s' released from memory (data persisted at %s)", self._collection.name, self.PERSISTENT_PATH)
+            logger.info(
+                "RAG: collection '%s' released from memory (data persisted at %s)",
+                self._collection.name,
+                self.PERSISTENT_PATH,
+            )
         self._chroma = None
         self._collection = None
         self._indexed_files.clear()
