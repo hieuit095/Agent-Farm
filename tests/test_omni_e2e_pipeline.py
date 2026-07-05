@@ -80,6 +80,7 @@ from farm_agent.github.discovery import DatabaseTargetDiscovery
 from farm_agent.llm.provider import OpenRouterProvider
 from farm_agent.orchestrator.memory import Memory
 from farm_agent.orchestrator.pipeline import FarmAgentPipeline
+from farm_agent.core.config import FarmAgentConfig
 from farm_agent.pr.manager import PRManager
 
 
@@ -306,6 +307,7 @@ async def test_omni_e2e_pipeline(tmp_path):
 
     # ── Config ─────────────────────────────────────────────────────────────
     config = FarmAgentConfig()
+    config.llm.provider = "openrouter"
     config.pipeline.sandbox_validation_enabled = True
     config.github.max_prs_per_day = 10
     config.llm.openrouter_api_key = "sk-test"
@@ -368,6 +370,7 @@ async def test_omni_e2e_pipeline(tmp_path):
     # ── Patch definitions (applied via ExitStack) ──────────────────────────
     patch_defs = [
         patch.object(OpenRouterProvider, "complete", new=tracker),
+        patch.object(OpenRouterProvider, "close", new_callable=AsyncMock),
         patch("farm_agent.core.sandbox.DockerSandbox.__init__", return_value=None),
         patch.object(
             DockerSandbox,

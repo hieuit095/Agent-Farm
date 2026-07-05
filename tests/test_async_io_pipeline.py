@@ -9,9 +9,12 @@ from farm_agent.orchestrator.pipeline import FarmAgentPipeline
 
 class TestAsyncIOPipeline(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
-        self.config = MagicMock()
-        self.config.notifications.telegram_token = None
-        self.config.notifications.telegram_chat_id = None
+        from farm_agent.core.config import FarmAgentConfig
+
+        self.config = FarmAgentConfig()
+        self.config.pipeline.llm_concurrency_cap = 5
+        self.config.llm.provider = "openrouter"
+
         self.pipeline = FarmAgentPipeline(self.config)
 
     @patch("farm_agent.orchestrator.pipeline.asyncio.to_thread")
