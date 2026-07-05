@@ -26,32 +26,35 @@ Mocking strategy
 * ``DockerSandbox.run_in_sandbox`` is patched to return a simulated success log.
 * All external I/O (GitHub, Memory, discovery, Semgrep clone) is stubbed.
 """
+
 from __future__ import annotations
 
 import sys
 from unittest.mock import MagicMock
 
 # Ensure chromadb is mocked out
-sys.modules['chromadb'] = MagicMock()
+sys.modules["chromadb"] = MagicMock()
 
 # Ensure docker is mocked out
 mock_docker = MagicMock()
 mock_docker_errors = MagicMock()
 mock_docker_models = MagicMock()
 
-class MockDockerException(Exception): pass
+
+class MockDockerException(Exception):
+    pass
+
+
 mock_docker_errors.APIError = MockDockerException
 mock_docker_errors.ImageNotFound = MockDockerException
 mock_docker_errors.NotFound = MockDockerException
 
-sys.modules['docker'] = mock_docker
-sys.modules['docker.errors'] = mock_docker_errors
-sys.modules['docker.models.containers'] = mock_docker_models
+sys.modules["docker"] = mock_docker
+sys.modules["docker.errors"] = mock_docker_errors
+sys.modules["docker.models.containers"] = mock_docker_models
 
-import asyncio
 import contextlib
 import json
-from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -69,15 +72,17 @@ from farm_agent.core.models import (
     Repository,
     Severity,
 )
+from farm_agent.core.notifier import TelegramNotifier
 from farm_agent.core.sandbox import DockerSandbox
 from farm_agent.generator.engine import ContributionGenerator, GenerationResult
 from farm_agent.github.client import GitHubClient
 from farm_agent.github.discovery import DatabaseTargetDiscovery
 from farm_agent.llm.provider import OpenRouterProvider
-from farm_agent.core.notifier import TelegramNotifier
 from farm_agent.orchestrator.memory import Memory
 from farm_agent.orchestrator.pipeline import FarmAgentPipeline
+from farm_agent.core.config import FarmAgentConfig
 from farm_agent.pr.manager import PRManager
+
 
 # ── Descriptor-based async mock that preserves ``self`` on instance methods ──
 class TrackedAsyncMock:
@@ -210,7 +215,10 @@ async def _openrouter_complete_side_effect(
         # Phase 6 — Layer 2 Supreme Auditor
         return json.dumps({"final_approval": True, "rejection_reason": ""})
 
-    if "Finding Validation" in prompt_str or "senior code reviewer validating automated findings" in sys_str:
+    if (
+        "Finding Validation" in prompt_str
+        or "senior code reviewer validating automated findings" in sys_str
+    ):
         return json.dumps(
             {
                 "devil_advocate_critique": "f-string is unsafe here because user_id is tainted.",
@@ -222,27 +230,34 @@ async def _openrouter_complete_side_effect(
         )
 
     if "QA Automation Specialist" in sys_str:
-        return json.dumps({
-            "filename": "test_poc.py",
-            "content": "import os\nassert False, 'exploit'",
-            "command": "python test_poc.py"
-        })
+        return json.dumps(
+            {
+                "filename": "test_poc.py",
+                "content": "import os\nassert False, 'exploit'",
+                "command": "python test_poc.py",
+            }
+        )
 
     if "Vulnerability Verification Auditor" in sys_str:
         if not AUDITOR_CALLS:
             AUDITOR_CALLS.append(True)
-            return json.dumps({
-                "is_triggered": True,
-                "reason": "Vulnerability triggered successfully"
-            })
+            return json.dumps(
+                {"is_triggered": True, "reason": "Vulnerability triggered successfully"}
+            )
         else:
-            return json.dumps({
-                "is_triggered": False,
-                "reason": "Vulnerability was not triggered (patched successfully)"
-            })
+            return json.dumps(
+                {
+                    "is_triggered": False,
+                    "reason": "Vulnerability was not triggered (patched successfully)",
+                }
+            )
 
     # Red Team vs Generator check
-    if "vulnerabilities" in prompt_str.lower() or "security" in prompt_str.lower() or "red team" in sys_str.lower():
+    if (
+        "vulnerabilities" in prompt_str.lower()
+        or "security" in prompt_str.lower()
+        or "red team" in sys_str.lower()
+    ):
         # Phase 1 — Red Team severe vulnerability JSON
         return json.dumps(
             [
@@ -279,7 +294,6 @@ async def _openrouter_complete_side_effect(
     )
 
 
-
 # ── Test ────────────────────────────────────────────────────────────────────
 @pytest.mark.asyncio
 async def test_omni_e2e_pipeline(tmp_path):
@@ -293,6 +307,7 @@ async def test_omni_e2e_pipeline(tmp_path):
 
     # ── Config ─────────────────────────────────────────────────────────────
     config = FarmAgentConfig()
+    config.llm.provider = "openrouter"
     config.pipeline.sandbox_validation_enabled = True
     config.github.max_prs_per_day = 10
     config.llm.openrouter_api_key = "sk-test"
@@ -340,12 +355,14 @@ async def test_omni_e2e_pipeline(tmp_path):
 
     async def mock_clone_and_patch(*args, **kwargs):
         import os
+
         path = str(tmp_path / "clone")
         os.makedirs(path, exist_ok=True)
         return path
 
     async def mock_clone_shallow(*args, **kwargs):
         import os
+
         path = tmp_path / "shallow"
         os.makedirs(str(path), exist_ok=True)
         return path
@@ -353,6 +370,7 @@ async def test_omni_e2e_pipeline(tmp_path):
     # ── Patch definitions (applied via ExitStack) ──────────────────────────
     patch_defs = [
         patch.object(OpenRouterProvider, "complete", new=tracker),
+        patch.object(OpenRouterProvider, "close", new_callable=AsyncMock),
         patch("farm_agent.core.sandbox.DockerSandbox.__init__", return_value=None),
         patch.object(
             DockerSandbox,
@@ -362,19 +380,53 @@ async def test_omni_e2e_pipeline(tmp_path):
         ),
         patch.object(PRManager, "create_pr", new_callable=AsyncMock, return_value=fake_pr),
         patch.object(PRManager, "check_compliance_and_fix", new_callable=AsyncMock),
-        patch("farm_agent.orchestrator.pipeline.run_security_gate", new_callable=AsyncMock, return_value=None),
-        patch("farm_agent.orchestrator.pipeline.fetch_repo_guidelines", new_callable=AsyncMock, return_value=mock_guidelines),
-        patch.object(FarmAgentPipeline, "_check_ai_policy", new_callable=AsyncMock, return_value=False),
+        patch(
+            "farm_agent.orchestrator.pipeline.run_security_gate",
+            new_callable=AsyncMock,
+            return_value=None,
+        ),
+        patch(
+            "farm_agent.orchestrator.pipeline.fetch_repo_guidelines",
+            new_callable=AsyncMock,
+            return_value=mock_guidelines,
+        ),
+        patch.object(
+            FarmAgentPipeline, "_check_ai_policy", new_callable=AsyncMock, return_value=False
+        ),
         patch.object(FarmAgentPipeline, "_clone_and_patch_repo", new=mock_clone_and_patch),
         patch("farm_agent.github.client.GitHubClient.__init__", return_value=None),
         patch.object(GitHubClient, "close", new_callable=AsyncMock),
-        patch.object(GitHubClient, "check_interaction_limits", new_callable=AsyncMock, return_value=False),
-        patch.object(GitHubClient, "get_repo_details", new_callable=AsyncMock, return_value=fake_repo),
-        patch.object(GitHubClient, "fetch_repo_structure_graphql", new_callable=AsyncMock, return_value=[FileNode(path="src/app.py", type="blob", size=200)]),
-        patch.object(GitHubClient, "get_file_tree", new_callable=AsyncMock, return_value=[FileNode(path="src/app.py", type="blob", size=200)]),
-        patch.object(GitHubClient, "get_file_content", new_callable=AsyncMock, return_value="def get_user(user_id):\n    cursor.execute(f'SELECT * FROM users WHERE id = {user_id}')\n    return cursor.fetchone()\n"),
+        patch.object(
+            GitHubClient, "check_interaction_limits", new_callable=AsyncMock, return_value=False
+        ),
+        patch.object(
+            GitHubClient, "get_repo_details", new_callable=AsyncMock, return_value=fake_repo
+        ),
+        patch.object(
+            GitHubClient,
+            "fetch_repo_structure_graphql",
+            new_callable=AsyncMock,
+            return_value=[FileNode(path="src/app.py", type="blob", size=200)],
+        ),
+        patch.object(
+            GitHubClient,
+            "get_file_tree",
+            new_callable=AsyncMock,
+            return_value=[FileNode(path="src/app.py", type="blob", size=200)],
+        ),
+        patch.object(
+            GitHubClient,
+            "get_file_content",
+            new_callable=AsyncMock,
+            return_value="def get_user(user_id):\n    cursor.execute(f'SELECT * FROM users WHERE id = {user_id}')\n    return cursor.fetchone()\n",
+        ),
         patch.object(GitHubClient, "list_pull_requests", new_callable=AsyncMock, return_value=[]),
-        patch.object(GitHubClient, "fetch_recent_maintainer_comments", new_callable=AsyncMock, return_value=[]),
+        patch.object(
+            GitHubClient,
+            "fetch_recent_maintainer_comments",
+            new_callable=AsyncMock,
+            return_value=[],
+        ),
         patch("farm_agent.orchestrator.memory.Memory.__init__", return_value=None),
         patch.object(Memory, "close", new_callable=AsyncMock),
         patch.object(Memory, "init", new_callable=AsyncMock),
@@ -389,15 +441,45 @@ async def test_omni_e2e_pipeline(tmp_path):
         patch.object(Memory, "get_qa_lessons", new_callable=AsyncMock, return_value=[]),
         patch.object(Memory, "record_qa_lesson", new_callable=AsyncMock),
         patch.object(Memory, "get_style_guide", new_callable=AsyncMock, return_value=None),
-        patch.object(CodeAnalyzer, "check_maintainer_vibe", new_callable=AsyncMock, return_value="FRIENDLY"),
+        patch.object(
+            CodeAnalyzer, "check_maintainer_vibe", new_callable=AsyncMock, return_value="FRIENDLY"
+        ),
         patch.object(CodeAnalyzer, "analyze", new_callable=AsyncMock, return_value=fake_analysis),
         patch.object(BloodhoundAnalyzer, "_clone_repo_shallow", new=mock_clone_shallow),
-        patch.object(BloodhoundAnalyzer, "_run_semgrep", new_callable=AsyncMock, return_value=[{"file": "src/app.py", "line": 2, "match": "cursor.execute(f'SELECT * FROM users WHERE id = {user_id}')", "rule": "semgrep:python.sql.injection", "severity": "HIGH"}]),
-        patch.object(ContributionGenerator, "generate_from_dossier", new_callable=AsyncMock, return_value=fake_gen_result),
-        patch.object(ContributionGenerator, "generate", new_callable=AsyncMock, return_value=fake_contribution),
+        patch.object(
+            BloodhoundAnalyzer,
+            "_run_semgrep",
+            new_callable=AsyncMock,
+            return_value=[
+                {
+                    "file": "src/app.py",
+                    "line": 2,
+                    "match": "cursor.execute(f'SELECT * FROM users WHERE id = {user_id}')",
+                    "rule": "semgrep:python.sql.injection",
+                    "severity": "HIGH",
+                }
+            ],
+        ),
+        patch.object(
+            ContributionGenerator,
+            "generate_from_dossier",
+            new_callable=AsyncMock,
+            return_value=fake_gen_result,
+        ),
+        patch.object(
+            ContributionGenerator,
+            "generate",
+            new_callable=AsyncMock,
+            return_value=fake_contribution,
+        ),
         patch("farm_agent.github.discovery.DatabaseTargetDiscovery.__init__", return_value=None),
         patch.object(DatabaseTargetDiscovery, "initialize", new_callable=AsyncMock),
-        patch.object(DatabaseTargetDiscovery, "get_next_target", new_callable=AsyncMock, return_value=fake_target),
+        patch.object(
+            DatabaseTargetDiscovery,
+            "get_next_target",
+            new_callable=AsyncMock,
+            return_value=fake_target,
+        ),
         patch.object(DatabaseTargetDiscovery, "mark_status", new_callable=AsyncMock),
         patch("farm_agent.core.notifier.TelegramNotifier.__init__", return_value=None),
         patch.object(TelegramNotifier, "send_message", new_callable=AsyncMock),
@@ -409,9 +491,7 @@ async def test_omni_e2e_pipeline(tmp_path):
             stack.enter_context(p)
 
         # ── Phase 1, 3, 4, 5, 6 via run_circular ───────────────────────────
-        result_circular = await pipeline.run_circular(
-            json_path="target_repo.json", dry_run=False
-        )
+        result_circular = await pipeline.run_circular(json_path="target_repo.json", dry_run=False)
 
         # ── Phase 2, 3, 4, 6 via run_single ────────────────────────────────
         result_single = await pipeline.run_single(
@@ -435,7 +515,7 @@ async def test_omni_e2e_pipeline(tmp_path):
 
     # 2. Strict model-routing assertions
     called_models = []
-    for instance, args, kwargs in tracker.call_args_list:
+    for instance, _args, _kwargs in tracker.call_args_list:
         model = getattr(instance, "_model", None) or getattr(
             getattr(instance, "config", None), "model", "unknown"
         )
