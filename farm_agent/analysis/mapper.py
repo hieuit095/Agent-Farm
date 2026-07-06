@@ -19,21 +19,59 @@ from collections.abc import Awaitable, Callable
 logger = logging.getLogger(__name__)
 
 # Extensions considered "code" files
-CODE_EXTENSIONS = frozenset({
-    ".py", ".js", ".ts", ".jsx", ".tsx",
-    ".go", ".rs",
-    ".java", ".rb", ".c", ".cpp", ".h", ".hpp",
-    ".cs", ".swift", ".kt",
-})
+CODE_EXTENSIONS = frozenset(
+    {
+        ".py",
+        ".js",
+        ".ts",
+        ".jsx",
+        ".tsx",
+        ".go",
+        ".rs",
+        ".java",
+        ".rb",
+        ".c",
+        ".cpp",
+        ".h",
+        ".hpp",
+        ".cs",
+        ".swift",
+        ".kt",
+    }
+)
 
 # Extensions explicitly skipped (non-code / config / docs)
-SKIP_EXTENSIONS = frozenset({
-    ".md", ".txt", ".rst", ".json", ".yaml", ".yml",
-    ".toml", ".cfg", ".ini", ".lock", ".csv", ".xml",
-    ".html", ".css", ".scss", ".svg", ".png", ".jpg",
-    ".gif", ".ico", ".woff", ".woff2", ".eot", ".ttf",
-    ".map", ".min.js", ".min.css",
-})
+SKIP_EXTENSIONS = frozenset(
+    {
+        ".md",
+        ".txt",
+        ".rst",
+        ".json",
+        ".yaml",
+        ".yml",
+        ".toml",
+        ".cfg",
+        ".ini",
+        ".lock",
+        ".csv",
+        ".xml",
+        ".html",
+        ".css",
+        ".scss",
+        ".svg",
+        ".png",
+        ".jpg",
+        ".gif",
+        ".ico",
+        ".woff",
+        ".woff2",
+        ".eot",
+        ".ttf",
+        ".map",
+        ".min.js",
+        ".min.css",
+    }
+)
 
 # Hard limits to protect the LLM context window
 MAX_FILES = 500
@@ -65,15 +103,15 @@ class RepoMapper:
         """
         # Filter to code files only
         code_files = [
-            f for f in file_tree
-            if getattr(f, "type", "") == "blob" and self._is_code_file(f.path)
+            f for f in file_tree if getattr(f, "type", "") == "blob" and self._is_code_file(f.path)
         ]
 
         # Enforce hard file limit
         if len(code_files) > MAX_FILES:
             logger.warning(
                 "RepoMapper: capping file scan from %d to %d files",
-                len(code_files), MAX_FILES,
+                len(code_files),
+                MAX_FILES,
             )
             code_files = code_files[:MAX_FILES]
 
@@ -360,10 +398,7 @@ class RepoMapper:
                 continue
 
             signatures = self._extract_signatures(path, content)
-            if signatures:
-                block = f"{path}\n" + "\n".join(f"  {s}" for s in signatures)
-            else:
-                block = path
+            block = f"{path}\n" + "\n".join(f"  {s}" for s in signatures) if signatures else path
 
             output_parts.append(block)
             total_chars += len(block)
@@ -371,7 +406,8 @@ class RepoMapper:
 
         logger.debug(
             "RepoMapper.generate_repo_skeleton: %d files, %d chars",
-            file_count, total_chars,
+            file_count,
+            total_chars,
         )
         return "\n\n".join(output_parts)
 
@@ -426,7 +462,9 @@ class RepoMapper:
 
         logger.debug(
             "resolve_file_dependencies(%s): imports=%s callers=%s",
-            target_path, imports, callers,
+            target_path,
+            imports,
+            callers,
         )
         return {"imports": imports, "callers": callers}
 
@@ -463,12 +501,11 @@ class RepoMapper:
             if isinstance(node, ast.Import):
                 for alias in node.names:
                     modules.append(alias.name)
-            elif isinstance(node, ast.ImportFrom):
-                if node.module:
-                    # node.level > 0 means relative import (from . import …)
-                    # We still record the module name; relative resolution
-                    # happens in _resolve_module_to_path.
-                    modules.append(node.module)
+            elif isinstance(node, ast.ImportFrom) and node.module:
+                # node.level > 0 means relative import (from . import …)
+                # We still record the module name; relative resolution
+                # happens in _resolve_module_to_path.
+                modules.append(node.module)
         return modules
 
     def _extract_js_ts_imports(self, content: str) -> list[str]:
@@ -552,16 +589,18 @@ class RepoMapper:
             module_clean = module.replace("crate::", "").replace("::", "/")
             parts = module_clean.split("/")
             module_clean_parent = "/".join(parts[:-1]) if len(parts) > 1 else ""
-            
+
             rust_candidates = []
             for m in [module_clean, module_clean_parent]:
                 if m:
-                    rust_candidates.extend([
-                        f"src/{m}.rs",
-                        f"src/{m}/mod.rs",
-                        f"{m}.rs",
-                        f"{m}/mod.rs",
-                    ])
+                    rust_candidates.extend(
+                        [
+                            f"src/{m}.rs",
+                            f"src/{m}/mod.rs",
+                            f"{m}.rs",
+                            f"{m}/mod.rs",
+                        ]
+                    )
             for c in rust_candidates:
                 if c in all_file_contents:
                     return c
@@ -616,15 +655,12 @@ class RepoMapper:
                 pass
 
         # Regex fallback — covers JS/TS and failed Python parse
-        for mv in module_variants:
-            if re.search(rf"""["'`]{re.escape(mv)}["'`]""", content):
-                return True
-        return False
+        return any(re.search(rf"""["'`]{re.escape(mv)}["'`]""", content) for mv in module_variants)
 
     def get_module_dependencies(
         self,
         filepath: str,
-        file_contents: dict[str, str] = None,
+        file_contents: dict[str, str] | None = None,
     ) -> dict[str, list[str]]:
         """Construct a lightweight dependency graph for the target file.
 
@@ -640,6 +676,7 @@ class RepoMapper:
             - "dependents": other files in the repo that import or call this file.
         """
         import os
+
         contents = file_contents if file_contents is not None else self.file_contents
         if not contents or filepath not in contents:
             return {"imports": [], "calls": [], "dependents": []}
@@ -679,7 +716,7 @@ class RepoMapper:
                     resolved_call_path = self._resolve_module_to_path(imp, filepath, contents)
                     if resolved_call_path:
                         break
-            
+
             if resolved_call_path:
                 if resolved_call_path != filepath and resolved_call_path not in resolved_calls:
                     resolved_calls.append(resolved_call_path)
@@ -748,7 +785,7 @@ class RepoMapper:
         return {
             "imports": sorted(resolved_imports)[:10],
             "calls": sorted(resolved_calls)[:10],
-            "dependents": sorted(dependents)[:10]
+            "dependents": sorted(dependents)[:10],
         }
 
     def _extract_python_deps(self, content: str) -> tuple[set[str], set[str]]:
@@ -812,7 +849,7 @@ class RepoMapper:
         for match in re.finditer(r'import\s+"([^"]+)"', content):
             imports.add(match.group(1))
 
-        multi_line_import = re.search(r'import\s*\((.*?)\)', content, re.DOTALL)
+        multi_line_import = re.search(r"import\s*\((.*?)\)", content, re.DOTALL)
         if multi_line_import:
             for line in multi_line_import.group(1).split("\n"):
                 line = line.strip()
@@ -831,11 +868,11 @@ class RepoMapper:
         imports = set()
         calls = set()
 
-        for match in re.finditer(r'(?:pub\s+)?use\s+([\w:]+)', content):
+        for match in re.finditer(r"(?:pub\s+)?use\s+([\w:]+)", content):
             path = match.group(1)
             imports.add(path)
 
-        for match in re.finditer(r'(?:pub\s+)?use\s+([\w:]+)::\{([^}]+)\}', content):
+        for match in re.finditer(r"(?:pub\s+)?use\s+([\w:]+)::\{([^}]+)\}", content):
             base_path = match.group(1)
             for item in match.group(2).split(","):
                 item = item.strip()
