@@ -20,7 +20,7 @@ Agent-Farm is an autonomous AI agent ecosystem designed to crawl GitHub, pinpoin
 ### 🧠 Omniscient Context Engine
 Upgraded codebase intelligence using Retrieval-Augmented Generation (RAG) powered by ChromaDB. It recursively discovers internal documentation (`.md`, `.txt`, `.rst`), semantically chunks docs by headers, and indexes them to seed local knowledge. Concurrently, it builds AST-based call graphs (for Python, Rust, Go, TypeScript) to inject precise module dependency links ("imports", "calls", "dependents") directly into the prompt context.
 
-### 🛡️ Zero-Garbage PR Gatekeepers
+### 🛡️ Anti-Farming Filter
 Zero tolerance for typo-fixes, formatting tweaks, or documentation-only PRs (README/doc contributions are strictly banned). Implements a two-layer filter system:
 * **Gate 1: EXPERT APPRAISAL (Qwen-3.7-Max):** Renders strict verdicts on findings to filter out false positives and theoretical edge cases.
 * **Gate 2: REAL-WORLD VALUE CHECK:** Vetoes patches targeting dead or deprecated code blocks to avoid sending low-effort spam to maintainers.
@@ -35,15 +35,27 @@ Validates generated patches in isolated Docker sandboxes through a double-pass c
 
 ---
 
+## 🏗️ System Architecture (High-Level)
+
+Agent-Farm operates as a multi-stage pipeline:
+1. **Target Discovery:** Discovers repositories matching criteria, filtering out repositories restricted to prior contributors or with hostile maintainer vibes.
+2. **Analysis & Indexing:** Clones target, discovers subsystem docs, chunks and indexes into ChromaDB (Omniscient Context Engine). Generates AST dependency graphs.
+3. **Vulnerability Analysis:** Employs Bloodhound Red Team audits via Semgrep and deep code scans to find security issues or code improvements. Passes findings through the Anti-Farming Filter.
+4. **Verification & Generation:** Uses a dynamic PoC to prove vulnerabilities. Generates patches with `deepseek-v4-pro` and passes them through an internal DEV-QA loop and Layer 2 Supreme Audit (`gemini-3.5-flash`).
+5. **Execution & PR Creation:** Verifies the patch via Docker sandbox (Blast Radius check) and creates a PR or private security disclosure.
+
+---
+
 ## 🛠️ Getting Started (1-Click Docker Quick-Start)
 
 Agent-Farm provides a robust, pre-configured Docker setup that mounts the Docker socket from the host to spawn sibling containers for isolated PoC and test execution.
 
 ### Prerequisites
-* **Docker Desktop** installed and running.
+* **Docker Desktop** (version >= 7.1) installed and running.
 * **Git** installed on the host machine.
 * A GitHub Personal Access Token (PAT) with `repo` scope.
 * An OpenRouter API Key configured with credits.
+* Python 3.11+ (if running locally).
 
 ### 1-Click Launch
 
@@ -65,11 +77,12 @@ Agent-Farm provides a robust, pre-configured Docker setup that mounts the Docker
      ```
    * *Note: The script will automatically pull the latest codebase, initialize your `.env` configuration file from `.env.example` if missing, build the Docker image, and launch the daemon in the background.*
 
-3. **Configure Settings:**
-   Open the newly created `.env` file and configure your API tokens:
+3. **Configure Environment Variables:**
+   Open the newly created `.env` file and configure your API tokens (core variables):
    ```env
    GITHUB_TOKEN=your_github_pat_here
    OPENROUTER_API_KEY=your_openrouter_key_here
+   TELEGRAM_BOT_TOKEN=your_telegram_token_here  # Optional: For notifications
    ```
 
 4. **Attach to the Agent CLI:**
@@ -90,20 +103,17 @@ farm_agent run
 # Target a specific repository directly
 farm_agent target <repo_url>
 
-# Solve open issues in a specific repository
+# Solve open issues in a specific repository (Issue-First Pipeline)
 farm_agent solve <repo_url>
 
-# Run in Hunt Mode: agresively discover repos and solve issues/bugs
+# Run in Hunt Mode: aggressively discover repos and solve issues/bugs
 farm_agent hunt [--rounds N] [--mode analysis|issues|both]
 
-# Run the Relentless 24/7 Super Human loop (patrols PRs and hunts targets)
+# Run the Relentless 24/7 Terminator Mode loop (patrols PRs and hunts targets)
 farm_agent superhuman
 
 # Check open PRs for maintainer comments, answer queries, and push CI auto-fixes
 farm_agent patrol
-
-# Scan and close low-quality/garbage PRs submitted on GitHub
-farm_agent janitor
 
 # Clean up forks where all PRs are closed or merged
 farm_agent cleanup
