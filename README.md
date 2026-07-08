@@ -11,27 +11,30 @@
 
 ## 🚀 Overview
 
-Agent-Farm is an autonomous AI agent ecosystem designed to crawl GitHub, pinpoint real security vulnerabilities or code flaws, generate high-quality patches, validate fixes dynamically in isolated sandboxes, and submit pull requests or private disclosures. Operating with human-like precision, it implements advanced self-correcting DEV-QA loops and maintainer vibe analysis to ensure every contribution is high-value, precise, and completely regression-free.
+Agent-Farm is an autonomous AI ecosystem that discovers open-source GitHub repositories, identifies real security vulnerabilities or code flaws, and generates high-quality patches. Operating with human-like precision, it implements advanced self-correcting DEV-QA loops and maintainer vibe analysis to ensure every contribution is high-value, precise, and completely regression-free.
 
 ---
 
-## 🔥 Key Features (v4.0.0 Upgrades)
+## 🔥 Key Features (v4.0.0)
 
 ### 🧠 Omniscient Context Engine
-Upgraded codebase intelligence using Retrieval-Augmented Generation (RAG) powered by ChromaDB. It recursively discovers internal documentation (`.md`, `.txt`, `.rst`), semantically chunks docs by headers, and indexes them to seed local knowledge. Concurrently, it builds AST-based call graphs (for Python, Rust, Go, TypeScript) to inject precise module dependency links ("imports", "calls", "dependents") directly into the prompt context.
+Upgraded codebase intelligence using Retrieval-Augmented Generation (RAG) powered by ChromaDB. It recursively discovers internal documentation (`.md`, `.txt`, `.rst`), semantically chunks docs by headers, and indexes them to seed local knowledge. Concurrently, it builds AST-based call graphs (for Python, Rust, Go, TypeScript) to inject precise module dependency links directly into the prompt context.
 
-### 🛡️ Zero-Garbage PR Gatekeepers
+### 🛡️ Anti-Farming Filter
 Zero tolerance for typo-fixes, formatting tweaks, or documentation-only PRs (README/doc contributions are strictly banned). Implements a two-layer filter system:
-* **Gate 1: EXPERT APPRAISAL (Qwen-3.7-Max):** Renders strict verdicts on findings to filter out false positives and theoretical edge cases.
-* **Gate 2: REAL-WORLD VALUE CHECK:** Vetoes patches targeting dead or deprecated code blocks to avoid sending low-effort spam to maintainers.
+* **Layer 1: The Appraiser (Qwen-3.7-Max):** Renders strict verdicts on findings to filter out false positives and theoretical edge cases.
+* **Layer 2: Supreme Auditor (Gemini-3.5-Flash):** Vetoes patches targeting dead or deprecated code blocks, ensuring fixes are complete and the Sandbox logs are completely clean.
 
-### 🧪 Dynamic Bug Verification (PoC Execution)
+### 🧪 Dynamic Bug Verification
 Before writing a fix, the agent generates a self-contained Proof-of-Concept (PoC) script using `deepseek-v4-pro` to dynamically trigger the vulnerability inside a locked-down container sandbox. If the PoC fails to trigger the bug, the finding is immediately classified as a False Positive and dropped.
 
 ### 🔍 Blast Radius & Regression Auditing
 Validates generated patches in isolated Docker sandboxes through a double-pass check:
 * **Pass 1 (Efficacy):** Applies the patch and re-runs the PoC. The vulnerability must be completely resolved.
-* **Pass 2 (Regression):** Executes the project's native test suite to ensure the patch does not break any existing functionality. Also verifies that changes do not break downstream dependent modules.
+* **Pass 2 (Regression):** Executes the project's native test suite to ensure the patch does not break any existing functionality.
+
+### ⚙️ Terminator Mode
+A relentless continuous execution loop. Runs database-driven hunt-circular and patrol in a tight deterministic loop without artificial delays, pulling targets exclusively from the SQLite `target_repos` table.
 
 ---
 
@@ -40,7 +43,7 @@ Validates generated patches in isolated Docker sandboxes through a double-pass c
 Agent-Farm provides a robust, pre-configured Docker setup that mounts the Docker socket from the host to spawn sibling containers for isolated PoC and test execution.
 
 ### Prerequisites
-* **Docker Desktop** installed and running.
+* **Docker Desktop** (version >= 7.1) installed and running.
 * **Git** installed on the host machine.
 * A GitHub Personal Access Token (PAT) with `repo` scope.
 * An OpenRouter API Key configured with credits.
@@ -70,6 +73,7 @@ Agent-Farm provides a robust, pre-configured Docker setup that mounts the Docker
    ```env
    GITHUB_TOKEN=your_github_pat_here
    OPENROUTER_API_KEY=your_openrouter_key_here
+   MINIMAX_API_KEY=your_minimax_key_here
    ```
 
 4. **Attach to the Agent CLI:**
@@ -81,7 +85,7 @@ Agent-Farm provides a robust, pre-configured Docker setup that mounts the Docker
 
 ## ⚙️ CLI Command Reference
 
-Agent-Farm provides a comprehensive suite of Click-based CLI utilities:
+Agent-Farm provides a comprehensive suite of CLI utilities:
 
 ```bash
 # Start the full automated discovery, analysis, and contribution pipeline
@@ -93,10 +97,10 @@ farm_agent target <repo_url>
 # Solve open issues in a specific repository
 farm_agent solve <repo_url>
 
-# Run in Hunt Mode: agresively discover repos and solve issues/bugs
+# Run in Hunt Mode: agressively discover repos and solve issues/bugs
 farm_agent hunt [--rounds N] [--mode analysis|issues|both]
 
-# Run the Relentless 24/7 Super Human loop (patrols PRs and hunts targets)
+# Run the Relentless 24/7 continuous execution loop (Terminator Mode)
 farm_agent superhuman
 
 # Check open PRs for maintainer comments, answer queries, and push CI auto-fixes

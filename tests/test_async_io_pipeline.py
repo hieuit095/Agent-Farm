@@ -11,6 +11,10 @@ from farm_agent.orchestrator.pipeline import FarmAgentPipeline
 class TestAsyncIOPipeline(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.config = MagicMock()
+        self.config.pipeline = type("Pipeline", (), {"max_concurrent_repos": 5, "llm_concurrency_cap": 5, "rate_limit_cooldown_sec": 300})()
+        self.config.pipeline.max_concurrent_repos = 5
+        self.config.pipeline.llm_concurrency_cap = 5
+        self.config.pipeline.rate_limit_cooldown_sec = 300
         self.config.notifications.telegram_token = None
         self.config.notifications.telegram_chat_id = None
         self.pipeline = FarmAgentPipeline(self.config)
@@ -24,6 +28,7 @@ class TestAsyncIOPipeline(unittest.IsolatedAsyncioTestCase):
 
         # Mocking the clone behavior
         async def mock_to_thread_func(func, *args, **kwargs):
+            if getattr(func, "__name__", "") == "_do_clone": return
             if func == os.makedirs:
                 return None
             return await asyncio.to_thread(func, *args, **kwargs)
