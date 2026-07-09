@@ -1077,7 +1077,7 @@ class FarmAgentPipeline:
 
             if qa_passed and winning_contribution is not None:
                 # ── Proceed to PR submission ─────────────────────────────
-                
+
                 # Layer 2: Supreme Auditor
                 layer2_approved, reject_reason = await self._layer2_supreme_audit(winning_contribution, failure_context)
                 if not layer2_approved:
@@ -1226,7 +1226,7 @@ class FarmAgentPipeline:
             self._github, repo.owner, repo.name,
             memory=self._memory, llm=self._llm,
         )
-        
+
         # Discover subsystem documentation files inside the cloned repository
         await guidelines.discover_subsystem_docs(repo_path)
 
@@ -1296,11 +1296,11 @@ class FarmAgentPipeline:
             try:
                 from farm_agent.analysis.mapper import RepoMapper
                 mapper = RepoMapper()
-                
+
                 # Read all repository files to construct the full dependency graph
                 file_contents = await asyncio.to_thread(_read_all_repo_files_sync, repo_path)
                 mapper.generate_repo_skeleton(file_contents)
-                
+
                 for finding in analysis.findings:
                     if finding.file_path:
                         deps = mapper.get_module_dependencies(finding.file_path)
@@ -1779,14 +1779,14 @@ class FarmAgentPipeline:
                             poc_content=poc_content,
                             run_command=run_command,
                         )
-                        
+
                         logger.info("🧪 [Phase 3] Evaluating PoC validation outcome via LLM...")
                         is_triggered, reason = await poc_gen.evaluate_poc_result(
                             finding=finding,
                             poc_content=poc_content,
                             sandbox_output=sandbox_result,
                         )
-                        
+
                         if not is_triggered:
                             logger.warning(
                                 "🚫 [Phase 3] Vulnerability verification FAILED (bug could not be triggered). "
@@ -1802,7 +1802,7 @@ class FarmAgentPipeline:
                                     f"PoC did not trigger bug. Reason: {reason}",
                                 )
                             continue
-                        
+
                         logger.info("✅ [Phase 3] Vulnerability verified successfully: %s. Proceeding to fix generation.", reason)
                     else:
                         logger.warning("⚠️ [Phase 3] PoC Generator did not return a valid script. Falling back to direct fix generation.")
@@ -1891,7 +1891,7 @@ class FarmAgentPipeline:
                         patched_tests = await self._sandbox.run_native_test_suite(patched_repo_path, language=repo.language)
                         patched_exit_code = patched_tests.get("exit_code", 0)
                         patched_status = patched_tests.get("status", "tests_missing")
-                        
+
                         if baseline_exit_code == 0 and patched_exit_code != 0 and patched_status == "failed":
                             logger.warning("🚫 [Phase 4: Regression] Patch FAILED native tests (regression detected!). Status: %s, Exit Code: %s", patched_status, patched_exit_code)
                             is_success = False
@@ -2778,12 +2778,12 @@ class FarmAgentPipeline:
         """Layer 1: The Appraiser. Verifies if finding is genuinely HIGH/CRITICAL."""
         if not file_content:
             return True, ""  # Bypass if no code (or handle differently)
-        
+
         from farm_agent.llm.provider import create_llm_provider
         import copy
         import json
         import re
-        
+
         try:
             appraiser_cfg = copy.copy(self.config.llm)
             appraiser_cfg.provider = "openrouter"
@@ -2811,7 +2811,7 @@ class FarmAgentPipeline:
         try:
             response = await appraiser_provider.complete(prompt, system=system_prompt, temperature=0.1)
             await appraiser_provider.close()
-            
+
             response_text = response.strip()
             fence_match = re.search(r"```(?:json)?\s*(.*?)```", response_text, re.DOTALL | re.IGNORECASE)
             if fence_match:
@@ -2824,12 +2824,12 @@ class FarmAgentPipeline:
             parsed = json.loads(response_text)
             is_genuine = parsed.get("is_genuine_severe_vuln", False)
             critique = parsed.get("expert_critique", "No critique provided")
-            
+
             if not is_genuine:
                 logger.warning("Dropped by Layer 1 Appraiser (Qwen): %s", critique)
                 return False, critique
             return True, ""
-            
+
         except Exception as e:
             logger.error("Layer 1 evaluation failed for %s: %s", finding.title, e)
             return False, str(e)
@@ -2844,7 +2844,7 @@ class FarmAgentPipeline:
         import copy
         import json
         import re
-        
+
         try:
             gem_cfg = copy.copy(self.config.llm)
             gem_cfg.provider = "openrouter"
@@ -2878,7 +2878,7 @@ class FarmAgentPipeline:
         try:
             response = await gem_provider.complete(prompt, system=system_prompt, temperature=0.1)
             await gem_provider.close()
-            
+
             response_text = response.strip()
             fence_match = re.search(r"```(?:json)?\s*(.*?)```", response_text, re.DOTALL | re.IGNORECASE)
             if fence_match:
@@ -2891,12 +2891,12 @@ class FarmAgentPipeline:
             parsed = json.loads(response_text)
             approved = parsed.get("final_approval", False)
             reason = parsed.get("rejection_reason", "No reason provided")
-            
+
             if not approved:
                 logger.warning("Vetoed by Layer 2 Supreme Auditor (Gemini 3.5 Flash): %s", reason)
                 return False, reason
             return True, ""
-            
+
         except Exception as e:
             logger.error("Layer 2 audit failed for %s: %s", contribution.title, e)
             return False, str(e)
