@@ -20,7 +20,7 @@ Agent-Farm is an autonomous AI agent ecosystem designed to crawl GitHub, pinpoin
 ### 🧠 Omniscient Context Engine
 Upgraded codebase intelligence using Retrieval-Augmented Generation (RAG) powered by ChromaDB. It recursively discovers internal documentation (`.md`, `.txt`, `.rst`), semantically chunks docs by headers, and indexes them to seed local knowledge. Concurrently, it builds AST-based call graphs (for Python, Rust, Go, TypeScript) to inject precise module dependency links ("imports", "calls", "dependents") directly into the prompt context.
 
-### 🛡️ Anti-Farming Filter
+### 🛡️ Zero-Garbage PR Gatekeepers
 Zero tolerance for typo-fixes, formatting tweaks, or documentation-only PRs (README/doc contributions are strictly banned). Implements a two-layer filter system:
 * **Gate 1: EXPERT APPRAISAL (Qwen-3.7-Max):** Renders strict verdicts on findings to filter out false positives and theoretical edge cases.
 * **Gate 2: REAL-WORLD VALUE CHECK:** Vetoes patches targeting dead or deprecated code blocks to avoid sending low-effort spam to maintainers.
@@ -96,14 +96,14 @@ farm_agent solve <repo_url>
 # Run in Hunt Mode: agresively discover repos and solve issues/bugs
 farm_agent hunt [--rounds N] [--mode analysis|issues|both]
 
-# Run the circular hunt over a predefined list of target repos
-farm_agent hunt-circular <json_path>
-
-# Run Terminator Mode: a relentless continuous execution loop without artificial delays, pulling targets exclusively from the SQLite target_repos table
+# Run the Relentless 24/7 Super Human loop (patrols PRs and hunts targets)
 farm_agent superhuman
 
 # Check open PRs for maintainer comments, answer queries, and push CI auto-fixes
 farm_agent patrol
+
+# Scan and close low-quality/garbage PRs submitted on GitHub
+farm_agent janitor
 
 # Clean up forks where all PRs are closed or merged
 farm_agent cleanup
@@ -113,15 +113,6 @@ farm_agent status
 farm_agent stats
 farm_agent models
 farm_agent leaderboard
-
-# Show Farm-Agent system status — memory, PRs, rate limits
-farm_agent system-status
-
-# Monitor and synchronize Alumni Sync + Full Friendly Repo List
-farm_agent vips
-
-# Test notification channels configured in your environment
-farm_agent notify-test
 
 # Run with thorough, standard, or quick presets
 farm_agent profile <profile_name>

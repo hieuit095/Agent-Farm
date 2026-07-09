@@ -356,6 +356,8 @@ class DockerSandbox:
         timed_out = False
         exit_code: int | None = None
 
+        import shutil
+        import tempfile
 
         logger.info("Starting sandbox container %s for %s", container_name, repo_dir)
 
@@ -392,7 +394,7 @@ class DockerSandbox:
                             break
 
                         if loop.time() >= deadline:
-                            raise TimeoutError()
+                            raise asyncio.TimeoutError()
 
                         try:
                             await asyncio.to_thread(container.reload)
@@ -438,7 +440,7 @@ class DockerSandbox:
 
                 timed_out = False
 
-            except TimeoutError:
+            except asyncio.TimeoutError:
                 timed_out = True
                 logger.warning(
                     "Sandbox container %s exceeded hard execution timeout (%ds); "
