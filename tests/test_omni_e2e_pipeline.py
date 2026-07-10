@@ -434,7 +434,7 @@ async def test_omni_e2e_pipeline(tmp_path):
 
     # 2. Strict model-routing assertions
     called_models = []
-    for instance, args, kwargs in tracker.call_args_list:
+    for instance, _args, _kwargs in tracker.call_args_list:
         model = getattr(instance, "_model", None) or getattr(
             getattr(instance, "config", None), "model", "unknown"
         )

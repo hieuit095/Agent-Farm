@@ -130,7 +130,7 @@ def _discover_docs_sync(repo_path: str) -> dict[str, str]:
             for root_item in os.listdir(repo_path):
                 full_root_item = os.path.join(repo_path, root_item)
                 if os.path.isdir(full_root_item) and root_item.lower() in target_dirs:
-                    for root, dirs, files in os.walk(full_root_item):
+                    for root, _dirs, files in os.walk(full_root_item):
                         for file in files:
                             ext = os.path.splitext(file)[1].lower()
                             if ext in [".md", ".txt", ".rst"]:

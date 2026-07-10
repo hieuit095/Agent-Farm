@@ -270,7 +270,7 @@ async def test_kimi_rejection(mock_clone, mock_guidelines, mock_create_llm, pipe
     pipeline._generator.generate.assert_not_called()
     # Confirm DB lesson recorded
     pipeline._memory.add_filter_lesson.assert_called_once()
-    args, kwargs = pipeline._memory.add_filter_lesson.call_args
+    args, _kwargs = pipeline._memory.add_filter_lesson.call_args
     assert args[1] == 1 # layer=1
     assert "Mocked hallucination" in args[3]
 

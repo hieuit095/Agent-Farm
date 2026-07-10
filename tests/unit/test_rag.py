@@ -42,7 +42,7 @@ This is subsystem B documentation.
 
 def test_chunk_markdown_with_preamble():
     markdown_content = """Preamble content before headers.
-    
+
 # Subsystem A
 This is subsystem A.
 """

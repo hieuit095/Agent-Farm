@@ -149,7 +149,7 @@ def detect_language_from_extensions(repo_path: str | Path) -> str:
 
     skip_dirs = {"node_modules", "target", ".git", "dist", "build", "__pycache__", "vendor", "venv", ".venv", ".pytest_cache", ".mypy_cache"}
     try:
-        for root, dirs, files in os.walk(repo_dir):
+        for _root, dirs, files in os.walk(repo_dir):
             # Prune skip dirs in-place to avoid descending into them
             dirs[:] = [d for d in dirs if d not in skip_dirs]
             for file in files:
@@ -758,7 +758,7 @@ class DockerSandbox:
         # Also check for files with _test.go or test/spec in name
         if not has_tests:
             try:
-                for root, dirs, files in os.walk(repo_dir):
+                for root, _dirs, files in os.walk(repo_dir):
                     if any(d in root for d in [".git", "node_modules", "venv", ".venv"]):
                         continue
                     if any("test" in f.lower() or "spec" in f.lower() for f in files):

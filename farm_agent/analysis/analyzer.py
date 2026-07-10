@@ -896,7 +896,6 @@ class CodeAnalyzer:
 
     def _filter_severity(self, findings: list[Finding]) -> list[Finding]:
         """Filter findings by minimum severity threshold."""
-        order = [Severity.LOW, Severity.MEDIUM, Severity.HIGH, Severity.CRITICAL]
         # Define a mapping from Severity enum to an integer order for comparison
         severity_order = {
             Severity.LOW.value: 0,
@@ -1161,10 +1160,8 @@ class BloodhoundAnalyzer:
             for result in results:
                 file_path = result.get("path", "")
                 if file_path:
-                    try:
+                    with contextlib.suppress(ValueError):
                         file_path = str(Path(file_path).relative_to(repo_path))
-                    except ValueError:
-                        pass
 
                 line_num = result.get("start", {}).get("line", 0)
                 lines_text = result.get("extra", {}).get("lines", "")
@@ -1240,7 +1237,7 @@ Your core directives:
 2. CHAINING: Do not just look at the single line; deduce how this snippet connects to user input or global state to form an exploit chain.
 3. RUTHLESSNESS: If the code relies on "security by obscurity" or weak default configurations, tear it apart.
 
-You will receive a Semgrep match report. 
+You will receive a Semgrep match report.
 - If the code is genuinely secure and cannot be exploited in any scenario, you MUST return [{"file": "NONE"}].
 - If it is exploitable, you must provide the exact attack path.
 
@@ -1362,10 +1359,7 @@ You MUST respond strictly in the following JSON array format. No markdown, no co
             return False
 
         structural_chars = {"{", "}", "(", ")", "[", "]", "=", ">", "<", "+", "-", "*", "/", "!", ";", ":"}
-        if not any(ch in stripped for ch in structural_chars):
-            return False
-
-        return True
+        return any(ch in stripped for ch in structural_chars)
 
     def _parse_audit_response(self, response: str, repo_url: str, forbidden_paths: list[str] | None = None) -> VulnerabilityDossier:
         import re as _re

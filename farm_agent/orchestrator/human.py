@@ -379,7 +379,7 @@ class SuperHumanLoop:
 
             # ── Deterministic action: hunt first, then patrol ──
             try:
-                prs_opened, repos_scanned = await self._do_hunt()
+                prs_opened, _repos_scanned = await self._do_hunt()
                 if prs_opened > 0:
                     self._prs_created_today += prs_opened
                     logger.info(
