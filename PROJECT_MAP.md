@@ -1,18 +1,15 @@
-# PROJECT_MAP.md — Agent-Farm Ground Truth
+# PROJECT_MAP.md — Architecture Blueprint
 
 **Generated:** 2026-06-02  
 **Version:** v4.0.0 — Omniscient Context Engine  
 **Entry Point:** `farm_agent/cli/main.py` → `cli()` (Click-based CLI)  
 **Language:** Python 3.11+  
-**Evidence basis:** Direct code inspection. No assumptions. All line numbers are verified.
 
 ---
 
-## 1. System Overview & Active Tech Stack
+## 1. System Overview & Tech Stack
 
 **What it does:** Autonomous AI agent system that discovers open-source GitHub repositories or scans targets for issues and vulnerabilities. It analyzes code via multi-phase LLM prompts, generates patches, validates them in isolated Docker sandboxes, runs a two-layer expert filter (Qwen → Gemini), and submits pull requests or private disclosures. It also runs a PR Patrol loop to auto-reply to comments, address code reviews, and self-correct CI failures.
-
-Version 4.0.0 introduces the **Omniscient Context Engine**, which recursively discovers repository documentation, chunks it semantically by markdown headers, ingests it into ChromaDB, and maps local module/function dependency linkages to provide deep subsystem context to LLM agents. Furthermore, version 4.0.0 incorporates **Dynamic Bug Verification** (generating and executing Proof-of-Concept exploits in an isolated container sandbox, evaluated via LLM) and **Blast Radius & Regression Auditing** (using baseline test suite runs and downstream dependent analysis to guarantee zero regressions).
 
 | Component | Technology | Source |
 |-----------|------------|--------|
@@ -33,38 +30,108 @@ Version 4.0.0 introduces the **Omniscient Context Engine**, which recursively di
 
 ---
 
-## 2. CLI Commands
+## 2. Directory Structure
 
-The CLI is Click-based and located in [main.py](file:///c:/Users/USER/Documents/GitHub/Agent-Farm/farm_agent/cli/main.py).
-
-| Command | Python Method | Description |
-|---------|--------------|-------------|
-| `farm_agent run` | `FarmAgentPipeline.run()` | Standard run: discover, analyze, generate fixes, run sandbox, check gates, submit PRs. |
-| `farm_agent target <url>` | `FarmAgentPipeline.run_single()` | Process a single target repository. |
-| `farm_agent hunt` | `FarmAgentPipeline.hunt()` | Run multi-round search and analysis (analysis, issues, or both). |
-| `farm_agent hunt-circular` | `FarmAgentPipeline.run_circular()` | Deterministic round-robin target loop from `target_repo.json`. |
-| `farm_agent patrol` | `PRPatrol.patrol()` | Check open PRs for maintainer review comments, reply to questions, and auto-fix CI failures. |
-| `farm_agent superhuman` | `SuperHumanLoop.run_daily_routine()` | 24/7 relentless loop cycling through circular target hunt and patrol operations. |
-| `farm_agent solve <url>` | `IssueSolver` flow | Proactively search for solvable issues in a repo, construct deep fixes, and generate PRs. |
-| `farm_agent analyze <url>` | `FarmAgentPipeline.analyze_only()` | Perform code analysis pass only; do not generate contributions or open issues. |
-| `farm_agent status` | `_show()` | Show targets queue statuses from `target_repos` table. |
-| `farm_agent stats` | `_get_stats()` | Show current runtime and OpenRouter API usage statistics. |
-| `farm_agent cleanup` | `_cleanup()` | Purge local temporary files and cleanup stale forks. |
-| `farm_agent reset-db` | `reset_db()` | Recreate database tables and reset memory database. |
-| `farm_agent config` | `show_config()` | Output the current loaded runtime settings. |
-| `farm_agent vips` | `vips()` | Monitor and synchronize VIP repository radar list. |
-| `farm_agent templates` | `list_templates()` | Display formatting templates for PR descriptions. |
-| `farm_agent profile` | `run_profile()` | Run the pipeline pre-loaded with quick, standard, or thorough presets. |
-| `farm_agent models` | `show_models()` | List the active LLM routing mappings. |
-| `farm_agent leaderboard` | `show_leaderboard()` | Show leaderboards of merged and submitted contributions. |
-| `farm_agent gc` | `gc()` | Purge knowledge base entries older than N days. |
-| `farm_agent janitor` | `SweepAndDestroy()` | Sweeps all open PRs and closes/deletes low-quality/garbage contributions. |
+```
+.
+├── Dockerfile
+├── LICENSE
+├── Makefile
+├── PROJECT_MAP.md
+├── README.md
+├── config.example.yaml
+├── docker-compose.yml
+├── farm_agent/                         # Package root (version = "4.0.0")
+│   ├── __init__.py
+│   ├── agents/
+│   │   └── registry.py                 # Task agent configurations
+│   ├── analysis/
+│   │   ├── analyzer.py                 # CodeAnalyzer & BloodhoundAnalyzer
+│   │   └── mapper.py                   # RepoMapper (AST/regex dependency graphing)
+│   ├── cli/
+│   │   └── main.py                     # Click CLI — command registrations
+│   ├── core/
+│   │   ├── config.py                   # Pydantic v2 config and YAML loading
+│   │   ├── daily_log.py                # Formats daily markdown activity logs
+│   │   ├── exceptions.py               # System exception types hierarchy
+│   │   ├── leaderboard.py              # Leaderboard stat collections
+│   │   ├── logger.py                   # Rotating file logging system setup
+│   │   ├── middleware.py               # Context middleware chain layers
+│   │   ├── models.py                   # Core Pydantic data structures definitions
+│   │   ├── notifier.py                 # Telegram notifications integration
+│   │   ├── profiles.py                 # Thorough, quick, and standard run configurations
+│   │   ├── quotas.py                   # OpenRouter usage quota controllers
+│   │   ├── rag.py                      # ChromaDB vector DB context loaders
+│   │   ├── retry.py                    # Retry decorators for GitHub/LLM interfaces
+│   │   └── sandbox.py                  # DockerSandbox engine
+│   ├── generator/
+│   │   ├── engine.py                   # ContributionGenerator
+│   │   ├── poc.py                      # PoCGenerator (PoC validation & LLM evaluation)
+│   │   ├── reviewer.py                 # ReviewerAgent
+│   │   └── scorer.py                   # QAHardcoreScorer
+│   ├── github/
+│   │   ├── client.py                   # Async-retrying GitHub REST and GraphQL Client
+│   │   ├── discovery.py                # Target network search and crawler discoverers
+│   │   ├── guidelines.py               # Guidelines, PR templates, and subsystem doc discovery
+│   │   └── security_gate.py            # Identifies private security disclosure files
+│   ├── issues/
+│   │   └── solver.py                   # IssueSolver (solves issues, multi-file deep planner)
+│   ├── llm/
+│   │   ├── agents.py                   # LLM agent prompts and routing models
+│   │   ├── context.py                  # Generator system instruction builders
+│   │   ├── models.py                   # Model registry definitions
+│   │   ├── provider.py                 # OpenRouter integration handlers
+│   │   └── router.py                   # Task router mapping
+│   ├── notifications/
+│   │   └── notifier.py
+│   ├── orchestrator/
+│   │   ├── human.py                    # SuperHumanLoop relentless daily scheduler
+│   │   ├── memory.py                   # Persistence memory sqlite connection interface
+│   │   └── pipeline.py                 # Pipeline implementation
+│   ├── plugins/
+│   ├── pr/
+│   │   ├── manager.py                  # Pull Request manager (forking, branches, commits)
+│   │   └── patrol.py                   # PR Patrol (reviews comments, fixes CI errors)
+│   ├── templates/
+│   │   └── registry.py
+│   └── tools/
+│       └── protocol.py                 # CLI tool protocols
+├── pyproject.toml
+├── requirements.txt
+├── scripts/
+├── secret_findings/
+├── sg-extract/
+├── start.bat
+├── start.sh
+├── target_repo.json
+└── tests/
+```
 
 ---
 
-## 3. Core Execution Pipelines
+## 3. Core Module Dependency Graph
 
-### 3A. Standard Pipeline — `_process_repo()` ([pipeline.py:1172](file:///c:/Users/USER/Documents/GitHub/Agent-Farm/farm_agent/orchestrator/pipeline.py#L1172))
+```mermaid
+graph TD
+    CLI[farm_agent/cli/main.py] --> Orchestrator[farm_agent/orchestrator/pipeline.py]
+    Orchestrator --> GitHub[farm_agent/github/client.py]
+    Orchestrator --> Analysis[farm_agent/analysis/analyzer.py]
+    Orchestrator --> Generation[farm_agent/generator/engine.py]
+    Orchestrator --> RAG[farm_agent/core/rag.py]
+    Analysis --> Bloodhound[BloodhoundAnalyzer]
+    Analysis --> Mapper[RepoMapper]
+    Generation --> PoC[PoCGenerator]
+    Generation --> QA[QAHardcoreScorer]
+    Generation --> Sandbox[DockerSandbox]
+    Orchestrator --> PR[farm_agent/pr/manager.py]
+    PR --> Patrol[PRPatrol]
+```
+
+---
+
+## 4. Core Execution Loops / Entry Points
+
+### 4A. Standard Pipeline — `_process_repo()` ([pipeline.py:1172](file:///c:/Users/USER/Documents/GitHub/Agent-Farm/farm_agent/orchestrator/pipeline.py#L1172))
 
 Processes a single repository through the full contribution pipeline:
 
@@ -159,9 +226,7 @@ _process_repo(repo)
   └─ PRManager.create_pr()                              # pipeline.py:2017
 ```
 
----
-
-### 3B. Circular target pipeline — `run_circular()` ([pipeline.py:834](file:///c:/Users/USER/Documents/GitHub/Agent-Farm/farm_agent/orchestrator/pipeline.py#L834))
+### 4B. Circular target pipeline — `run_circular()` ([pipeline.py:834](file:///c:/Users/USER/Documents/GitHub/Agent-Farm/farm_agent/orchestrator/pipeline.py#L834))
 
 Circular target pipeline loop extracting target repos from the local SQLite queue:
 
@@ -207,60 +272,7 @@ run_circular()
 
 ---
 
-## 4. Adaptive Concurrency & Throttling
-
-To prevent LLM rate limit exhaustion (HTTP 429 thundering herd) during parallel executions, the system utilizes the `AdaptiveConcurrencyManager` ([pipeline.py:214](file:///c:/Users/USER/Documents/GitHub/Agent-Farm/farm_agent/orchestrator/pipeline.py#L214)):
-
-1. **Safe Concurrency Limit**: Initial limit is parsed from the config (`config.pipeline.llm_concurrency_cap`).
-2. **Dynamic Scaling on Rate Limit**: If an `LLMRateLimitError` (HTTP 429) is caught:
-   - Concurrency collapses immediately down to **1** active slot.
-   - Activates a cooldown period specified by `rate_limit_cooldown_sec` (defaults to 300s).
-3. **Ramp-back Mechanism**: Once the cooldown timer expires, a background task gradually ramps concurrency back up by adding **1 slot every 60 seconds** until the original cap is restored.
-
----
-
-## 5. PR Patrol Daemon & CI Auto-Fix Loop
-
-The `PRPatrol` module ([patrol.py:152](file:///c:/Users/USER/Documents/GitHub/Agent-Farm/farm_agent/pr/patrol.py#L152)) runs continuously to manage active contributions:
-
-1. **Feedback Collection**: Queries open and pending PRs, pulling PR reviews, reviewer comments, and commit statuses.
-2. **Comment Classification**: Feeds feedback to an LLM classifier, routing them into:
-   - `CODE_FIX`: Requests to modify code implementation.
-   - `QUESTION`: Queries requesting clarifications (the bot replies with a direct, professional message).
-   - `CLA_RECHECK`: Requests for signing CLAs (bot triggers recheck workflow).
-   - `CI_FAILURE`: System CI pipeline failures.
-   - `GREETING` / `TRIVIAL`: Ignores or handles simple conversational remarks.
-3. **Guardrails & Interaction Caps**:
-   - **Discussion Limits**: Auto-reply replies are tracked in the database and capped at `max_discussion_replies` (default 3) per PR.
-   - **CI Retry Limits**: Total CI auto-fix commits are tracked and capped at `max_ci_retries` (default 3) per PR. Exceeding either cap triggers auto-closure of the PR to prevent spam.
-4. **CI Auto-Fix Cycle** ([patrol.py:1497](file:///c:/Users/USER/Documents/GitHub/Agent-Farm/farm_agent/pr/patrol.py#L1497)):
-   - Parse raw logs, sanitize checks names, and isolate compiler tracebacks.
-   - Use `_guess_file_from_traceback` (line 2004) to identify the buggy source file.
-   - Launch LLM to draft a CI fix, mounting the workspace to the isolated Docker sandbox.
-   - Auto-run local test commands. If sandbox validation passes, commit and push the fix directly.
-
----
-
-## 6. Omniscient Context Engine & Subsystems
-
-Version 4.0.0 upgrades the system's codebase understanding from superficial file scans to deep documentation and linkage maps:
-
-1. **Documentation Discovery**:
-   - In `guidelines.py`, `discover_subsystem_docs()` searches for markdown (`.md`), text (`.txt`), and reStructuredText (`.rst`) files.
-   - Focuses recursively on target folders: `docs/`, `architecture/`, `wiki/`, and the root `README.md`.
-   - Utilizes `asyncio.to_thread` for non-blocking disk reads.
-2. **Semantic Header-Based Chunking**:
-   - In `rag.py`, documentation markdown is split cleanly by headers (H1, H2, and H3).
-   - Overly large sections are sub-chunked while retaining original header title context.
-   - Chunks are stored in ChromaDB using a cosine metric collection, tagged with metadata (`file_path`, `folder_path`, `header_title`, `is_doc: "true"`).
-3. **Subsystem Dependency Graphing**:
-   - In `mapper.py`, `RepoMapper.get_module_dependencies()` constructs local call linkages.
-   - Uses `ast` parsing for Python files to map package imports and external `ast.Call`/`ast.Attribute` expressions.
-   - Employs optimized regex patterns for Go (`import`), Rust (`use`), and JavaScript/TypeScript to extract dependency call paths, mapping `"imports"`, `"calls"`, and `"dependents"`.
-
----
-
-## 7. SQLite Schema & Persistence
+## 5. Database/State Schema
 
 Database file resides in `data/memory.db` and operates in **WAL (Write-Ahead Logging)** mode. Composite indices prevent full table scans.
 
@@ -297,99 +309,3 @@ Database file resides in `data/memory.db` and operates in **WAL (Write-Ahead Log
 ### Optimization & Indices
 * **`idx_api_usage`**: Composite index on `(provider, timestamp)` to optimize LLM call counts and quota checks.
 * **`idx_api_usage_cleanup`**: Index on `(timestamp)` to optimize daily purge queries.
-
----
-
-## 8. Directory & Module Architecture
-
-```
-.                                       # Workspace Root (v4.0.0)
-├── Dockerfile                          # Stage 1 builder (wheel creation) + Stage 2 lean runtime v4.0.0
-├── docker-compose.yml                  # agent-farm service definition with volumes (data/, logs/, secret_findings/)
-├── start.sh                            # Unix quick start wrapper script
-├── start.bat                           # Windows quick start wrapper script
-│
-├── farm_agent/                         # Package root (version = "4.0.0")
-│   ├── __init__.py
-│   │
-│   ├── cli/
-│   │   └── main.py                     # Click CLI — command registrations
-│   │
-│   ├── core/
-│   │   ├── config.py                   # Pydantic v2 config and YAML loading
-│   │   ├── daily_log.py                # Formats daily markdown activity logs
-│   │   ├── exceptions.py               # System exception types hierarchy
-│   │   ├── leaderboard.py              # Leaderboard stat collections
-│   │   ├── logger.py                   # Rotating file logging system setup
-│   │   ├── middleware.py               # Context middleware chain layers
-│   │   ├── models.py                   # Core Pydantic data structures definitions
-│   │   ├── notifier.py                 # Telegram notifications integration
-│   │   ├── profiles.py                 # Thorough, quick, and standard run configurations
-│   │   ├── quotas.py                   # OpenRouter usage quota controllers
-│   │   ├── rag.py                      # ChromaDB vector DB context loaders (with semantic markdown header chunking)
-│   │   ├── retry.py                    # Retry decorators for GitHub/LLM interfaces
-│   │   └── sandbox.py                  # DockerSandbox engine with Polyglot Guillotine, PoC execution context mapping
-│   │
-│   ├── analysis/
-│   │   ├── analyzer.py                 # CodeAnalyzer (parallelized security, quality, UX scanners) & BloodhoundAnalyzer
-│   │   └── mapper.py                   # RepoMapper (AST/regex dependency graphing)
-│   │
-│   ├── generator/
-│   │   ├── engine.py                   # ContributionGenerator (Patch and file correction)
-│   │   ├── poc.py                      # PoCGenerator (PoC validation & LLM evaluation)
-│   │   ├── reviewer.py                 # ReviewerAgent (Self-reflective code auditor with Blast Radius checks)
-│   │   └── scorer.py                   # QAHardcoreScorer (Qwen-based QA grader)
-│   │
-│   ├── github/
-│   │   ├── client.py                   # Async-retrying GitHub REST and GraphQL Client
-│   │   ├── discovery.py                # Target network search and crawler discoverers
-│   │   ├── guidelines.py               # Guidelines, PR templates, and subsystem doc discovery
-│   │   └── security_gate.py            # Identifies private security disclosure files
-│   │
-│   ├── issues/
-│   │   └── solver.py                   # IssueSolver (solves issues, multi-file deep planner)
-│   │
-│   ├── llm/
-│   │   ├── agents.py                   # LLM agent prompts and routing models
-│   │   ├── context.py                  # Generator system instruction builders
-│   │   ├── models.py                   # Model registry definitions
-│   │   ├── provider.py                 # OpenRouter integration handlers
-│   │   └── router.py                   # Task router mapping
-│   │
-│   ├── orchestrator/
-│   │   ├── memory.py                   # Persistence memory sqlite connection interface
-│   │   ├── pipeline.py                 # Pipeline (Standard & Circular pipelines implementation)
-│   │   └── human.py                    # SuperHumanLoop relentless daily scheduler
-│   │
-│   ├── pr/
-│   │   ├── manager.py                  # Pull Request manager (forking, branches, commits)
-│   │   ├── patrol.py                   # PR Patrol (reviews comments, fixes CI errors)
-│   │   └── janitor.py                  # PR Janitor (sweeps and destroys garbage PRs)
-│   │
-│   ├── agents/
-│   │   └── registry.py                 # Task agent configurations
-│   │
-│   └── tools/
-│       └── protocol.py                 # CLI tool protocols
-```
-
----
-
-## 9. Error Handling & Fallback Matrix
-
-| Scenario | Behavior |
-|----------|----------|
-| Missing runtime config file | Auto-defaults are used. Loads token from `GITHUB_TOKEN` environment variable or fallbacks to `gh auth token` CLI |
-| Qwen / Gemini API failure | **Fail-Closed**: Instantiation throws error, drops the current finding, and skips generation |
-| Docker Daemon offline | Sandbox functions return error, blocking PR submissions |
-| Sandbox Execution Timeout | Hard timeout wrapper (`timeout --signal=KILL 60s`) terminates execution. Exit code 137. |
-| Database WAL mode error | Logs warning and automatically reverts journal mode to `DELETE` |
-| Primary Token Rate Limited | Swaps active auth headers to configured `secondary_tokens` list |
-| GitHub API Error (502/503/429) | Backs off. Jittered retry: 5 retries, base 10s, max 120s, ±25% random jitter |
-| DEV-QA Cycles fail | Marks target status as `COMPLETED_TOO_COMPLEX` to avoid loops |
-| Maintainer marked Hostile | Project repository is blocked and blacklisted in `blacklisted_repos` |
-| Private Disclosure target | Saved to `/app/secret_findings/{repo}.json`, skips PR creation, sends Telegram/Discord/Slack alert |
-
----
-
-*All evidence anchored to source files. All line numbers verified by direct inspection. No speculation.*
