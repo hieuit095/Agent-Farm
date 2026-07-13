@@ -74,7 +74,7 @@ class LLMConfig(BaseModel):
             self.api_key = os.environ.get("OPENROUTER_API_KEY", "")
 
         if self.model == "gemini-2.5-flash":
-             self.model = "deepseek/deepseek-v4-flash"
+            self.model = "deepseek/deepseek-v4-flash"
         return self
 
 
@@ -95,13 +95,30 @@ class AnalysisConfig(BaseModel):
     # by the Orchestrator to prevent spam PRs against tests/examples/docs.
     forbidden_paths: list[str] = Field(
         default_factory=lambda: [
-            "tests", "test", "testing",
-            "examples", "example", "example_projects", "security_examples",
-            "fixtures", "fixture", "mocks", "mock",
-            "docs", "documentation", "doc",
-            "benchmarks", "benchmark", "perf",
-            "test_data", "testdata", "sample_data", "samples",
-            "demo", "demos", "playground",
+            "tests",
+            "test",
+            "testing",
+            "examples",
+            "example",
+            "example_projects",
+            "security_examples",
+            "fixtures",
+            "fixture",
+            "mocks",
+            "mock",
+            "docs",
+            "documentation",
+            "doc",
+            "benchmarks",
+            "benchmark",
+            "perf",
+            "test_data",
+            "testdata",
+            "sample_data",
+            "samples",
+            "demo",
+            "demos",
+            "playground",
         ]
     )
 
@@ -111,7 +128,14 @@ class AnalysisConfig(BaseModel):
 
     # Semgrep radar
     semgrep_rulesets: list[str] = Field(
-        default_factory=lambda: ["p/security-audit", "p/cwe-top-25", "p/default", "p/golang", "p/rust", "p/smart-contracts"]  # noqa: E501
+        default_factory=lambda: [
+            "p/security-audit",
+            "p/cwe-top-25",
+            "p/default",
+            "p/golang",
+            "p/rust",
+            "p/smart-contracts",
+        ]
     )
 
 
@@ -242,6 +266,7 @@ def load_config(path: str | Path | None = None) -> FarmAgentConfig:
     Automatically loads .env file from current working directory.
     """
     from dotenv import load_dotenv
+
     load_dotenv()
 
     search_paths = [

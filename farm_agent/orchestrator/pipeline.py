@@ -190,6 +190,7 @@ def _read_all_repo_files_sync(repo_path: str) -> dict[str, str]:
     import os
 
     from farm_agent.analysis.mapper import CODE_EXTENSIONS
+
     file_contents = {}
     if not os.path.exists(repo_path):
         return file_contents
@@ -281,7 +282,8 @@ class AdaptiveConcurrencyManager:
                 self._current_max = min(self._current_max + 1, target)
                 logger.info(
                     "[CRIT-03] Ramping concurrency back up: %d/%d",
-                    self._current_max, target,
+                    self._current_max,
+                    target,
                 )
             await asyncio.sleep(ramp_interval)
 
@@ -390,6 +392,7 @@ class FarmAgentPipeline:
 
         # Generator — now with memory for repo_preferences and dedicated v4-pro model
         import copy
+
         generator_cfg = copy.copy(self.config.llm)
         generator_cfg.provider = "openrouter"
         generator_cfg.model = "deepseek/deepseek-v4-pro"
@@ -533,6 +536,7 @@ class FarmAgentPipeline:
                         return await self._process_repo(repo, dry_run, remaining_prs)
                     except Exception as e:
                         from farm_agent.core.exceptions import LLMRateLimitError
+
                         if isinstance(e, LLMRateLimitError):
                             await self._notify_rate_limit()
                         msg = f"Error processing {repo.full_name}: {e}"
@@ -898,15 +902,26 @@ class FarmAgentPipeline:
                 memory=self._memory,
             )
             import os
+
             try:
                 load1, load5, load15 = os.getloadavg()
-                logger.info("[CPU PROFILING] Starting Bloodhound Semgrep scan. Load: %.2f, %.2f, %.2f", load1, load5, load15)  # noqa: E501
+                logger.info(
+                    "[CPU PROFILING] Starting Bloodhound Semgrep scan. Load: %.2f, %.2f, %.2f",
+                    load1,
+                    load5,
+                    load15,
+                )
             except Exception:
                 logger.info("[CPU PROFILING] Starting Bloodhound Semgrep scan.")
             dossier = await bloodhound.run_bloodhound(repo)
             try:
                 load1, load5, load15 = os.getloadavg()
-                logger.info("[CPU PROFILING] Finished Bloodhound Semgrep scan. Load: %.2f, %.2f, %.2f", load1, load5, load15)  # noqa: E501
+                logger.info(
+                    "[CPU PROFILING] Finished Bloodhound Semgrep scan. Load: %.2f, %.2f, %.2f",
+                    load1,
+                    load5,
+                    load15,
+                )
             except Exception:
                 logger.info("[CPU PROFILING] Finished Bloodhound Semgrep scan.")
 
@@ -946,15 +961,17 @@ class FarmAgentPipeline:
 
             dossier.vulnerabilities = production_vulns
 
-        # ── Build RepoContext with vulnerable file contents ───────────
+            # ── Build RepoContext with vulnerable file contents ───────────
             # Use GraphQL for repo tree (falls back to REST on any error)
             try:
-                file_tree = await self._github.fetch_repo_structure_graphql(
-                    repo.owner, repo.name
-                )
+                file_tree = await self._github.fetch_repo_structure_graphql(repo.owner, repo.name)
             except Exception as exc:
-                logger.info("GraphQL tree fetch failed for %s/%s, falling back to REST: %s",
-                             repo.owner, repo.name, exc)
+                logger.info(
+                    "GraphQL tree fetch failed for %s/%s, falling back to REST: %s",
+                    repo.owner,
+                    repo.name,
+                    exc,
+                )
                 file_tree = await self._github.get_file_tree(repo.owner, repo.name)
             relevant_files: dict[str, str] = {}
             for vuln in dossier.vulnerabilities:
@@ -983,6 +1000,7 @@ class FarmAgentPipeline:
             import copy
 
             from farm_agent.llm.provider import create_llm_provider
+
             qa_cfg = copy.deepcopy(self.config.llm)
             qa_cfg.provider = "openrouter"
             qa_cfg.model = "qwen/qwen3.7-max"
@@ -1005,13 +1023,17 @@ class FarmAgentPipeline:
             for cycle in range(MAX_DEV_QA_CYCLES):
                 logger.info(
                     "Starting DEV-QA Cycle %d/%d for %s",
-                    cycle + 1, MAX_DEV_QA_CYCLES, target.repo_url,
+                    cycle + 1,
+                    MAX_DEV_QA_CYCLES,
+                    target.repo_url,
                 )
 
                 # 1. DEV generates patches (auto-injects QA Lessons + failure context)
                 try:
                     gen_result: GenerationResult = await self._generator.generate_from_dossier(
-                        dossier, context, github_client=self._github,
+                        dossier,
+                        context,
+                        github_client=self._github,
                         failure_context=failure_context,
                     )
                     contributions = gen_result.contributions
@@ -1042,12 +1064,14 @@ class FarmAgentPipeline:
 
                 # 2. QA evaluates the first (best) contribution
                 qa_result: QAResult = await scorer.evaluate(
-                    dossier, contributions[0],
+                    dossier,
+                    contributions[0],
                     repo_style_guide=repo_style_guide_text,
                 )
                 logger.info(
                     "QA Score: %.1f/10.0 — Approved: %s",
-                    qa_result.score, qa_result.approved,
+                    qa_result.score,
+                    qa_result.approved,
                 )
 
                 if qa_result.approved:
@@ -1056,16 +1080,15 @@ class FarmAgentPipeline:
                     winning_contribution = contributions[0]
                     logger.info(
                         "QA PASSED on cycle %d with score %.1f",
-                        cycle + 1, qa_result.score,
+                        cycle + 1,
+                        qa_result.score,
                     )
                     break
                 else:
                     # 3. QA rejected — record critiques as lessons and inject into failure context
                     critique_text = "; ".join(qa_result.critiques)
                     for critique in qa_result.critiques:
-                        await self._memory.record_qa_lesson(
-                            repo.full_name, critique
-                        )
+                        await self._memory.record_qa_lesson(repo.full_name, critique)
                     failure_context += (
                         f"\n[CYCLE {cycle + 1} QA REJECTED — Score: {qa_result.score:.1f}/10.0]"
                         f"\nQA Critiques: {critique_text}"
@@ -1080,13 +1103,22 @@ class FarmAgentPipeline:
                 # ── Proceed to PR submission ─────────────────────────────
 
                 # Layer 2: Supreme Auditor
-                layer2_approved, reject_reason = await self._layer2_supreme_audit(winning_contribution, failure_context)  # noqa: E501
+                layer2_approved, reject_reason = await self._layer2_supreme_audit(
+                    winning_contribution, failure_context
+                )
                 if not layer2_approved:
                     logger.warning("🚫 Vetoed by Layer 2 Supreme Auditor (Gemini). Skipping PR.")
                     if self._memory:
-                        patch_str = "\n".join(f"File: {c.path}\n```\n{c.new_content}\n```" for c in winning_contribution.changes)  # noqa: E501
-                        await self._memory.add_filter_lesson(repo.full_name, 2, patch_str, reject_reason)  # noqa: E501
-                    logger.info("Recorded Layer 2 lesson for %s: %s...", repo.full_name, reject_reason[:50])  # noqa: E501
+                        patch_str = "\n".join(
+                            f"File: {c.path}\n```\n{c.new_content}\n```"
+                            for c in winning_contribution.changes
+                        )
+                        await self._memory.add_filter_lesson(
+                            repo.full_name, 2, patch_str, reject_reason
+                        )
+                    logger.info(
+                        "Recorded Layer 2 lesson for %s: %s...", repo.full_name, reject_reason[:50]
+                    )
                     await discovery.mark_status(target.repo_url, "COMPLETED_TOO_COMPLEX")
                     return result
 
@@ -1104,7 +1136,9 @@ class FarmAgentPipeline:
                         "Approved finding saved to secret_findings/. Aborting PR for %s.",
                         target.repo_url,
                     )
-                    await discovery.mark_status(target.repo_url, "COMPLIANCE_SKIP_PRIVATE_DISCLOSURE")  # noqa: E501
+                    await discovery.mark_status(
+                        target.repo_url, "COMPLIANCE_SKIP_PRIVATE_DISCLOSURE"
+                    )
                     return result
 
                 result.repos_analyzed += 1
@@ -1135,7 +1169,8 @@ class FarmAgentPipeline:
                 logger.warning(
                     "Bailout: Complexity exceeded after %d DEV-QA cycles for %s. "
                     "Cutting losses to save tokens.",
-                    MAX_DEV_QA_CYCLES, target.repo_url,
+                    MAX_DEV_QA_CYCLES,
+                    target.repo_url,
                 )
                 await discovery.mark_status(target.repo_url, "COMPLETED_TOO_COMPLEX")
 
@@ -1190,9 +1225,13 @@ class FarmAgentPipeline:
         baseline_exit_code = 0
         baseline_test_status = "tests_missing"
         if self._sandbox is not None:
-            logger.info("🧪 [Phase 4] Running baseline native test suite on unpatched repository...")  # noqa: E501
+            logger.info(
+                "🧪 [Phase 4] Running baseline native test suite on unpatched repository..."
+            )
             try:
-                baseline_tests = await self._sandbox.run_native_test_suite(repo_path, language=repo.language)  # noqa: E501
+                baseline_tests = await self._sandbox.run_native_test_suite(
+                    repo_path, language=repo.language
+                )
                 baseline_exit_code = baseline_tests.get("exit_code", 0)
                 baseline_test_status = baseline_tests.get("status", "tests_missing")
                 logger.info(
@@ -1201,7 +1240,9 @@ class FarmAgentPipeline:
                     baseline_exit_code,
                 )
             except Exception as exc:
-                logger.warning("🧪 [Phase 4] Baseline native test suite check failed (non-fatal): %s", exc)  # noqa: E501
+                logger.warning(
+                    "🧪 [Phase 4] Baseline native test suite check failed (non-fatal): %s", exc
+                )
 
         # Check AI policy — skip repos that ban AI-generated PRs
         if await self._check_ai_policy(repo):
@@ -1224,8 +1265,11 @@ class FarmAgentPipeline:
 
         # Fetch repo guidelines (CONTRIBUTING.md, PR template)
         guidelines = await fetch_repo_guidelines(
-            self._github, repo.owner, repo.name,
-            memory=self._memory, llm=self._llm,
+            self._github,
+            repo.owner,
+            repo.name,
+            memory=self._memory,
+            llm=self._llm,
         )
 
         # Discover subsystem documentation files inside the cloned repository
@@ -1235,9 +1279,15 @@ class FarmAgentPipeline:
         if guidelines.subsystem_docs:
             try:
                 from farm_agent.core.rag import RepoIndexer
+
                 indexer = RepoIndexer()
-                await asyncio.to_thread(indexer.index_repo, repo.full_name, guidelines.subsystem_docs)  # noqa: E501
-                logger.info("Indexed %d subsystem documentation files in ChromaDB", len(guidelines.subsystem_docs))  # noqa: E501
+                await asyncio.to_thread(
+                    indexer.index_repo, repo.full_name, guidelines.subsystem_docs
+                )
+                logger.info(
+                    "Indexed %d subsystem documentation files in ChromaDB",
+                    len(guidelines.subsystem_docs),
+                )
             except Exception as e:
                 logger.warning("Failed to index subsystem docs in ChromaDB: %s", e)
 
@@ -1296,6 +1346,7 @@ class FarmAgentPipeline:
         if analysis.findings:
             try:
                 from farm_agent.analysis.mapper import RepoMapper
+
                 mapper = RepoMapper()
 
                 # Read all repository files to construct the full dependency graph
@@ -1306,7 +1357,10 @@ class FarmAgentPipeline:
                     if finding.file_path:
                         deps = mapper.get_module_dependencies(finding.file_path)
                         finding.metadata["module_dependencies"] = deps
-                logger.info("Successfully injected dependency graphs into %d findings", len(analysis.findings))  # noqa: E501
+                logger.info(
+                    "Successfully injected dependency graphs into %d findings",
+                    len(analysis.findings),
+                )
             except Exception as e:
                 logger.warning("Failed to construct dependency graph: %s", e)
 
@@ -1476,7 +1530,6 @@ class FarmAgentPipeline:
                         finding.impact_level.value,
                     )
                     continue
-
 
             # ── Gate 2: ABSOLUTE DOCS BAN — README_FIX / DOCS_IMPROVE ──────
             # Zero-tolerance: documentation contributions are FORBIDDEN.
@@ -1741,7 +1794,6 @@ class FarmAgentPipeline:
 
         # Generate contributions for validated findings
         for finding in validated_findings:
-
             # ── Hybrid Contribution Router ─────────────────────────────────
             # Route A — Direct PR (Firefighter): SECURITY_FIX or CRITICAL/HIGH severity
             # Route B — Issue-First (Polite Senior): everything else
@@ -1764,6 +1816,7 @@ class FarmAgentPipeline:
 
                 from farm_agent.generator.poc import PoCGenerator
                 from farm_agent.llm.provider import create_llm_provider
+
                 poc_cfg = copy.copy(self.config.llm)
                 poc_cfg.provider = "openrouter"
                 poc_cfg.model = "deepseek/deepseek-v4-pro"
@@ -1771,7 +1824,9 @@ class FarmAgentPipeline:
                 try:
                     poc_gen = PoCGenerator(poc_llm)
                     target_file_content = relevant_files.get(finding.file_path, "")
-                    poc_filename, poc_content, run_command = await poc_gen.generate_poc(finding, target_file_content)  # noqa: E501
+                    poc_filename, poc_content, run_command = await poc_gen.generate_poc(
+                        finding, target_file_content
+                    )
 
                     if poc_filename and poc_content and run_command:
                         logger.info("🧪 [Phase 3] Executing PoC validation script in sandbox...")
@@ -1805,13 +1860,21 @@ class FarmAgentPipeline:
                                 )
                             continue
 
-                        logger.info("✅ [Phase 3] Vulnerability verified successfully: %s. Proceeding to fix generation.", reason)  # noqa: E501
+                        logger.info(
+                            "✅ [Phase 3] Vulnerability verified successfully: %s. Proceeding to fix generation.",  # noqa: E501
+                            reason,
+                        )
                     else:
-                        logger.warning("⚠️ [Phase 3] PoC Generator did not return a valid script. Falling back to direct fix generation.")  # noqa: E501
+                        logger.warning(
+                            "⚠️ [Phase 3] PoC Generator did not return a valid script. Falling back to direct fix generation."  # noqa: E501
+                        )
                 finally:
                     await poc_llm.close()
             except Exception as e:
-                logger.warning("⚠️ [Phase 3] PoC verification gate encountered an error: %s. Falling back to direct fix generation.", e)  # noqa: E501
+                logger.warning(
+                    "⚠️ [Phase 3] PoC verification gate encountered an error: %s. Falling back to direct fix generation.",  # noqa: E501
+                    e,
+                )
 
             logger.info("🛠️ Generating fix for: %s", finding.title)
             self._set_task("code_gen")
@@ -1866,22 +1929,29 @@ class FarmAgentPipeline:
                     error_log = ""
 
                     # --- Pass 1: Efficacy Validation (PoC checks) ---
-                    if 'poc_filename' in locals() and poc_filename and poc_content and run_command:
-                        logger.info("🧪 [Phase 4: Efficacy] Executing PoC validation script on patched codebase...")  # noqa: E501
+                    if "poc_filename" in locals() and poc_filename and poc_content and run_command:
+                        logger.info(
+                            "🧪 [Phase 4: Efficacy] Executing PoC validation script on patched codebase..."  # noqa: E501
+                        )
                         poc_result = await self._sandbox.verify_vulnerability_with_poc(
                             repo_path=patched_repo_path,
                             poc_filename=poc_filename,
                             poc_content=poc_content,
                             run_command=run_command,
                         )
-                        logger.info("🧪 [Phase 4: Efficacy] Evaluating PoC validation outcome via LLM...")  # noqa: E501
+                        logger.info(
+                            "🧪 [Phase 4: Efficacy] Evaluating PoC validation outcome via LLM..."
+                        )
                         is_triggered, reason = await poc_gen.evaluate_poc_result(
                             finding=finding,
                             poc_content=poc_content,
                             sandbox_output=poc_result,
                         )
                         if is_triggered:
-                            logger.warning("🚫 [Phase 4: Efficacy] Patch FAILED efficacy validation (vulnerability still triggered!). Reason: %s", reason)  # noqa: E501
+                            logger.warning(
+                                "🚫 [Phase 4: Efficacy] Patch FAILED efficacy validation (vulnerability still triggered!). Reason: %s",  # noqa: E501
+                                reason,
+                            )
                             is_success = False
                             error_log = f"EFFICACY FAILURE: The vulnerability could still be triggered after applying the patch. Reason: {reason}\nPoC Stderr: {poc_result.get('stderr')}"  # noqa: E501
                         else:
@@ -1889,13 +1959,25 @@ class FarmAgentPipeline:
 
                     # --- Pass 2: Regression Auditor (Native tests checks) ---
                     if is_success:
-                        logger.info("🧪 [Phase 4: Regression] Running native test suite on patched codebase...")  # noqa: E501
-                        patched_tests = await self._sandbox.run_native_test_suite(patched_repo_path, language=repo.language)  # noqa: E501
+                        logger.info(
+                            "🧪 [Phase 4: Regression] Running native test suite on patched codebase..."  # noqa: E501
+                        )
+                        patched_tests = await self._sandbox.run_native_test_suite(
+                            patched_repo_path, language=repo.language
+                        )
                         patched_exit_code = patched_tests.get("exit_code", 0)
                         patched_status = patched_tests.get("status", "tests_missing")
 
-                        if baseline_exit_code == 0 and patched_exit_code != 0 and patched_status == "failed":  # noqa: E501
-                            logger.warning("🚫 [Phase 4: Regression] Patch FAILED native tests (regression detected!). Status: %s, Exit Code: %s", patched_status, patched_exit_code)  # noqa: E501
+                        if (
+                            baseline_exit_code == 0
+                            and patched_exit_code != 0
+                            and patched_status == "failed"
+                        ):
+                            logger.warning(
+                                "🚫 [Phase 4: Regression] Patch FAILED native tests (regression detected!). Status: %s, Exit Code: %s",  # noqa: E501
+                                patched_status,
+                                patched_exit_code,
+                            )
                             is_success = False
                             raw_stderr = patched_tests.get("stderr", "")
                             raw_stdout = patched_tests.get("stdout", "")
@@ -1903,13 +1985,17 @@ class FarmAgentPipeline:
                             err_trunc = raw_stderr[-2000:] if raw_stderr else ""
                             error_log = f"REGRESSION FAILURE: Native test suite failed after applying the patch (it passed in the baseline).\nSTDOUT:\n{out_trunc}\n\nSTDERR:\n{err_trunc}"  # noqa: E501
                         elif patched_status == "tests_missing":
-                            logger.info("🧪 [Phase 4: Compile Check] No tests found. Running basic compilation/syntax check in sandbox...")  # noqa: E501
+                            logger.info(
+                                "🧪 [Phase 4: Compile Check] No tests found. Running basic compilation/syntax check in sandbox..."  # noqa: E501
+                            )
                             compile_result = await self._sandbox.run_in_sandbox(
                                 repo_path=patched_repo_path,
                                 command=None,
                             )
                             if compile_result.get("exit_code") != 0:
-                                logger.warning("🚫 [Phase 4: Compile Check] Patch FAILED compilation/syntax check!")  # noqa: E501
+                                logger.warning(
+                                    "🚫 [Phase 4: Compile Check] Patch FAILED compilation/syntax check!"  # noqa: E501
+                                )
                                 is_success = False
                                 raw_stderr = compile_result.get("stderr", "")
                                 raw_stdout = compile_result.get("stdout", "")
@@ -1917,12 +2003,20 @@ class FarmAgentPipeline:
                                 err_trunc = raw_stderr[-2000:] if raw_stderr else ""
                                 error_log = f"COMPILATION FAILURE: Patch failed basic syntax/compilation check.\nSTDOUT:\n{out_trunc}\n\nSTDERR:\n{err_trunc}"  # noqa: E501
                             else:
-                                logger.info("✅ [Phase 4: Compile Check] Patch PASSED compilation check.")  # noqa: E501
+                                logger.info(
+                                    "✅ [Phase 4: Compile Check] Patch PASSED compilation check."
+                                )
                         else:
-                            logger.info("✅ [Phase 4: Regression] Patch PASSED native tests (status=%s, exit_code=%s).", patched_status, patched_exit_code)  # noqa: E501
+                            logger.info(
+                                "✅ [Phase 4: Regression] Patch PASSED native tests (status=%s, exit_code=%s).",  # noqa: E501
+                                patched_status,
+                                patched_exit_code,
+                            )
 
                     if is_success:
-                        logger.info("✅ Sandbox validated — patch passes Efficacy, Regression, and Compilation checks.")  # noqa: E501
+                        logger.info(
+                            "✅ Sandbox validated — patch passes Efficacy, Regression, and Compilation checks."  # noqa: E501
+                        )
                         break
 
                     logger.warning(
@@ -1968,20 +2062,31 @@ class FarmAgentPipeline:
             # ----------------------------------------------------------
 
             # Layer 2: Supreme Auditor
-            layer2_approved, reject_reason = await self._layer2_supreme_audit(contribution, error_log)  # noqa: E501
+            layer2_approved, reject_reason = await self._layer2_supreme_audit(
+                contribution, error_log
+            )
             if not layer2_approved:
-                logger.warning("🚫 Vetoed by Layer 2 Supreme Auditor (Gemini). Skipping PR for '%s'.", contribution.title)  # noqa: E501
+                logger.warning(
+                    "🚫 Vetoed by Layer 2 Supreme Auditor (Gemini). Skipping PR for '%s'.",
+                    contribution.title,
+                )
                 if self._memory:
-                    patch_str = "\n".join(f"File: {c.path}\n```\n{c.new_content}\n```" for c in contribution.changes)  # noqa: E501
-                    await self._memory.add_filter_lesson(repo.full_name, 2, patch_str, reject_reason)  # noqa: E501
-                logger.info("Recorded Layer 2 lesson for %s: %s...", repo.full_name, reject_reason[:50])  # noqa: E501
+                    patch_str = "\n".join(
+                        f"File: {c.path}\n```\n{c.new_content}\n```" for c in contribution.changes
+                    )
+                    await self._memory.add_filter_lesson(
+                        repo.full_name, 2, patch_str, reject_reason
+                    )
+                logger.info(
+                    "Recorded Layer 2 lesson for %s: %s...", repo.full_name, reject_reason[:50]
+                )
                 continue
 
             # ── Diplomat Protocol: Security Disclosure Gate ──────────────────
             from types import SimpleNamespace
+
             dummy_dossier = SimpleNamespace(
-                vulnerabilities=[contribution.finding],
-                repo_url=repo.clone_url
+                vulnerabilities=[contribution.finding], repo_url=repo.clone_url
             )
             security_gate_result = await run_security_gate(
                 github=self._github,
@@ -2073,9 +2178,7 @@ class FarmAgentPipeline:
                 result.errors.append(error)
                 if not dry_run and getattr(self, "_notifier", None):
                     await self._safe_send_notification(
-                        f"❌ **PR FAILED**\n"
-                        f"Target: {repo.full_name}\n"
-                        f"Error: {str(e)[:200]}"
+                        f"❌ **PR FAILED**\nTarget: {repo.full_name}\nError: {str(e)[:200]}"
                     )
 
         result.repos_analyzed = 1
@@ -2218,7 +2321,9 @@ class FarmAgentPipeline:
             return result
 
         # Fetch repo guidelines
-        guidelines = await fetch_repo_guidelines(self._github, repo.owner, repo.name, memory=self._memory, llm=self._llm)  # noqa: E501
+        guidelines = await fetch_repo_guidelines(
+            self._github, repo.owner, repo.name, memory=self._memory, llm=self._llm
+        )
 
         # Build repo context with more files for deeper understanding
         file_tree = await self._github.get_file_tree(repo.owner, repo.name)
@@ -2411,20 +2516,31 @@ class FarmAgentPipeline:
             # ----------------------------------------------------------
 
             # Layer 2: Supreme Auditor
-            layer2_approved, reject_reason = await self._layer2_supreme_audit(contribution, error_log)  # noqa: E501
+            layer2_approved, reject_reason = await self._layer2_supreme_audit(
+                contribution, error_log
+            )
             if not layer2_approved:
-                logger.warning("🚫 Vetoed by Layer 2 Supreme Auditor (Gemini). Skipping PR for issue #%d.", issue.number)  # noqa: E501
+                logger.warning(
+                    "🚫 Vetoed by Layer 2 Supreme Auditor (Gemini). Skipping PR for issue #%d.",
+                    issue.number,
+                )
                 if self._memory:
-                    patch_str = "\n".join(f"File: {c.path}\n```\n{c.new_content}\n```" for c in contribution.changes)  # noqa: E501
-                    await self._memory.add_filter_lesson(repo.full_name, 2, patch_str, reject_reason)  # noqa: E501
-                logger.info("Recorded Layer 2 lesson for %s: %s...", repo.full_name, reject_reason[:50])  # noqa: E501
+                    patch_str = "\n".join(
+                        f"File: {c.path}\n```\n{c.new_content}\n```" for c in contribution.changes
+                    )
+                    await self._memory.add_filter_lesson(
+                        repo.full_name, 2, patch_str, reject_reason
+                    )
+                logger.info(
+                    "Recorded Layer 2 lesson for %s: %s...", repo.full_name, reject_reason[:50]
+                )
                 continue
 
             # ── Diplomat Protocol: Security Disclosure Gate ──────────────────
             from types import SimpleNamespace
+
             dummy_dossier = SimpleNamespace(
-                vulnerabilities=[contribution.finding],
-                repo_url=repo.clone_url
+                vulnerabilities=[contribution.finding], repo_url=repo.clone_url
             )
             security_gate_result = await run_security_gate(
                 github=self._github,
@@ -2447,9 +2563,7 @@ class FarmAgentPipeline:
                     len(c.new_content) for c in contribution.changes if c.new_content
                 )
                 base_coding_time = max(60, patch_length // 15)
-                logger.info(
-                    "Creating PR for issue #%d in %s...", issue.number, repo.full_name
-                )
+                logger.info("Creating PR for issue #%d in %s...", issue.number, repo.full_name)
                 async with self._human_typing_lock:
                     if not dry_run:
                         curr_prs = await self._memory.get_today_pr_count()
@@ -2462,9 +2576,7 @@ class FarmAgentPipeline:
                             )
                             return result
 
-                    logger.info(
-                        "Creating PR for issue #%d in %s...", issue.number, repo.full_name
-                    )
+                    logger.info("Creating PR for issue #%d in %s...", issue.number, repo.full_name)
                 typing_time = int(patch_length / 3.75)
                 total_coding_delay = min(base_coding_time + typing_time, 3600)
 
@@ -2491,6 +2603,7 @@ class FarmAgentPipeline:
                             return result
 
                         import random
+
                         logger.info("⏳ Chuẩn bị push code... (Taking a deep breath)")
                         await asyncio.sleep(random.randint(15, 45))
 
@@ -2544,9 +2657,7 @@ class FarmAgentPipeline:
                 result.errors.append(error)
                 if not dry_run and getattr(self, "_notifier", None):
                     await self._safe_send_notification(
-                        f"❌ **PR FAILED**\n"
-                        f"Target: {repo.full_name}\n"
-                        f"Error: {str(e)[:200]}"
+                        f"❌ **PR FAILED**\nTarget: {repo.full_name}\nError: {str(e)[:200]}"
                     )
 
         result.repos_analyzed = 1
@@ -2670,8 +2781,27 @@ class FarmAgentPipeline:
 
             # TASK 3: Python pre-filter — skip non-code findings before LLM call
             finding_text = f"{finding.title} {finding.description} {finding.suggestion or ''}"
-            code_chars = {"{", "}", "(", ")", "=", ":=", "func", "def", "class",
-                          "[", "]", "<", ">", "+", "-", "*", "/", ";", "!"}
+            code_chars = {
+                "{",
+                "}",
+                "(",
+                ")",
+                "=",
+                ":=",
+                "func",
+                "def",
+                "class",
+                "[",
+                "]",
+                "<",
+                ">",
+                "+",
+                "-",
+                "*",
+                "/",
+                ";",
+                "!",
+            }
             if not any(ch in finding_text for ch in code_chars):
                 logger.info(
                     "Snippet dropped: Does not look like code — %s",
@@ -2717,13 +2847,15 @@ class FarmAgentPipeline:
             # Parse JSON response
             try:
                 response_text = response.strip()
-                fence_match = re.search(r"```(?:json)?\s*(.*?)```", response_text, re.DOTALL | re.IGNORECASE)  # noqa: E501
+                fence_match = re.search(
+                    r"```(?:json)?\s*(.*?)```", response_text, re.DOTALL | re.IGNORECASE
+                )
                 if fence_match:
                     response_text = fence_match.group(1).strip()
                 brace_start = response_text.find("{")
                 brace_end = response_text.rfind("}")
                 if brace_start != -1 and brace_end != -1 and brace_end > brace_start:
-                    response_text = response_text[brace_start:brace_end + 1]
+                    response_text = response_text[brace_start : brace_end + 1]
 
                 parsed = json.loads(response_text)
 
@@ -2737,9 +2869,19 @@ class FarmAgentPipeline:
                 data_flow_proof = parsed.get("data_flow_proof", "")
 
                 # TASK 3: Auto-drop if data_flow_proof is lazy (hallucination indicator)
-                _hallucination_words = {" If ", " Assume ", " Might ", " Maybe ", " Possibly ", " Probably "}  # noqa: E501
-                if is_real and (len(data_flow_proof) < 20 or data_flow_proof.lower().count("if") > 2
-                        or any(w in data_flow_proof for w in _hallucination_words)):
+                _hallucination_words = {
+                    " If ",
+                    " Assume ",
+                    " Might ",
+                    " Maybe ",
+                    " Possibly ",
+                    " Probably ",
+                }
+                if is_real and (
+                    len(data_flow_proof) < 20
+                    or data_flow_proof.lower().count("if") > 2
+                    or any(w in data_flow_proof for w in _hallucination_words)
+                ):
                     logger.info(
                         "❌ data_flow_proof too lazy (len=%d, contains If/Assume/Might) for %s — auto-rejected",  # noqa: E501
                         len(data_flow_proof),
@@ -2754,7 +2896,9 @@ class FarmAgentPipeline:
                         finding.title,
                         confidence,
                         rejection_reason,
-                        (devil_advocate[:60] + "...") if len(devil_advocate) > 60 else devil_advocate,  # noqa: E501
+                        (devil_advocate[:60] + "...")
+                        if len(devil_advocate) > 60
+                        else devil_advocate,
                     )
                     continue
 
@@ -2762,7 +2906,9 @@ class FarmAgentPipeline:
                     "✅ Finding validated: %s — score=%d flow=%s",
                     finding.title,
                     confidence,
-                    (data_flow_proof[:60] + "...") if len(data_flow_proof) > 60 else data_flow_proof,  # noqa: E501
+                    (data_flow_proof[:60] + "...")
+                    if len(data_flow_proof) > 60
+                    else data_flow_proof,
                 )
                 validated.append(finding)
 
@@ -2813,17 +2959,21 @@ class FarmAgentPipeline:
         )
 
         try:
-            response = await appraiser_provider.complete(prompt, system=system_prompt, temperature=0.1)  # noqa: E501
+            response = await appraiser_provider.complete(
+                prompt, system=system_prompt, temperature=0.1
+            )
             await appraiser_provider.close()
 
             response_text = response.strip()
-            fence_match = re.search(r"```(?:json)?\s*(.*?)```", response_text, re.DOTALL | re.IGNORECASE)  # noqa: E501
+            fence_match = re.search(
+                r"```(?:json)?\s*(.*?)```", response_text, re.DOTALL | re.IGNORECASE
+            )
             if fence_match:
                 response_text = fence_match.group(1).strip()
             brace_start = response_text.find("{")
             brace_end = response_text.rfind("}")
             if brace_start != -1 and brace_end != -1 and brace_end > brace_start:
-                response_text = response_text[brace_start:brace_end + 1]
+                response_text = response_text[brace_start : brace_end + 1]
 
             parsed = json.loads(response_text)
             is_genuine = parsed.get("is_genuine_severe_vuln", False)
@@ -2885,13 +3035,15 @@ class FarmAgentPipeline:
             await gem_provider.close()
 
             response_text = response.strip()
-            fence_match = re.search(r"```(?:json)?\s*(.*?)```", response_text, re.DOTALL | re.IGNORECASE)  # noqa: E501
+            fence_match = re.search(
+                r"```(?:json)?\s*(.*?)```", response_text, re.DOTALL | re.IGNORECASE
+            )
             if fence_match:
                 response_text = fence_match.group(1).strip()
             brace_start = response_text.find("{")
             brace_end = response_text.rfind("}")
             if brace_start != -1 and brace_end != -1 and brace_end > brace_start:
-                response_text = response_text[brace_start:brace_end + 1]
+                response_text = response_text[brace_start : brace_end + 1]
 
             parsed = json.loads(response_text)
             approved = parsed.get("final_approval", False)
@@ -3102,13 +3254,29 @@ class FarmAgentPipeline:
             logger.debug("Reusing cached clone at %s", clone_path)
             # Revert any previous patch modifications to start with a clean baseline state!
             try:
+
                 def _revert_local_changes() -> None:
-                    subprocess.run(["git", "reset", "--hard", "HEAD"], cwd=clone_path, capture_output=True, text=True, timeout=30)  # noqa: E501
-                    subprocess.run(["git", "clean", "-fd"], cwd=clone_path, capture_output=True, text=True, timeout=30)  # noqa: E501
+                    subprocess.run(
+                        ["git", "reset", "--hard", "HEAD"],
+                        cwd=clone_path,
+                        capture_output=True,
+                        text=True,
+                        timeout=30,
+                    )
+                    subprocess.run(
+                        ["git", "clean", "-fd"],
+                        cwd=clone_path,
+                        capture_output=True,
+                        text=True,
+                        timeout=30,
+                    )
+
                 await asyncio.to_thread(_revert_local_changes)
                 logger.info("Successfully reverted cached clone %s to baseline state", clone_path)
             except Exception as e:
-                logger.warning("Failed to revert local changes in cached clone %s: %s", clone_path, e)  # noqa: E501
+                logger.warning(
+                    "Failed to revert local changes in cached clone %s: %s", clone_path, e
+                )
         else:
             # Create a unique temp directory for this clone
             base_temp = tempfile.gettempdir()
