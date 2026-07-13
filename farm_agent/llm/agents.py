@@ -96,7 +96,7 @@ class AnalysisAgent(BaseAgent):
             "and best practices. Be precise and actionable.\n\n"
             "CRITICAL RULE - NO GUESSWORK: You are strictly forbidden from hallucinating, "
             "guessing, or making 'If-Driven' assumptions. "
-            "EVERY conclusion MUST be backed by explicit, visible evidence in the provided code snippet. "
+            "EVERY conclusion MUST be backed by explicit, visible evidence in the provided code snippet. "  # noqa: E501
             "Cite exact variable names, line numbers, and trace the data flow. "
             "FAIL-CLOSED POLICY: If you cannot find explicit evidence to prove a vulnerability, "
             "you MUST default to marking it as a FALSE POSITIVE. Lack of evidence equals FALSE."
@@ -127,7 +127,7 @@ class CodeGenAgent(BaseAgent):
             "You are an expert programmer. Generate clean, "
             "well-documented, production-ready code. Follow "
             "the project's existing style and conventions. "
-            "STRICT NO-PLACEHOLDER POLICY. You are FORBIDDEN from using `// ...`, `TODO`, or any comments implying 'code remains the same'. You MUST output the ENTIRE function or block you are modifying.\n\n"
+            "STRICT NO-PLACEHOLDER POLICY. You are FORBIDDEN from using `// ...`, `TODO`, or any comments implying 'code remains the same'. You MUST output the ENTIRE function or block you are modifying.\n\n"  # noqa: E501
             "CRITICAL RULE - NO GUESSWORK: You are strictly forbidden from hallucinating, "
             "guessing, or making 'If-Driven' assumptions. "
             "EVERY conclusion MUST be backed by explicit, visible evidence. "

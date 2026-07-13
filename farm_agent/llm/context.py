@@ -95,12 +95,28 @@ def extract_style_guide(prs_data: list[dict]) -> str:
 
     # Verb tense — check first word
     imperative_verbs = {
-        "add", "fix", "update", "remove", "change",
-        "improve", "refactor", "bump", "move", "use",
+        "add",
+        "fix",
+        "update",
+        "remove",
+        "change",
+        "improve",
+        "refactor",
+        "bump",
+        "move",
+        "use",
     }
     past_verbs = {
-        "added", "fixed", "updated", "removed", "changed",
-        "improved", "refactored", "bumped", "moved", "used",
+        "added",
+        "fixed",
+        "updated",
+        "removed",
+        "changed",
+        "improved",
+        "refactored",
+        "bumped",
+        "moved",
+        "used",
     }
     first_words = [re.sub(r"^[^a-zA-Z]+", "", t).split()[0].lower() for t in titles if t.strip()]
     imp = sum(1 for w in first_words if w in imperative_verbs)
@@ -131,7 +147,7 @@ def extract_style_guide(prs_data: list[dict]) -> str:
         return ""
 
     # Example titles for the LLM to mimic
-    example_section = "\n".join(f"  - \"{t}\"" for t in titles[:3])
+    example_section = "\n".join(f'  - "{t}"' for t in titles[:3])
 
     guide = (
         f"OBSERVED REPO STYLE (from {len(prs_data)} recent merged PRs):\n"
@@ -248,7 +264,9 @@ def build_generator_system_prompt(
         max_tokens: Token budget for the repo context section.
     """
     repo_context = build_repo_context_prompt(
-        context, max_tokens=max_tokens, style_guide=style_guide,
+        context,
+        max_tokens=max_tokens,
+        style_guide=style_guide,
     )
 
     # ── Style sections (existing behaviour) ──────────────────────────
@@ -279,8 +297,7 @@ def build_generator_system_prompt(
         truncation_notice = ""
         if len(project_map) > 60000:
             truncation_notice = (
-                "\nNote: The Project Map may be truncated. "
-                "Rely on the provided context first.\n"
+                "\nNote: The Project Map may be truncated. Rely on the provided context first.\n"
             )
 
         map_section = (
@@ -335,14 +352,14 @@ def build_generator_system_prompt(
         "10. SURGICAL PRECISION: Do NOT rewrite entire functions or classes. "
         "Your SEARCH block must target the absolute minimum number of lines "
         "needed to apply the fix. A 2-line bug must produce a ~2-line search/replace.\n"
-"11. STRICT NO-LAZINESS: You MUST output the full, complete block of code "
-"for every search/replace operation, even if it is long. DO NOT use "
-"placeholders like `// ...`, `// TODO`, `/* unchanged */`, or `...` under any circumstances.\n\n"
-"CRITICAL: ABSOLUTELY NO TRUNCATION. YOU MUST OUTPUT THE ENTIRE MODIFIED FUNCTION OR BLOCK. "
-"NEVER USE \"...\" OR \"# TODO\". YOUR PATCH WILL BE AUTOMATICALLY REJECTED AND YOU WILL BE "
-"PENALIZED IF YOU OMIT ANY ORIGINAL CODE. Every search/replace block MUST contain the complete, "
-"runnable code — no abbreviations, no shortcuts, no ellipsis, no \"rest remains the same\". "
-"If the original function is 50 lines, your replace block must include all 50 lines with the fix applied.\n\n"
+        "11. STRICT NO-LAZINESS: You MUST output the full, complete block of code "
+        "for every search/replace operation, even if it is long. DO NOT use "
+        "placeholders like `// ...`, `// TODO`, `/* unchanged */`, or `...` under any circumstances.\n\n"  # noqa: E501
+        "CRITICAL: ABSOLUTELY NO TRUNCATION. YOU MUST OUTPUT THE ENTIRE MODIFIED FUNCTION OR BLOCK. "  # noqa: E501
+        'NEVER USE "..." OR "# TODO". YOUR PATCH WILL BE AUTOMATICALLY REJECTED AND YOU WILL BE '
+        "PENALIZED IF YOU OMIT ANY ORIGINAL CODE. Every search/replace block MUST contain the complete, "  # noqa: E501
+        'runnable code — no abbreviations, no shortcuts, no ellipsis, no "rest remains the same". '
+        "If the original function is 50 lines, your replace block must include all 50 lines with the fix applied.\n\n"  # noqa: E501
         "MAINTAINER ACCEPTANCE CRITERIA:\n"
         "- Would a busy maintainer merge this in under 30 seconds?\n\n"
         "COMMIT & PR TITLE TONE (MANDATORY):\n"

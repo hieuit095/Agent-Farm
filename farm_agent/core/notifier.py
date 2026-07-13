@@ -18,6 +18,7 @@ async def _persist_failed_alert(message: str, channel: str) -> None:
     try:
         with open(FAILED_ALERTS_FILE, "a", encoding="utf-8") as f:
             from datetime import datetime
+
             timestamp = datetime.now(UTC).isoformat()
             f.write(f"[{timestamp}] [{channel}] PERSISTED ALERT: {message}\n")
     except Exception:
@@ -71,6 +72,7 @@ class TelegramNotifier:
                 response_text = str(e.response.text)[:500]
             logger.error("Failed to deliver Telegram message: %s", response_text or str(e))
             await _persist_failed_alert(text, "telegram")
+
     async def _register_commands(self) -> None:
         """Register the bot's command menu with Telegram."""
         if not self.enabled or not self._client:
@@ -85,7 +87,7 @@ class TelegramNotifier:
                 {"command": "update", "description": "Trigger Alumni Sync — scan new merged PRs"},
                 {"command": "clean", "description": "Run Janitor — destroy garbage PRs on GitHub"},
                 {"command": "accept", "description": "Hall of Fame — merged PRs (Bảng Vàng)"},
-                {"command": "help", "description": "Show the help menu"}
+                {"command": "help", "description": "Show the help menu"},
             ]
         }
 
@@ -96,7 +98,13 @@ class TelegramNotifier:
         except Exception as e:
             logger.error("Failed to register Telegram commands menu: %s", e)
 
-    async def start_polling(self, memory_instance, on_update_callback=None, on_clean_callback=None, on_accept_callback=None) -> None:
+    async def start_polling(
+        self,
+        memory_instance,
+        on_update_callback=None,
+        on_clean_callback=None,
+        on_accept_callback=None,
+    ) -> None:
         """Run long-polling loop to receive Telegram commands.
 
         Args:
@@ -106,6 +114,7 @@ class TelegramNotifier:
             on_accept_callback: Optional async callable — returns Hall of Fame string.
         """
         import asyncio
+
         if not self.enabled or not self._client:
             return
 
@@ -131,7 +140,9 @@ class TelegramNotifier:
 
                     chat_id = str(message.get("chat", {}).get("id", ""))
                     if chat_id != self.chat_id:
-                        logger.warning("Ignoring Telegram command from unauthorized chat: %s", chat_id)
+                        logger.warning(
+                            "Ignoring Telegram command from unauthorized chat: %s", chat_id
+                        )
                         continue
 
                     text = message.get("text", "").strip()
@@ -148,11 +159,20 @@ class TelegramNotifier:
                 await asyncio.sleep(1)  # normal polling interval on success
 
             except Exception:
-                logger.critical("All notification channels failed — persisted to %s", FAILED_ALERTS_FILE)
+                logger.critical(
+                    "All notification channels failed — persisted to %s", FAILED_ALERTS_FILE
+                )
                 await asyncio.sleep(delay)
                 delay = min(delay * 2, max_delay)  # double backoff, cap at 60s
 
-    async def _handle_command(self, text: str, memory_instance, on_update_callback=None, on_clean_callback=None, on_accept_callback=None) -> None:
+    async def _handle_command(
+        self,
+        text: str,
+        memory_instance,
+        on_update_callback=None,
+        on_clean_callback=None,
+        on_accept_callback=None,
+    ) -> None:
         """Handle incoming C2 commands from Telegram."""
         import time
         from datetime import UTC, datetime
@@ -200,19 +220,21 @@ class TelegramNotifier:
 
             cursor = await memory_instance._db.execute(
                 "SELECT COUNT(1) FROM api_usage_log WHERE provider = 'minimax' AND timestamp >= ?",
-                (five_hours_ago,)
+                (five_hours_ago,),
             )
             row = await cursor.fetchone()
             count_5h = row[0] if row else 0
 
             cursor = await memory_instance._db.execute(
                 "SELECT COUNT(1) FROM api_usage_log WHERE provider = 'minimax' AND timestamp >= ?",
-                (seven_days_ago,)
+                (seven_days_ago,),
             )
             row = await cursor.fetchone()
             count_7d = row[0] if row else 0
 
-            await self.send_message(f"📈 <b>Minimax Quota Usage:</b>\nLast 5h: {count_5h}/1000\nLast 7d: {count_7d}/10000")
+            await self.send_message(
+                f"📈 <b>Minimax Quota Usage:</b>\nLast 5h: {count_5h}/1000\nLast 7d: {count_7d}/10000"  # noqa: E501
+            )
 
         elif command == "/update":
             # Notify user immediately that sync has started
@@ -229,13 +251,10 @@ class TelegramNotifier:
                     )
                 except Exception as e:
                     await self.send_message(
-                        f"❌ Sếp ơi, API GitHub đang dở chứng, "
-                        f"đồng bộ thất bại rồi ạ. Lỗi: {e}"
+                        f"❌ Sếp ơi, API GitHub đang dở chứng, đồng bộ thất bại rồi ạ. Lỗi: {e}"
                     )
             else:
-                await self.send_message(
-                    "⚠️ Alumni Sync callback not configured. Sync is disabled."
-                )
+                await self.send_message("⚠️ Alumni Sync callback not configured. Sync is disabled.")
 
         elif command == "/clean":
             # /clean triggers the PR Janitor sweep — destroy garbage PRs via LLM
@@ -255,9 +274,7 @@ class TelegramNotifier:
                         f"Giữ lại: {spared} tinh hoa."
                     )
                 except Exception as e:
-                    await self.send_message(
-                        f"❌ Ây da, cán chổi bị gãy rồi Sếp ơi. Lỗi: {e}"
-                    )
+                    await self.send_message(f"❌ Ây da, cán chổi bị gãy rồi Sếp ơi. Lỗi: {e}")
             else:
                 await self.send_message(
                     "⚠️ Janitor sweep callback not configured. Cleanup is disabled."
@@ -274,13 +291,9 @@ class TelegramNotifier:
                     result = await on_accept_callback()
                     await self.send_message(result)
                 except Exception as e:
-                    await self.send_message(
-                        f"❌ Ây da, kẹt tủ rồi Sếp ơi. Lỗi: {e}"
-                    )
+                    await self.send_message(f"❌ Ây da, kẹt tủ rồi Sếp ơi. Lỗi: {e}")
             else:
-                await self.send_message(
-                    "⚠️ Hall of Fame callback not configured."
-                )
+                await self.send_message("⚠️ Hall of Fame callback not configured.")
 
     async def close(self) -> None:
         """Release the persistent HTTP connection pool."""
