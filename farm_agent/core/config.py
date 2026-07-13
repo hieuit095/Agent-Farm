@@ -111,7 +111,7 @@ class AnalysisConfig(BaseModel):
 
     # Semgrep radar
     semgrep_rulesets: list[str] = Field(
-        default_factory=lambda: ["p/security-audit", "p/cwe-top-25", "p/default", "p/golang", "p/rust", "p/smart-contracts"]
+        default_factory=lambda: ["p/security-audit", "p/cwe-top-25", "p/default", "p/golang", "p/rust", "p/smart-contracts"]  # noqa: E501
     )
 
 

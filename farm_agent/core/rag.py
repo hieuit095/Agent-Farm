@@ -51,13 +51,10 @@ class CodeChunk:
 
 def _should_index_file(path: str) -> bool:
     """Return False for files that should be excluded from RAG indexing."""
-    for pattern in EXCLUDE_PATTERNS:
-        if pattern.search(path):
-            return False
-    return True
+    return all(not pattern.search(path) for pattern in EXCLUDE_PATTERNS)
 
 
-def chunk_file(content: str, file_path: str, chunk_size: int = DEFAULT_CHUNK_SIZE, overlap: int = DEFAULT_CHUNK_OVERLAP) -> list[CodeChunk]:
+def chunk_file(content: str, file_path: str, chunk_size: int = DEFAULT_CHUNK_SIZE, overlap: int = DEFAULT_CHUNK_OVERLAP) -> list[CodeChunk]:  # noqa: E501
     """Split a file's content into overlapping sliding-window chunks.
 
     Uses a simple character-based sliding window with fixed stride.
@@ -293,9 +290,9 @@ class RepoIndexer:
                 name=self._repo_name.replace("/", "_").replace("-", "_")[:64],
                 metadata={"hnsw:space": "cosine"},
             )
-            logger.info("ChromaDB persistent collection '%s' initialized at %s", self._repo_name, self.PERSISTENT_PATH)
+            logger.info("ChromaDB persistent collection '%s' initialized at %s", self._repo_name, self.PERSISTENT_PATH)  # noqa: E501
         except (ImportError, Exception) as e:
-            logger.warning("ChromaDB not installed or failed to initialize (%s) — using regex fallback for cross-file search", e)
+            logger.warning("ChromaDB not installed or failed to initialize (%s) — using regex fallback for cross-file search", e)  # noqa: E501
             self._chroma = None
             self._collection = None
 
@@ -413,7 +410,7 @@ class RepoIndexer:
                     "chunk_index": meta.get("chunk_index", 0),
                 })
 
-            logger.info("RAG query '%s' → %d results from %s", query[:60], len(output), self._repo_name)
+            logger.info("RAG query '%s' → %d results from %s", query[:60], len(output), self._repo_name)  # noqa: E501
             return output
 
         except Exception as exc:
@@ -423,7 +420,7 @@ class RepoIndexer:
     def destroy(self) -> None:
         """Clear in-memory references (collection persists on disk for next run)."""
         if self._chroma is not None and self._collection is not None:
-            logger.info("RAG: collection '%s' released from memory (data persisted at %s)", self._collection.name, self.PERSISTENT_PATH)
+            logger.info("RAG: collection '%s' released from memory (data persisted at %s)", self._collection.name, self.PERSISTENT_PATH)  # noqa: E501
         self._chroma = None
         self._collection = None
         self._indexed_files.clear()

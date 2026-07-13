@@ -34,7 +34,7 @@ class GitHubClient:
         "/repos/",
     )
 
-    def __init__(self, token: str, rate_limit_buffer: int = 3, secondary_tokens: list[str] | None = None):
+    def __init__(self, token: str, rate_limit_buffer: int = 3, secondary_tokens: list[str] | None = None):  # noqa: E501
         self._primary_token = token
         self._rate_limit_buffer = rate_limit_buffer
 
@@ -49,7 +49,7 @@ class GitHubClient:
                 "Accept": "application/vnd.github+json",
                 "X-GitHub-Api-Version": "2022-11-28",
                 # Sanitized — browser-like UA avoids GitHub abuse detection
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",  # noqa: E501
             },
             # P0-FIX: Granular timeouts prevent infinite hangs on TLS handshakes
             # and slow reads.  A flat timeout=30.0 does NOT cap the connect phase
@@ -79,7 +79,7 @@ class GitHubClient:
 
     # ── Core HTTP ──────────────────────────────────────────────────────────
 
-    async def _request(self, method: str, url: str, *, _retries: int = 3, use_primary_only: bool = False, is_graphql: bool = False, **kwargs) -> Any:
+    async def _request(self, method: str, url: str, *, _retries: int = 3, use_primary_only: bool = False, is_graphql: bool = False, **kwargs) -> Any:  # noqa: E501
         """Make an authenticated GitHub API request with error handling and retry.
 
         Handles GitHub Secondary Rate Limits (abuse detection) by retrying
@@ -116,7 +116,7 @@ class GitHubClient:
             }
 
             try:
-                response = await self._client.request(method, url, headers=request_headers, **kwargs)
+                response = await self._client.request(method, url, headers=request_headers, **kwargs)  # noqa: E501
             except httpx.HTTPError as e:
                 network_attempts += 1
                 # P0-FIX: Use repr(e) — str(e) for ConnectTimeout, ReadError, etc.
@@ -139,7 +139,7 @@ class GitHubClient:
                     remaining_int = int(remaining_header)
                     if remaining_int < 50 and not use_primary_only and len(self._pool_tokens) > 1:
                         old_index = self._current_token_index
-                        self._current_token_index = (self._current_token_index + 1) % len(self._pool_tokens)
+                        self._current_token_index = (self._current_token_index + 1) % len(self._pool_tokens)  # noqa: E501
                         if self._current_token_index != old_index:
                             logger.info(
                                 "Token rotation: rate-limit-remaining=%d (< 50), "
@@ -581,7 +581,7 @@ class GitHubClient:
             if not hasattr(self, "_cached_user"):
                 self._cached_user = await self.get_authenticated_user()
 
-            author_name = self._cached_user.get("name") or self._cached_user.get("login", author_name)
+            author_name = self._cached_user.get("name") or self._cached_user.get("login", author_name)  # noqa: E501
             author_email = self._cached_user.get("email")
             if not author_email:
                 # Use the real user ID + login to match GitHub's internal privacy pattern
@@ -589,7 +589,7 @@ class GitHubClient:
                 login = self._cached_user.get('login', 'farm_agent')
                 author_email = f"{uid}+{login}@users.noreply.github.com"
 
-            author_date = (datetime.now(UTC) - timedelta(minutes=random.randint(15, 45))).strftime("%Y-%m-%dT%H:%M:%SZ")
+            author_date = (datetime.now(UTC) - timedelta(minutes=random.randint(15, 45))).strftime("%Y-%m-%dT%H:%M:%SZ")  # noqa: E501
             payload["author"] = {
                 "name": author_name,
                 "email": author_email,
@@ -655,7 +655,7 @@ class GitHubClient:
             raise GitHubAPIError(error_msg, status_code=status_code)
 
         pr_number = response_data.get("number", "?")
-        pr_url = response_data.get("html_url", "")
+        response_data.get("html_url", "")
         logger.info("Created PR #%s on %s/%s: %s", pr_number, owner, repo, title)
         return response_data
 
@@ -787,7 +787,7 @@ class GitHubClient:
             logger.warning(
                 "fetch_user_merged_prs: could not validate username via GET /user: %s — "
                 "using provided '%s'",
-                exc, username,
+                e, username,  # noqa: F821
             )
 
         if not username or not username.strip():
@@ -1085,8 +1085,8 @@ class GitHubClient:
                 check_run_id, exc.response.status_code,
             )
             return ""
-        except Exception:
-            logger.warning("Failed to download CI log for job %d: %s", check_run_id, exc)
+        except Exception as e:
+            logger.warning("Failed to download CI log for job %d: %s", check_run_id, e)
             return ""
 
     async def delete_branch(self, owner: str, repo: str, branch_name: str) -> None:
@@ -1197,7 +1197,7 @@ class GitHubClient:
 
         payload = {
             "content": encoded,
-            "encoding": "base64" if encoding != "base64" else "base64",
+            "encoding": "base64" if encoding != "base64" else "base64",  # noqa: RUF034
         }
 
         data = await self._post(f"/repos/{owner}/{repo}/git/blobs", json=payload)

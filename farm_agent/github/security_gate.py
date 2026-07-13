@@ -275,14 +275,14 @@ async def run_security_gate(
     elif dossier is None:
         findings_data.append(
             {
-                "note": "Vulnerabilities detected during analysis — detailed findings available in pipeline logs",
+                "note": "Vulnerabilities detected during analysis — detailed findings available in pipeline logs",  # noqa: E501
             }
         )
 
     saved_path = save_secret_findings(
         repo_full_name=result.repo_full_name,
         findings=findings_data,
-        dossier_data={"repo_url": str(dossier.repo_url)} if dossier and hasattr(dossier, "repo_url") else None,
+        dossier_data={"repo_url": str(dossier.repo_url)} if dossier and hasattr(dossier, "repo_url") else None,  # noqa: E501
     )
 
     # Send Telegram notification (blocking await — guarantees delivery)

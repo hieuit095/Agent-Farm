@@ -579,7 +579,7 @@ class CodeAnalyzer:
         )
 
         if self._memory:
-            lessons = await self._memory.get_knowledge(context.repo.full_name, "FILTER_REJECTION_LESSON")
+            lessons = await self._memory.get_knowledge(context.repo.full_name, "FILTER_REJECTION_LESSON")  # noqa: E501
             if lessons:
                 system += f"\n\n### PREVIOUS MISTAKES TO AVOID ON THIS REPO:\n{lessons}\n"
 
@@ -896,7 +896,6 @@ class CodeAnalyzer:
 
     def _filter_severity(self, findings: list[Finding]) -> list[Finding]:
         """Filter findings by minimum severity threshold."""
-        order = [Severity.LOW, Severity.MEDIUM, Severity.HIGH, Severity.CRITICAL]
         # Define a mapping from Severity enum to an integer order for comparison
         severity_order = {
             Severity.LOW.value: 0,
@@ -1022,7 +1021,7 @@ class BloodhoundAnalyzer:
             api_key = getattr(self._llm.config, "openrouter_api_key", "")
 
         if not api_key:
-            logger.debug("No OpenRouter API key configured — will use default LLM for Red Team audit")
+            logger.debug("No OpenRouter API key configured — will use default LLM for Red Team audit")  # noqa: E501
             return None
 
         red_team_model = getattr(self._config, "red_team_model", "deepseek/deepseek-v4-flash")
@@ -1150,7 +1149,7 @@ class BloodhoundAnalyzer:
                         data = json.loads(clean_json)
                         logger.info("Successfully extracted Clean JSON from Semgrep output")
                     except json.JSONDecodeError:
-                        logger.error("Clean JSON extraction failed. Could not parse Semgrep output.")
+                        logger.error("Clean JSON extraction failed. Could not parse Semgrep output.")  # noqa: E501
                         return []
                 else:
                     return []
@@ -1161,10 +1160,8 @@ class BloodhoundAnalyzer:
             for result in results:
                 file_path = result.get("path", "")
                 if file_path:
-                    try:
+                    with contextlib.suppress(ValueError):
                         file_path = str(Path(file_path).relative_to(repo_path))
-                    except ValueError:
-                        pass
 
                 line_num = result.get("start", {}).get("line", 0)
                 lines_text = result.get("extra", {}).get("lines", "")
@@ -1183,7 +1180,7 @@ class BloodhoundAnalyzer:
             return matches
 
         except TimeoutError:
-            logger.warning("Semgrep scan timed out (%ds) for %s", self.SEMGREP_TIMEOUT, repo_path.name)
+            logger.warning("Semgrep scan timed out (%ds) for %s", self.SEMGREP_TIMEOUT, repo_path.name)  # noqa: E501
             return []
         except json.JSONDecodeError:
             logger.warning("Semgrep returned invalid JSON for %s", repo_path.name)
@@ -1197,7 +1194,7 @@ class BloodhoundAnalyzer:
         self, repo_url: str, repo_name: str, matches: list[dict]
     ) -> VulnerabilityDossier:
         context_parts = []
-        max_chars = getattr(self._llm.config, "max_snippet_chars", 15000) if hasattr(self, "_llm") and hasattr(self._llm, "config") else 15000
+        max_chars = getattr(self._llm.config, "max_snippet_chars", 15000) if hasattr(self, "_llm") and hasattr(self._llm, "config") else 15000  # noqa: E501
 
         for m in matches:
             severity = m.get("severity", "UNKNOWN").upper()
@@ -1225,7 +1222,7 @@ class BloodhoundAnalyzer:
 
         if not context_parts:
             # If everything was filtered out, skip LLM call
-            return VulnerabilityDossier(repo_url=repo_url, target_commit="unknown", vulnerabilities=[])
+            return VulnerabilityDossier(repo_url=repo_url, target_commit="unknown", vulnerabilities=[])  # noqa: E501
 
         context_str = "\n---\n".join(context_parts)
 
@@ -1240,7 +1237,7 @@ Your core directives:
 2. CHAINING: Do not just look at the single line; deduce how this snippet connects to user input or global state to form an exploit chain.
 3. RUTHLESSNESS: If the code relies on "security by obscurity" or weak default configurations, tear it apart.
 
-You will receive a Semgrep match report. 
+You will receive a Semgrep match report.
 - If the code is genuinely secure and cannot be exploited in any scenario, you MUST return [{"file": "NONE"}].
 - If it is exploitable, you must provide the exact attack path.
 
@@ -1255,7 +1252,7 @@ You MUST respond strictly in the following JSON array format. No markdown, no co
         "fix": "The architectural patch to kill this attack vector.",
         "impact": "CRITICAL: Remote Code Execution via..."
     }
-]"""
+]"""  # noqa: E501
 
         user_prompt = (
             f"Repository: {repo_url}\n\n"
@@ -1279,7 +1276,7 @@ You MUST respond strictly in the following JSON array format. No markdown, no co
                         )
                         client = None
                     else:
-                        logger.info("OpenRouter Red Team audit (%d/%d today)", usage + 1, daily_limit)
+                        logger.info("OpenRouter Red Team audit (%d/%d today)", usage + 1, daily_limit)  # noqa: E501
 
             if client is not None:
                 response = await client.complete(user_prompt, system=system_prompt, temperature=0.1)
@@ -1287,9 +1284,9 @@ You MUST respond strictly in the following JSON array format. No markdown, no co
                     await self._memory.record_openrouter_usage()
             else:
                 logger.info("No OpenRouter provider — using default LLM for White-Hat audit")
-                response = await self._llm.complete(user_prompt, system=system_prompt, temperature=0.1)
+                response = await self._llm.complete(user_prompt, system=system_prompt, temperature=0.1)  # noqa: E501
 
-            return self._parse_audit_response(response, repo_url, forbidden_paths=self._forbidden_paths())
+            return self._parse_audit_response(response, repo_url, forbidden_paths=self._forbidden_paths())  # noqa: E501
         except Exception as exc:
             # ── Universal LLM fallback for ANY provider error ──────────────────
             # If OpenRouter fails for ANY reason (402 Payment Required,
@@ -1300,31 +1297,31 @@ You MUST respond strictly in the following JSON array format. No markdown, no co
 
             if isinstance(exc, LLMRateLimitError):
                 logger.warning(
-                    "[RED TEAM OFFLINE] OpenRouter rate limit hit. Initiating Fallback to Minimax M2.7."
+                    "[RED TEAM OFFLINE] OpenRouter rate limit hit. Initiating Fallback to Minimax M2.7."  # noqa: E501
                 )
             elif isinstance(exc, LLMError):
                 status_str = str(exc)
                 if "402" in status_str:
                     logger.warning(
-                        "[RED TEAM OFFLINE] OpenRouter 402 Payment Required. Initiating Fallback to Minimax M2.7."
+                        "[RED TEAM OFFLINE] OpenRouter 402 Payment Required. Initiating Fallback to Minimax M2.7."  # noqa: E501
                     )
                 else:
                     logger.warning(
-                        "[RED TEAM OFFLINE] OpenRouter LLM error — initiating Fallback to Minimax M2.7: %s",
+                        "[RED TEAM OFFLINE] OpenRouter LLM error — initiating Fallback to Minimax M2.7: %s",  # noqa: E501
                         exc,
                     )
             else:
                 logger.warning(
-                    "[RED TEAM OFFLINE] Unexpected error from OpenRouter — initiating Fallback to Minimax M2.7: %s",
+                    "[RED TEAM OFFLINE] Unexpected error from OpenRouter — initiating Fallback to Minimax M2.7: %s",  # noqa: E501
                     exc,
                 )
 
             try:
-                response = await self._llm.complete(user_prompt, system=system_prompt, temperature=0.1)
-                return self._parse_audit_response(response, repo_url, forbidden_paths=self._forbidden_paths())
+                response = await self._llm.complete(user_prompt, system=system_prompt, temperature=0.1)  # noqa: E501
+                return self._parse_audit_response(response, repo_url, forbidden_paths=self._forbidden_paths())  # noqa: E501
             except Exception as fallback_exc:
                 logger.error("White-Hat audit fallback LLM also failed: %s", fallback_exc)
-                return VulnerabilityDossier(repo_url=repo_url, target_commit="unknown", vulnerabilities=[])
+                return VulnerabilityDossier(repo_url=repo_url, target_commit="unknown", vulnerabilities=[])  # noqa: E501
 
     def _classify_context(self, file_path: str, forbidden_paths: list[str] | None = None) -> str:
         """Classify a file path as PRODUCTION or LOW_PRIORITY_CONTEXT.
@@ -1353,7 +1350,7 @@ You MUST respond strictly in the following JSON array format. No markdown, no co
         - Has fewer than 10 characters, OR
         - Does not contain ANY structural programming characters:
           braces {}, parentheses (), brackets [], operators =, ==, !=, >, <, >=, <=, ->, +=, -=, *=, /=, semicolon ;
-        """
+        """  # noqa: E501
         if not snippet or not isinstance(snippet, str):
             return False
 
@@ -1361,13 +1358,10 @@ You MUST respond strictly in the following JSON array format. No markdown, no co
         if len(stripped) < 10:
             return False
 
-        structural_chars = {"{", "}", "(", ")", "[", "]", "=", ">", "<", "+", "-", "*", "/", "!", ";", ":"}
-        if not any(ch in stripped for ch in structural_chars):
-            return False
+        structural_chars = {"{", "}", "(", ")", "[", "]", "=", ">", "<", "+", "-", "*", "/", "!", ";", ":"}  # noqa: E501
+        return any(ch in stripped for ch in structural_chars)
 
-        return True
-
-    def _parse_audit_response(self, response: str, repo_url: str, forbidden_paths: list[str] | None = None) -> VulnerabilityDossier:
+    def _parse_audit_response(self, response: str, repo_url: str, forbidden_paths: list[str] | None = None) -> VulnerabilityDossier:  # noqa: E501
         import re as _re
 
         text = response.strip()
@@ -1385,11 +1379,11 @@ You MUST respond strictly in the following JSON array format. No markdown, no co
             parsed = json.loads(text)
         except json.JSONDecodeError:
             logger.warning("Failed to parse LLM audit response as JSON")
-            return VulnerabilityDossier(repo_url=repo_url, target_commit="unknown", vulnerabilities=[])
+            return VulnerabilityDossier(repo_url=repo_url, target_commit="unknown", vulnerabilities=[])  # noqa: E501
 
         if not isinstance(parsed, list):
             logger.warning("LLM audit response is not a JSON array")
-            return VulnerabilityDossier(repo_url=repo_url, target_commit="unknown", vulnerabilities=[])
+            return VulnerabilityDossier(repo_url=repo_url, target_commit="unknown", vulnerabilities=[])  # noqa: E501
 
         vulns = []
         for item in parsed:
@@ -1410,7 +1404,7 @@ You MUST respond strictly in the following JSON array format. No markdown, no co
 
                 # TASK 3: Parse evidence_chain and enforce lazy-evidence auto-drop gate
                 evidence_chain = str(item.get("evidence_chain", ""))
-                _hallucination_words = {" If ", " Assume ", " Might ", " Maybe ", " Possibly ", " Probably "}
+                _hallucination_words = {" If ", " Assume ", " Might ", " Maybe ", " Possibly ", " Probably "}  # noqa: E501
                 is_lazy = (
                     len(evidence_chain) < 20
                     or evidence_chain.lower().count("if") > 2
@@ -1418,7 +1412,7 @@ You MUST respond strictly in the following JSON array format. No markdown, no co
                 )
                 if is_lazy:
                     logger.info(
-                        "Evidence chain too lazy (< 20 chars or contains hallucination words) for %s:%s — filtering out. evidence=%s",
+                        "Evidence chain too lazy (< 20 chars or contains hallucination words) for %s:%s — filtering out. evidence=%s",  # noqa: E501
                         file_path,
                         item.get("line", 0),
                         (evidence_chain[:50] + "...") if evidence_chain else "<empty>",
@@ -1432,10 +1426,10 @@ You MUST respond strictly in the following JSON array format. No markdown, no co
                 poc = str(item.get("poc", ""))
                 fix = str(item.get("fix", ""))
 
-                if impact.upper().startswith("CRITICAL") or impact.upper().startswith("HIGH"):
+                if impact.upper().startswith("CRITICAL") or impact.upper().startswith("HIGH"):  # noqa: SIM102
                     if not poc or not fix:
                         logger.warning(
-                            "LLM returned CRITICAL/HIGH finding with empty poc/fix for %s:%s — filtering out",
+                            "LLM returned CRITICAL/HIGH finding with empty poc/fix for %s:%s — filtering out",  # noqa: E501
                             file_path,
                             item.get("line", 0),
                         )
@@ -1454,7 +1448,7 @@ You MUST respond strictly in the following JSON array format. No markdown, no co
             except (ValueError, TypeError):
                 continue
 
-        return VulnerabilityDossier(repo_url=repo_url, target_commit="unknown", vulnerabilities=vulns)
+        return VulnerabilityDossier(repo_url=repo_url, target_commit="unknown", vulnerabilities=vulns)  # noqa: E501
 
     async def run_bloodhound(self, repo: Repository) -> VulnerabilityDossier:
         """Execute the full Bloodhound pipeline for a repository.
@@ -1495,7 +1489,7 @@ You MUST respond strictly in the following JSON array format. No markdown, no co
 
             # If tool is not available
             if not tasks:
-                logger.warning("No radar tools available for %s — skipping bloodhound", repo.full_name)
+                logger.warning("No radar tools available for %s — skipping bloodhound", repo.full_name)  # noqa: E501
                 return empty_dossier
 
             results = await asyncio.gather(*tasks)

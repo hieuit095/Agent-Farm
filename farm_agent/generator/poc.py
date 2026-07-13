@@ -29,13 +29,13 @@ class PoCGenerator:
         """Generate an executable script to dynamically trigger the finding's vulnerability."""
         system_prompt = (
             "You are a Senior Security Engineer and QA Automation Specialist.\n"
-            "Your task is to write a Proof-of-Concept (PoC) validation script to dynamically trigger\n"
+            "Your task is to write a Proof-of-Concept (PoC) validation script to dynamically trigger\n"  # noqa: E501
             "the bug or vulnerability described in the finding.\n\n"
             "Requirements:\n"
-            "1. The script must be written to run locally inside the repository workspace (e.g. Python, Bash, or Go/Rust test).\n"
-            "2. It should specifically trigger the bug/vulnerability, causing an assertion failure, exception, crash, or non-zero exit code.\n"
+            "1. The script must be written to run locally inside the repository workspace (e.g. Python, Bash, or Go/Rust test).\n"  # noqa: E501
+            "2. It should specifically trigger the bug/vulnerability, causing an assertion failure, exception, crash, or non-zero exit code.\n"  # noqa: E501
             "3. If the bug has been fixed, the script must exit successfully with code 0.\n"
-            "4. Keep it self-contained and avoid external HTTP requests or complex system configurations. Do not require network access.\n"
+            "4. Keep it self-contained and avoid external HTTP requests or complex system configurations. Do not require network access.\n"  # noqa: E501
             "5. Return the result strictly in JSON format inside markdown code fences:\n"
             "```json\n"
             "{\n"
@@ -59,7 +59,7 @@ class PoCGenerator:
             f"Dependents: {deps.get('dependents', [])}\n\n"
             f"Target Source File Content:\n"
             f"```\n{target_file_content}\n```\n\n"
-            f"Construct the PoC script. Output the JSON payload containing 'filename', 'content', and 'command'."
+            f"Construct the PoC script. Output the JSON payload containing 'filename', 'content', and 'command'."  # noqa: E501
         )
 
         try:
@@ -93,15 +93,15 @@ class PoCGenerator:
         poc_content: str,
         sandbox_output: dict,
     ) -> tuple[bool, str]:
-        """Evaluate sandbox output to determine if the vulnerability was successfully triggered (True Positive) or if it is a False Positive."""
+        """Evaluate sandbox output to determine if the vulnerability was successfully triggered (True Positive) or if it is a False Positive."""  # noqa: E501
         system_prompt = (
             "You are a Vulnerability Verification Auditor.\n"
-            "Your task is to analyze the execution output of a PoC verification script inside a sandbox container.\n"
-            "Determine if the crash or output was caused by the target vulnerability (True Positive) or if it is a False Positive\n"
-            "(e.g., syntax errors, compilation failures, missing module dependencies, command not found, or successful exit without hitting the bug).\n\n"
+            "Your task is to analyze the execution output of a PoC verification script inside a sandbox container.\n"  # noqa: E501
+            "Determine if the crash or output was caused by the target vulnerability (True Positive) or if it is a False Positive\n"  # noqa: E501
+            "(e.g., syntax errors, compilation failures, missing module dependencies, command not found, or successful exit without hitting the bug).\n\n"  # noqa: E501
             "Analyze exit_code, stdout, stderr, and timed_out:\n"
-            "- True Positive: Exit code != 0 due to an AssertionError, panic, crash, or unexpected exception related to the vulnerability described. Or stdout/stderr contains printed proof of leak.\n"
-            "- False Positive: Exit code != 0 due to SyntaxError, ModuleNotFoundError, compile errors, command not found. Or exit code is 0 meaning it failed to trigger the issue.\n\n"
+            "- True Positive: Exit code != 0 due to an AssertionError, panic, crash, or unexpected exception related to the vulnerability described. Or stdout/stderr contains printed proof of leak.\n"  # noqa: E501
+            "- False Positive: Exit code != 0 due to SyntaxError, ModuleNotFoundError, compile errors, command not found. Or exit code is 0 meaning it failed to trigger the issue.\n\n"  # noqa: E501
             "Return the result strictly in JSON format inside markdown code fences:\n"
             "```json\n"
             "{\n"
@@ -122,7 +122,7 @@ class PoCGenerator:
             f"Timed Out: {sandbox_output.get('timed_out')}\n"
             f"Stdout:\n{sandbox_output.get('stdout')}\n\n"
             f"Stderr:\n{sandbox_output.get('stderr')}\n\n"
-            f"Determine if the vulnerability is triggered. Output the JSON payload containing 'is_triggered' (boolean) and 'reason'."
+            f"Determine if the vulnerability is triggered. Output the JSON payload containing 'is_triggered' (boolean) and 'reason'."  # noqa: E501
         )
 
         try:

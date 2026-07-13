@@ -325,7 +325,7 @@ class DatabaseTargetDiscovery:
         """
         return await self._memory.seed_targets_from_json(Path(json_path))
 
-    async def get_next_target(self, excluded_languages: list[str] | None = None) -> TargetRepoEntry | None:
+    async def get_next_target(self, excluded_languages: list[str] | None = None) -> TargetRepoEntry | None:  # noqa: E501
         """Return the target with the oldest scanned_at (or NULL first).
 
         Atomically reserves the target and reads from the target_repos SQLite
@@ -347,7 +347,7 @@ class DatabaseTargetDiscovery:
             status=row.get("status", "PENDING"),
             scanned_at=scanned_at_value,
             language=row.get("language"),
-            bounty_amount=str(row.get("bounty_amount")) if row.get("bounty_amount") is not None else None,
+            bounty_amount=str(row.get("bounty_amount")) if row.get("bounty_amount") is not None else None,  # noqa: E501
             diamond_target=bool(row.get("diamond_target", 0)),
         )
 

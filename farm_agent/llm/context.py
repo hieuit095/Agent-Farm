@@ -342,7 +342,7 @@ def build_generator_system_prompt(
 "NEVER USE \"...\" OR \"# TODO\". YOUR PATCH WILL BE AUTOMATICALLY REJECTED AND YOU WILL BE "
 "PENALIZED IF YOU OMIT ANY ORIGINAL CODE. Every search/replace block MUST contain the complete, "
 "runnable code — no abbreviations, no shortcuts, no ellipsis, no \"rest remains the same\". "
-"If the original function is 50 lines, your replace block must include all 50 lines with the fix applied.\n\n"
+"If the original function is 50 lines, your replace block must include all 50 lines with the fix applied.\n\n"  # noqa: E501
         "MAINTAINER ACCEPTANCE CRITERIA:\n"
         "- Would a busy maintainer merge this in under 30 seconds?\n\n"
         "COMMIT & PR TITLE TONE (MANDATORY):\n"

@@ -68,7 +68,7 @@ class RepoStyleGuide:
             "REPO-SPECIFIC STYLE GUIDE (from CONTRIBUTING.md):\n"
             "You MUST follow these rules exactly. Violations will be penalized by the QA Agent.\n"
             f"{self.raw_summary}\n\n"
-            "If any of these rules conflict with general best practices, the repo-specific rules take precedence.\n"
+            "If any of these rules conflict with general best practices, the repo-specific rules take precedence.\n"  # noqa: E501
         )
 
 
@@ -103,7 +103,7 @@ class RepoGuidelines:
         return bool(self.contributing_md or self.pr_template)
 
     async def discover_subsystem_docs(self, repo_path: str) -> dict[str, str]:
-        """Recursively discover and read documentation files from docs/, architecture/, wiki/ and root README.md."""
+        """Recursively discover and read documentation files from docs/, architecture/, wiki/ and root README.md."""  # noqa: E501
         docs = await asyncio.to_thread(_discover_docs_sync, repo_path)
         self.subsystem_docs = docs
         return docs
@@ -130,7 +130,7 @@ def _discover_docs_sync(repo_path: str) -> dict[str, str]:
             for root_item in os.listdir(repo_path):
                 full_root_item = os.path.join(repo_path, root_item)
                 if os.path.isdir(full_root_item) and root_item.lower() in target_dirs:
-                    for root, dirs, files in os.walk(full_root_item):
+                    for root, _dirs, files in os.walk(full_root_item):
                         for file in files:
                             ext = os.path.splitext(file)[1].lower()
                             if ext in [".md", ".txt", ".rst"]:
@@ -354,15 +354,15 @@ async def llm_summarize_contributing_md(
     content = contributing_md[:6000]
 
     prompt = (
-        "You are analyzing a repository's CONTRIBUTING.md to extract coding and contribution rules.\n"
+        "You are analyzing a repository's CONTRIBUTING.md to extract coding and contribution rules.\n"  # noqa: E501
         "Extract and summarize the following categories as a structured list:\n\n"
         "1. **Code Formatting Rules**: e.g., 'use 4 spaces for indentation', 'no trailing commas', "
         "'use single quotes', 'max line length 120'. List each rule separately.\n"
-        "2. **Commit Message Rules**: e.g., 'use Conventional Commits', 'max 50 chars for subject line', "
+        "2. **Commit Message Rules**: e.g., 'use Conventional Commits', 'max 50 chars for subject line', "  # noqa: E501
         "'use imperative mood'. List each rule separately.\n"
-        "3. **Branch Naming Rules**: e.g., 'use feature/description format', 'use issue number prefix'. "
+        "3. **Branch Naming Rules**: e.g., 'use feature/description format', 'use issue number prefix'. "  # noqa: E501
         "List each rule separately.\n"
-        "4. **PR Requirements**: e.g., 'must have tests', 'must update changelog', 'requires CLA signing'. "
+        "4. **PR Requirements**: e.g., 'must have tests', 'must update changelog', 'requires CLA signing'. "  # noqa: E501
         "List each rule separately.\n"
         "5. **Testing Requirements**: e.g., 'must pass CI', 'add unit tests for new features'. "
         "List each rule separately.\n"
@@ -375,8 +375,8 @@ async def llm_summarize_contributing_md(
     try:
         response = await llm.complete(
             prompt,
-            system="You are a helpful assistant that extracts structured rules from contribution guidelines. "
-            "Be thorough and precise. Only extract rules that are EXPLICITLY stated in the document. "
+            system="You are a helpful assistant that extracts structured rules from contribution guidelines. "  # noqa: E501
+            "Be thorough and precise. Only extract rules that are EXPLICITLY stated in the document. "  # noqa: E501
             "If a rule is ambiguous, quote the original text.",
             temperature=0.1,
         )
@@ -498,10 +498,10 @@ async def llm_fill_pr_template(
         for c in contribution.changes
     ) or files_list
 
-    severity = finding.severity.value if hasattr(finding.severity, "value") else str(finding.severity)
+    severity = finding.severity.value if hasattr(finding.severity, "value") else str(finding.severity)  # noqa: E501
 
     prompt = (
-        f"You are filling out a PR template. You MUST preserve the exact structure of the template. "
+        f"You are filling out a PR template. You MUST preserve the exact structure of the template. "  # noqa: E501
         f"If there are checkboxes like [ ] or [x], you MUST physically check the relevant ones by "
         f"changing them to [x] (e.g., '[x] I have read the contributing guide', '[x] Bug fix'). "
         f"Do NOT leave them blank if they apply.\n\n"
@@ -514,8 +514,8 @@ async def llm_fill_pr_template(
         f"- Affected file(s): {finding.file_path or 'N/A'}\n"
         f"- Suggested fix: {finding.suggestion or 'N/A'}\n"
         f"- Files changed:\n{files_changed}\n"
-        f"- Testing: Existing tests pass, manual review completed, no new warnings/errors introduced.\n\n"
-        f"Fill out the template completely. Preserve ALL markdown formatting, headers, and structure. "
+        f"- Testing: Existing tests pass, manual review completed, no new warnings/errors introduced.\n\n"  # noqa: E501
+        f"Fill out the template completely. Preserve ALL markdown formatting, headers, and structure. "  # noqa: E501
         f"Check ALL applicable checkboxes. Remove any instruction comments (<!-- ... -->) that are "
         f"meant for the template author, not the submitter. "
         f"Do NOT add sections that are not in the template. "

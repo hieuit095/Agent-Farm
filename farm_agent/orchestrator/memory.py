@@ -640,24 +640,24 @@ class Memory:
         try:
             await self._db.execute(
                 """INSERT OR REPLACE INTO knowledge_base (repo_name, entry_type, content, created_at)
-                   VALUES (?, 'qa_lesson', ?, ?)""",
+                   VALUES (?, 'qa_lesson', ?, ?)""",  # noqa: E501
                 (repo_name, content, datetime.now(UTC).isoformat()),
             )
             await self._db.commit()
         except Exception as exc:
             logger.debug("Could not record QA lesson for %s: %s", repo_name, exc)
 
-    async def add_filter_lesson(self, repo: str, layer: int, snippet_or_fix: str, critique: str) -> None:
+    async def add_filter_lesson(self, repo: str, layer: int, snippet_or_fix: str, critique: str) -> None:  # noqa: E501
         """Record a rejection lesson from Layer 1 or Layer 2 filters."""
         if self._db is None:
             return
 
         # Replace tricky quotes to avoid JSON issues, truncation.
-        content = f"[Layer {layer}] Rejected due to: {critique}\nSnippet/Fix context:\n{snippet_or_fix[:500]}..."
+        content = f"[Layer {layer}] Rejected due to: {critique}\nSnippet/Fix context:\n{snippet_or_fix[:500]}..."  # noqa: E501
         try:
             await self._db.execute(
                 """INSERT OR REPLACE INTO knowledge_base (repo_name, entry_type, content, created_at)
-                   VALUES (?, 'FILTER_REJECTION_LESSON', ?, ?)""",
+                   VALUES (?, 'FILTER_REJECTION_LESSON', ?, ?)""",  # noqa: E501
                 (repo, content, datetime.now(UTC).isoformat()),
             )
             await self._db.commit()
@@ -702,7 +702,7 @@ class Memory:
             deleted = cursor.rowcount
             if deleted > 0:
                 logger.info(
-                    "Garbage Collection: purged %d stale knowledge base entries (older than %d days)",
+                    "Garbage Collection: purged %d stale knowledge base entries (older than %d days)",  # noqa: E501
                     deleted,
                     days,
                 )
@@ -781,7 +781,7 @@ class Memory:
         try:
             raw = json_path.read_text(encoding="utf-8")
             entries = _json.loads(raw)
-        except (json.JSONDecodeError, OSError) as exc:
+        except (ValueError, OSError) as exc:
             logger.error("Failed to read target_repo.json for seeding: %s", exc)
             return 0
 
@@ -844,16 +844,16 @@ class Memory:
 
         if excluded_languages:
             placeholders = ",".join(["?"] * len(excluded_languages))
-            query = f"""UPDATE target_repos 
-               SET scanned_at = ? 
-               WHERE repo_url = (SELECT repo_url FROM target_repos WHERE LOWER(language) NOT IN ({placeholders}) ORDER BY COALESCE(scanned_at, 0) ASC, rowid ASC LIMIT 1) 
-               RETURNING *"""
+            query = f"""UPDATE target_repos
+               SET scanned_at = ?
+               WHERE repo_url = (SELECT repo_url FROM target_repos WHERE LOWER(language) NOT IN ({placeholders}) ORDER BY COALESCE(scanned_at, 0) ASC, rowid ASC LIMIT 1)
+               RETURNING *"""  # noqa: E501
             params = (now_ts, *[lang.lower() for lang in excluded_languages])
         else:
-            query = """UPDATE target_repos 
-               SET scanned_at = ? 
-               WHERE repo_url = (SELECT repo_url FROM target_repos ORDER BY COALESCE(scanned_at, 0) ASC, rowid ASC LIMIT 1) 
-               RETURNING *"""
+            query = """UPDATE target_repos
+               SET scanned_at = ?
+               WHERE repo_url = (SELECT repo_url FROM target_repos ORDER BY COALESCE(scanned_at, 0) ASC, rowid ASC LIMIT 1)
+               RETURNING *"""  # noqa: E501
             params = (now_ts,)
 
         cursor = await self._db.execute(query, params)
@@ -865,7 +865,7 @@ class Memory:
 
         cols = [d[0] for d in cursor.description]
         result = dict(zip(cols, row, strict=False))
-        logger.info(f"[TARGET ACQUIRED] Repo: {result.get('repo_url')} | Language: {result.get('language')} | Bounty: {result.get('bounty_amount')} | Diamond: {result.get('diamond_target')}")
+        logger.info(f"[TARGET ACQUIRED] Repo: {result.get('repo_url')} | Language: {result.get('language')} | Bounty: {result.get('bounty_amount')} | Diamond: {result.get('diamond_target')}")  # noqa: E501
         return result
 
     async def mark_target_status(
@@ -964,7 +964,7 @@ class Memory:
 
     async def check_and_record_llm_quota(self, provider: str = "openrouter") -> None:
         """Sliding-window quota checker and recorder for LLM providers.
-        
+
         Hardcoded safety limits: 1000 requests per 5 hours, 10000 per 7 days.
         Uses a 5% safety buffer (950 / 9500) to prevent overshoot.
 
@@ -1103,7 +1103,7 @@ class Memory:
         if self._db is None:
             return None
         cursor = await self._db.execute(
-            "SELECT repo, style_summary, contributing_md, pr_template FROM repo_style_guides WHERE repo = ?",
+            "SELECT repo, style_summary, contributing_md, pr_template FROM repo_style_guides WHERE repo = ?",  # noqa: E501
             (repo,),
         )
         row = await cursor.fetchone()

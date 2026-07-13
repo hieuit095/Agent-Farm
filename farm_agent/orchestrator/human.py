@@ -187,7 +187,7 @@ class SuperHumanLoop:
             username: str = user.get("login", "")
         except Exception as exc:
             logger.warning("Janitor sweep: could not get GitHub username: %s", exc)
-            return {"total_scanned": 0, "garbage_closed": 0, "critical_spared": 0, "errors": 1, "details": []}
+            return {"total_scanned": 0, "garbage_closed": 0, "critical_spared": 0, "errors": 1, "details": []}  # noqa: E501
 
         janitor = PRJanitor(self._pipeline._github, username, self._pipeline.config.llm)
         logger.info("[TERMINATOR] Janitor sweep triggered.")
@@ -278,7 +278,7 @@ class SuperHumanLoop:
         try:
             open_prs = await self._memory.get_prs(status="open", limit=10)
             if open_prs:
-                logger.info("[TERMINATOR] %d PR(s) with open feedback — prioritizing patrol.", len(open_prs))
+                logger.info("[TERMINATOR] %d PR(s) with open feedback — prioritizing patrol.", len(open_prs))  # noqa: E501
                 return True
             return False
         except Exception:
@@ -332,7 +332,7 @@ class SuperHumanLoop:
         while True:
             # ── Graceful shutdown: drain current iteration then exit ──
             if self._is_shutting_down:
-                logger.info("[TERMINATOR] Shutdown signal received — finishing current iteration then exiting.")
+                logger.info("[TERMINATOR] Shutdown signal received — finishing current iteration then exiting.")  # noqa: E501
                 self._daily_log.log_shutdown(self._iteration)
                 logger.info("[TERMINATOR] Graceful shutdown complete. Data secured.")
                 break
@@ -341,7 +341,7 @@ class SuperHumanLoop:
 
             # ── Time-warp exit gate ──
             if time_warp and self._iteration > WARP_MAX_ITERATIONS:
-                logger.info("[TERMINATOR] TIME-WARP: Completed %d iterations — exiting.", WARP_MAX_ITERATIONS)
+                logger.info("[TERMINATOR] TIME-WARP: Completed %d iterations — exiting.", WARP_MAX_ITERATIONS)  # noqa: E501
                 break
 
             # ── Daily reset & KB GC ──
@@ -379,7 +379,7 @@ class SuperHumanLoop:
 
             # ── Deterministic action: hunt first, then patrol ──
             try:
-                prs_opened, repos_scanned = await self._do_hunt()
+                prs_opened, _repos_scanned = await self._do_hunt()
                 if prs_opened > 0:
                     self._prs_created_today += prs_opened
                     logger.info(
