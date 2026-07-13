@@ -58,7 +58,7 @@ class TaskRouter:
         token_estimate: int = 1000,
     ) -> RoutingDecision:
         """Route a task to the best model based on type, complexity, and strategy."""
-        from farm_agent.llm.models import get_models_for_task, ModelTier
+        from farm_agent.llm.models import ModelTier, get_models_for_task
 
         light_tasks = {TaskType.QUICK_FIX, TaskType.DOCS, TaskType.BULK}
         heavy_tasks = {TaskType.ANALYSIS, TaskType.CODE_GEN, TaskType.PLANNING}
