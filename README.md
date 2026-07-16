@@ -15,12 +15,12 @@ Agent-Farm is an autonomous AI agent ecosystem designed to crawl GitHub, pinpoin
 
 ---
 
-## 🔥 Key Features (v4.0.0 Upgrades)
+## 🔥 Key Features
 
 ### 🧠 Omniscient Context Engine
 Upgraded codebase intelligence using Retrieval-Augmented Generation (RAG) powered by ChromaDB. It recursively discovers internal documentation (`.md`, `.txt`, `.rst`), semantically chunks docs by headers, and indexes them to seed local knowledge. Concurrently, it builds AST-based call graphs (for Python, Rust, Go, TypeScript) to inject precise module dependency links ("imports", "calls", "dependents") directly into the prompt context.
 
-### 🛡️ Zero-Garbage PR Gatekeepers
+### 🛡️ Anti-Farming Filter
 Zero tolerance for typo-fixes, formatting tweaks, or documentation-only PRs (README/doc contributions are strictly banned). Implements a two-layer filter system:
 * **Gate 1: EXPERT APPRAISAL (Qwen-3.7-Max):** Renders strict verdicts on findings to filter out false positives and theoretical edge cases.
 * **Gate 2: REAL-WORLD VALUE CHECK:** Vetoes patches targeting dead or deprecated code blocks to avoid sending low-effort spam to maintainers.
@@ -35,15 +35,26 @@ Validates generated patches in isolated Docker sandboxes through a double-pass c
 
 ---
 
+## 🏗️ System Architecture (High-Level)
+
+Agent-Farm orchestrates an autonomous pipeline by discovering repositories, scanning for issues, and executing fixes in an isolated environment.
+
+1. **Discovery & Auditing**: Utilizing the Bloodhound Red Team model (AST-grep + Semgrep), targets are scanned for real vulnerabilities. Trivial issues are filtered via the Anti-Farming Filter.
+2. **Context Engine Mapping**: The codebase is indexed using ChromaDB, enabling semantic understanding of documentation and modular dependencies.
+3. **Execution Sandbox**: Validates patches using Docker to prevent side effects, ensuring patches run flawlessly via dual efficacy and regression passes.
+4. **Contribution Mechanism**: Once changes pass the rigorous Layer 2 Supreme Audit by Gemini, PRs or issue comments are created via the PR Manager.
+
+---
+
 ## 🛠️ Getting Started (1-Click Docker Quick-Start)
 
 Agent-Farm provides a robust, pre-configured Docker setup that mounts the Docker socket from the host to spawn sibling containers for isolated PoC and test execution.
 
 ### Prerequisites
+* **Python** >= 3.11
+* **Docker** >= 7.1
 * **Docker Desktop** installed and running.
 * **Git** installed on the host machine.
-* A GitHub Personal Access Token (PAT) with `repo` scope.
-* An OpenRouter API Key configured with credits.
 
 ### 1-Click Launch
 
@@ -65,12 +76,18 @@ Agent-Farm provides a robust, pre-configured Docker setup that mounts the Docker
      ```
    * *Note: The script will automatically pull the latest codebase, initialize your `.env` configuration file from `.env.example` if missing, build the Docker image, and launch the daemon in the background.*
 
-3. **Configure Settings:**
-   Open the newly created `.env` file and configure your API tokens:
-   ```env
-   GITHUB_TOKEN=your_github_pat_here
-   OPENROUTER_API_KEY=your_openrouter_key_here
-   ```
+3. **Configure Environment Variables (`.env`):**
+   Open the newly created `.env` file and configure your settings. Required and core environment variables:
+   * `GITHUB_TOKEN`: (Required) Your GitHub personal access token with repo, read:org, and workflow scopes.
+   * `OPENROUTER_API_KEY`: API key for general task models via OpenRouter (e.g., Bloodhound audits).
+   * `MINIMAX_API_KEY`: API key for Minimax models.
+   * `TELEGRAM_BOT_TOKEN`: (Optional) Bot token for notifications.
+   * `TELEGRAM_CHAT_ID`: (Optional) Chat ID for notifications.
+   * `SLACK_WEBHOOK_URL`: (Optional) Webhook URL for Slack alerts.
+   * `DISCORD_WEBHOOK_URL`: (Optional) Webhook URL for Discord alerts.
+   * `EXCLUDED_LANGUAGES`: Filter out verbose/costly languages (comma-separated).
+   * `GITHUB_SECONDARY_TOKENS`: Additional tokens for read-only API load distribution.
+   * `MINIMAX_GROUP_ID`: Sent as X-Minimax-Group-Id header.
 
 4. **Attach to the Agent CLI:**
    ```bash
@@ -79,7 +96,7 @@ Agent-Farm provides a robust, pre-configured Docker setup that mounts the Docker
 
 ---
 
-## ⚙️ CLI Command Reference
+## ⚙️ Usage & CLI Commands
 
 Agent-Farm provides a comprehensive suite of Click-based CLI utilities:
 
@@ -93,17 +110,17 @@ farm_agent target <repo_url>
 # Solve open issues in a specific repository
 farm_agent solve <repo_url>
 
-# Run in Hunt Mode: agresively discover repos and solve issues/bugs
+# Run in Hunt Mode: aggressively discover repos and solve issues/bugs
 farm_agent hunt [--rounds N] [--mode analysis|issues|both]
 
-# Run the Relentless 24/7 Super Human loop (patrols PRs and hunts targets)
+# Run the Relentless Circular Target Loop from SQLite target_repos
+farm_agent hunt-circular
+
+# Run the Relentless 24/7 Terminator loop (patrols PRs and hunts targets)
 farm_agent superhuman
 
 # Check open PRs for maintainer comments, answer queries, and push CI auto-fixes
 farm_agent patrol
-
-# Scan and close low-quality/garbage PRs submitted on GitHub
-farm_agent janitor
 
 # Clean up forks where all PRs are closed or merged
 farm_agent cleanup
@@ -113,6 +130,7 @@ farm_agent status
 farm_agent stats
 farm_agent models
 farm_agent leaderboard
+farm_agent system-status
 
 # Run with thorough, standard, or quick presets
 farm_agent profile <profile_name>
@@ -122,6 +140,9 @@ farm_agent reset-db
 
 # Run garbage collection to purge stale knowledge base entries
 farm_agent gc --days 90
+
+# Alumni Sync + Full Friendly Repo List
+farm_agent vips
 ```
 
 ---
