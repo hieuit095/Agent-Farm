@@ -12,6 +12,12 @@ class TestAsyncIOPipeline(unittest.IsolatedAsyncioTestCase):
         self.config = MagicMock()
         self.config.notifications.telegram_token = None
         self.config.notifications.telegram_chat_id = None
+        self.config.pipeline.max_concurrent_repos = 5
+        self.config.pipeline.llm_concurrency_cap = 5
+        self.config.pipeline.rate_limit_cooldown_sec = 10
+        self.config.pipeline.max_concurrent_repos = 5
+        self.config.pipeline.llm_concurrency_cap = 5
+        self.config.pipeline.rate_limit_cooldown_sec = 10
         self.pipeline = FarmAgentPipeline(self.config)
 
     @patch("farm_agent.orchestrator.pipeline.asyncio.to_thread")
