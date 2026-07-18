@@ -147,7 +147,7 @@ OUTPUT STRICT JSON — no markdown, no explanation outside the JSON:
 **PR Title**: {contribution.title}
 **Finding Type**: {finding.type.value} | Severity: {finding.severity.value}
 **Finding Description**: {finding.description}
-**Expected Fix**: {finding.suggestion or '(not provided)'}
+**Expected Fix**: {finding.suggestion or "(not provided)"}
 **Primary File**: {finding.file_path}
 """
         if dependents:
@@ -198,11 +198,17 @@ you MUST REJECT and provide a detailed, specific critique.
                 # Only APPROVE if explicitly stated and no REJECT found
                 return {"decision": "APPROVE", "critique": ""}
             # Fail-Closed: any ambiguity or parse failure → REJECT
-            return {"decision": "REJECT", "critique": f"[Fail-Closed — JSON parse failed, raw: {response[:200]}]"}
+            return {
+                "decision": "REJECT",
+                "critique": f"[Fail-Closed — JSON parse failed, raw: {response[:200]}]",
+            }
 
         decision = parsed.get("decision", "REJECT").strip().upper()
         if decision not in ("APPROVE", "REJECT"):
-            logger.warning("ReviewerAgent: unknown decision '%s' — defaulting to REJECT (Fail-Closed)", decision)
+            logger.warning(
+                "ReviewerAgent: unknown decision '%s' — defaulting to REJECT (Fail-Closed)",
+                decision,
+            )
             decision = "REJECT"
 
         return {
