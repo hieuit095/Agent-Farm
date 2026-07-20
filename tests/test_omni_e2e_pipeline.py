@@ -294,6 +294,9 @@ async def test_omni_e2e_pipeline(tmp_path):
     # ── Config ─────────────────────────────────────────────────────────────
     config = FarmAgentConfig()
     config.pipeline.sandbox_validation_enabled = True
+    config.pipeline.max_concurrent_repos = 3
+    config.pipeline.llm_concurrency_cap = 5
+    config.pipeline.rate_limit_cooldown_sec = 60
     config.github.max_prs_per_day = 10
     config.llm.openrouter_api_key = "sk-test"
     config.llm.model = MODEL_PRIMARY
