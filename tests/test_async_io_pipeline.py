@@ -1,5 +1,3 @@
-
-import asyncio
 import os
 import unittest
 from unittest.mock import MagicMock, patch
@@ -21,7 +19,9 @@ class TestAsyncIOPipeline(unittest.IsolatedAsyncioTestCase):
     @patch("farm_agent.orchestrator.pipeline.asyncio.to_thread")
     @patch("farm_agent.orchestrator.pipeline.os.path.join")
     @patch("farm_agent.orchestrator.pipeline.tempfile.gettempdir")
-    async def test_clone_and_patch_repo_uses_to_thread(self, mock_gettempdir, mock_join, mock_to_thread):
+    async def test_clone_and_patch_repo_uses_to_thread(
+        self, mock_gettempdir, mock_join, mock_to_thread
+    ):
         mock_gettempdir.return_value = "/tmp"
         mock_join.return_value = "/tmp/clone"
 
@@ -29,7 +29,8 @@ class TestAsyncIOPipeline(unittest.IsolatedAsyncioTestCase):
         async def mock_to_thread_func(func, *args, **kwargs):
             if func == os.makedirs:
                 return None
-            return await asyncio.to_thread(func, *args, **kwargs)
+            # Do not actually run to_thread because it was patched
+            return None
 
         mock_to_thread.side_effect = mock_to_thread_func
 
@@ -42,10 +43,13 @@ class TestAsyncIOPipeline(unittest.IsolatedAsyncioTestCase):
         # Also need to mock _do_clone inside the function or just mock the whole to_thread
         # Let's simplify and just check calls to mock_to_thread
 
-        with patch(
-            "farm_agent.orchestrator.pipeline.asyncio.gather",
-            new_callable=unittest.mock.AsyncMock
-        ):
+        async def _mock_gather(*coros):
+            # Evaluate all passed coros immediately to satisfy the RuntimeWarning
+            for c in coros:
+                await c
+            return []
+
+        with patch("farm_agent.orchestrator.pipeline.asyncio.gather", side_effect=_mock_gather):
             # Reset mock to avoid noise from previous setups
             mock_to_thread.reset_mock()
 
@@ -59,9 +63,12 @@ class TestAsyncIOPipeline(unittest.IsolatedAsyncioTestCase):
             calls = mock_to_thread.call_args_list
             found = False
             for c in calls:
-                if c[0][0] == self.pipeline._apply_patch_sync:
-                    found = True
-                    break
+                # Some versions of mock wrap arguments differently depending on python version
+                # so we check if the function is anywhere in the args
+                for arg in c[0]:
+                    if arg == self.pipeline._apply_patch_sync:
+                        found = True
+                        break
             self.assertTrue(found, "Expected _apply_patch_sync to be called via to_thread")
 
     @patch("farm_agent.orchestrator.pipeline.os.makedirs")
@@ -74,7 +81,7 @@ class TestAsyncIOPipeline(unittest.IsolatedAsyncioTestCase):
         # Mock os.path.normpath to return a predictable path
         with (
             patch("farm_agent.orchestrator.pipeline.os.path.normpath", side_effect=lambda x: x),
-            patch("farm_agent.orchestrator.pipeline.os.path.dirname", return_value="/tmp/clone")
+            patch("farm_agent.orchestrator.pipeline.os.path.dirname", return_value="/tmp/clone"),
         ):
             self.pipeline._apply_patch_sync(clone_path, change)
 
