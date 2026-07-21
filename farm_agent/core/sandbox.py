@@ -235,7 +235,7 @@ class DockerSandbox:
 
         if (repo_path / "tox.ini").exists():
             return "tox"
-        
+
         makefile = repo_path / "Makefile"
         if makefile.exists():
             try:
@@ -243,7 +243,7 @@ class DockerSandbox:
                     return "make test"
             except Exception:
                 pass
-                
+
         package_json = repo_path / "package.json"
         if package_json.exists():
             try:
@@ -253,16 +253,16 @@ class DockerSandbox:
                     return "npm test"
             except Exception:
                 pass
-                
+
         if (repo_path / "pytest.ini").exists() or (repo_path / "tests").is_dir():
             return "pytest"
-            
+
         if (repo_path / "Cargo.toml").exists():
             return "cargo test"
-            
+
         if (repo_path / "go.mod").exists():
             return "go test ./..."
-            
+
         return fallback_cmd
 
     async def run_in_sandbox(
@@ -328,7 +328,7 @@ class DockerSandbox:
             raise FileNotFoundError(f"Sandbox repository path does not exist: {repo_dir}")
         if not repo_dir.is_dir():
             raise NotADirectoryError(f"Sandbox repository path is not a directory: {repo_dir}")
-            
+
         resolved_command = self._determine_test_command(repo_dir, fallback_cmd=base_command)
 
         logger.info(
@@ -358,7 +358,7 @@ class DockerSandbox:
 
         import shutil
         import tempfile
-        
+
         logger.info("Starting sandbox container %s for %s", container_name, repo_dir)
 
         try:
@@ -717,7 +717,7 @@ class DockerSandbox:
         try:
             with open(poc_file_path, "w", encoding="utf-8") as f:
                 f.write(poc_content)
-            
+
             # Execute sandbox
             result = await self.run_in_sandbox(
                 repo_path=repo_path,
@@ -746,17 +746,17 @@ class DockerSandbox:
         from pathlib import Path
 
         repo_dir = Path(repo_path).expanduser().resolve()
-        
+
         # Check if tests exist
         has_tests = False
         test_indicators = ["test", "tests", "spec", "specs", "pytest.ini", "tox.ini", "foundry.toml", "hardhat.config.js", "hardhat.config.ts"]
-        
+
         # Check if any folder/file exists
         for ind in test_indicators:
             if (repo_dir / ind).exists():
                 has_tests = True
                 break
-                
+
         # Also check for files with _test.go or test/spec in name
         if not has_tests:
             try:
@@ -768,7 +768,7 @@ class DockerSandbox:
                         break
             except Exception:
                 pass
-                
+
         if not has_tests:
             logger.info("No native test suite detected in %s", repo_path)
             return {

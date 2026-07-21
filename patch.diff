@@ -1,0 +1,19 @@
+--- tests/test_omni_e2e_pipeline.py
++++ tests/test_omni_e2e_pipeline.py
+@@ -48,15 +48,6 @@
+
+ mock_httpx.AsyncClient = MagicMock(return_value=mock_async_client_instance)
+ sys.modules["httpx"] = mock_httpx
+-# create an AsyncMock for aclose so await self._client.aclose() works correctly
+-mock_aclose = AsyncMock(return_value=None)
+-mock_async_client_instance.aclose = mock_aclose
+-mock_httpx.AsyncClient = MagicMock(return_value=mock_async_client_instance)
+-sys.modules["httpx"] = mock_httpx
+-mock_async_client_instance.aclose = AsyncMock(return_value=None)
+-mock_httpx.AsyncClient = MagicMock(return_value=mock_async_client_instance)
+-sys.modules["httpx"] = mock_httpx
+-mock_async_client_instance.aclose = AsyncMock()
+-mock_httpx.AsyncClient = MagicMock(return_value=mock_async_client_instance)
+-sys.modules["httpx"] = mock_httpx
+
+ class MockDockerException(Exception): pass

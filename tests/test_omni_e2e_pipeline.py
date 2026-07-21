@@ -29,7 +29,7 @@ Mocking strategy
 from __future__ import annotations
 
 import sys
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, AsyncMock
 
 # Ensure chromadb is mocked out
 sys.modules['chromadb'] = MagicMock()
@@ -38,6 +38,17 @@ sys.modules['chromadb'] = MagicMock()
 mock_docker = MagicMock()
 mock_docker_errors = MagicMock()
 mock_docker_models = MagicMock()
+# Mock missing dependencies to allow importing farm_agent
+import httpx
+sys.modules["httpx"] = MagicMock()
+mock_httpx = MagicMock()
+mock_async_client_instance = MagicMock()
+mock_aclose = AsyncMock(return_value=None)
+mock_async_client_instance.aclose = mock_aclose
+
+mock_httpx.AsyncClient = MagicMock(return_value=mock_async_client_instance)
+sys.modules["httpx"] = mock_httpx
+mock_aclose = AsyncMock(return_value=None)
 
 class MockDockerException(Exception): pass
 mock_docker_errors.APIError = MockDockerException

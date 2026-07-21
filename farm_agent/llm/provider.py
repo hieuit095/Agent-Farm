@@ -334,7 +334,10 @@ class OpenRouterProvider(LLMProvider):
         raise last_error or LLMError("OpenRouter: all retries exhausted")
 
     async def close(self):
-        await self._client.aclose()
+        if hasattr(self._client, "aclose"):
+            res = self._client.aclose()
+            if hasattr(res, "__await__"):
+                await res
 
 
 # ── Factory ────────────────────────────────────────────────────────────────────

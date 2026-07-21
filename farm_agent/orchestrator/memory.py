@@ -671,7 +671,7 @@ class Memory:
 
         if "://" in repo_name:
             repo_name = repo_name.split("/")[-2] + "/" + repo_name.split("/")[-1]
-        
+
         try:
             cursor = await self._db.execute(
                 """SELECT content FROM knowledge_base
@@ -860,7 +860,7 @@ class Memory:
         cursor = await self._db.execute(query, params)
         row = await cursor.fetchone()
         await self._db.commit()
-        
+
         if row is None:
             return None
 
