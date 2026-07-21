@@ -41,24 +41,14 @@ mock_docker_models = MagicMock()
 # Mock missing dependencies to allow importing farm_agent
 import httpx
 sys.modules["httpx"] = MagicMock()
-# Mock httpx AsyncClient
 mock_httpx = MagicMock()
 mock_async_client_instance = MagicMock()
-mock_async_client_instance.aclose = AsyncMock(return_value=None)
+mock_aclose = AsyncMock(return_value=None)
+mock_async_client_instance.aclose = mock_aclose
+
 mock_httpx.AsyncClient = MagicMock(return_value=mock_async_client_instance)
-
 sys.modules["httpx"] = mock_httpx
-
-sys.modules["aiohttp"] = MagicMock()
-sys.modules["httpx"] = MagicMock()
-# Mock httpx AsyncClient
-mock_httpx = MagicMock()
-mock_async_client_instance = MagicMock()
-mock_async_client_instance.aclose = AsyncMock(return_value=None)
-mock_httpx.AsyncClient = MagicMock(return_value=mock_async_client_instance)
-
-sys.modules["httpx"] = mock_httpx
-
+mock_aclose = AsyncMock(return_value=None)
 
 class MockDockerException(Exception): pass
 mock_docker_errors.APIError = MockDockerException

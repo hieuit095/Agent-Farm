@@ -9,12 +9,13 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import json
 import logging
 import re
 import time
 import uuid
 from fnmatch import fnmatch
+
+import json
 from pathlib import Path
 
 from farm_agent.core.config import AnalysisConfig
@@ -1182,7 +1183,7 @@ class BloodhoundAnalyzer:
             logger.info("Semgrep found %d matches for %s", len(matches), repo_path.name)
             return matches
 
-        except TimeoutError:
+        except asyncio.TimeoutError:
             logger.warning("Semgrep scan timed out (%ds) for %s", self.SEMGREP_TIMEOUT, repo_path.name)
             return []
         except json.JSONDecodeError:

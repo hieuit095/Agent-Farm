@@ -13,7 +13,6 @@ class TestAsyncIOPipeline(unittest.IsolatedAsyncioTestCase):
         self.config = MagicMock()
         self.config.pipeline.max_concurrent_repos = 5
         self.config.pipeline.llm_concurrency_cap = 5
-        self.config.llm.provider = "openrouter"
         self.config.notifications.telegram_token = None
         self.config.notifications.telegram_chat_id = None
         self.pipeline = FarmAgentPipeline(self.config)
