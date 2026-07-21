@@ -671,7 +671,7 @@ class Memory:
 
         if "://" in repo_name:
             repo_name = repo_name.split("/")[-2] + "/" + repo_name.split("/")[-1]
-        
+
         try:
             cursor = await self._db.execute(
                 """SELECT content FROM knowledge_base
@@ -724,11 +724,10 @@ class Memory:
         if self._db is None:
             return 0
 
-        import time as _time
         try:
             # Compute UTC midnight as Unix timestamp for today
             import datetime as _dt
-            now_utc = _dt.datetime.now(_dt.timezone.utc)
+            now_utc = _dt.datetime.now(_dt.UTC)
             midnight_utc = now_utc.replace(hour=0, minute=0, second=0, microsecond=0)
             day_start_ts = midnight_utc.timestamp()
 
@@ -860,7 +859,7 @@ class Memory:
         cursor = await self._db.execute(query, params)
         row = await cursor.fetchone()
         await self._db.commit()
-        
+
         if row is None:
             return None
 

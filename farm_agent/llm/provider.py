@@ -216,6 +216,7 @@ class OpenRouterProvider(LLMProvider):
     def __init__(self, config: LLMConfig):
         super().__init__(config)
 
+
         import httpx
 
         headers = {
@@ -248,6 +249,7 @@ class OpenRouterProvider(LLMProvider):
         max_tokens: int | None = None,
         **kwargs,
     ) -> str:
+
         import httpx
 
         temp = temperature if temperature is not None else self.temperature
@@ -273,7 +275,7 @@ class OpenRouterProvider(LLMProvider):
 
                 choices = data.get("choices", [])
                 if not choices:
-                    last_error = LLMError(f"OpenRouter returned empty choices (attempt {attempt + 1}/3)")
+                    last_error = LLMError(f"OpenRouter empty choices (attempt {attempt + 1}/3)")
                     if attempt < 2:
                         import asyncio as _asyncio
                         await _asyncio.sleep(5 * (attempt + 1))
@@ -334,7 +336,11 @@ class OpenRouterProvider(LLMProvider):
         raise last_error or LLMError("OpenRouter: all retries exhausted")
 
     async def close(self):
-        await self._client.aclose()
+        import asyncio
+        if hasattr(self._client, "aclose") and asyncio.iscoroutinefunction(self._client.aclose):
+            await self._client.aclose()
+        else:
+            pass
 
 
 # ── Factory ────────────────────────────────────────────────────────────────────

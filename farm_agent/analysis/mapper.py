@@ -552,7 +552,7 @@ class RepoMapper:
             module_clean = module.replace("crate::", "").replace("::", "/")
             parts = module_clean.split("/")
             module_clean_parent = "/".join(parts[:-1]) if len(parts) > 1 else ""
-            
+
             rust_candidates = []
             for m in [module_clean, module_clean_parent]:
                 if m:
@@ -679,7 +679,7 @@ class RepoMapper:
                     resolved_call_path = self._resolve_module_to_path(imp, filepath, contents)
                     if resolved_call_path:
                         break
-            
+
             if resolved_call_path:
                 if resolved_call_path != filepath and resolved_call_path not in resolved_calls:
                     resolved_calls.append(resolved_call_path)
