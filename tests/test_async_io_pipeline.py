@@ -11,6 +11,10 @@ from farm_agent.orchestrator.pipeline import FarmAgentPipeline
 class TestAsyncIOPipeline(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.config = MagicMock()
+        self.config.pipeline.max_concurrent_repos = 5
+        self.config.pipeline.llm_concurrency_cap = 5
+        self.config.pipeline.rate_limit_cooldown_sec = 300
+        self.config.llm.provider = 'openrouter'
         self.config.notifications.telegram_token = None
         self.config.notifications.telegram_chat_id = None
         self.pipeline = FarmAgentPipeline(self.config)
@@ -25,6 +29,8 @@ class TestAsyncIOPipeline(unittest.IsolatedAsyncioTestCase):
         # Mocking the clone behavior
         async def mock_to_thread_func(func, *args, **kwargs):
             if func == os.makedirs:
+                return None
+            if func == self.pipeline._apply_patch_sync:
                 return None
             return await asyncio.to_thread(func, *args, **kwargs)
 
@@ -42,7 +48,8 @@ class TestAsyncIOPipeline(unittest.IsolatedAsyncioTestCase):
         with patch(
             "farm_agent.orchestrator.pipeline.asyncio.gather",
             new_callable=unittest.mock.AsyncMock
-        ):
+        ), patch("farm_agent.orchestrator.pipeline.asyncio.to_thread", new_callable=unittest.mock.AsyncMock) as to_thread_gather_patch:
+
             # Reset mock to avoid noise from previous setups
             mock_to_thread.reset_mock()
 
@@ -53,7 +60,7 @@ class TestAsyncIOPipeline(unittest.IsolatedAsyncioTestCase):
 
             # Verify that _apply_patch_sync was wrapped in to_thread
             # The first argument to to_thread should be self.pipeline._apply_patch_sync
-            calls = mock_to_thread.call_args_list
+            calls = to_thread_gather_patch.call_args_list
             found = False
             for c in calls:
                 if c[0][0] == self.pipeline._apply_patch_sync:
