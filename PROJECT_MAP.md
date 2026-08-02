@@ -62,9 +62,36 @@ The CLI is Click-based and located in [main.py](file:///c:/Users/USER/Documents/
 
 ---
 
-## 3. Core Execution Pipelines
+## 3. Core Module Dependency Graph
 
-### 3A. Standard Pipeline — `_process_repo()` ([pipeline.py:1172](file:///c:/Users/USER/Documents/GitHub/Agent-Farm/farm_agent/orchestrator/pipeline.py#L1172))
+```mermaid
+graph TD
+    CLI["CLI (cli/main.py)"] --> Orch["Orchestrator (orchestrator/pipeline.py)"]
+
+    Orch --> GC["GitHubClient (github/client.py)"]
+    Orch --> Mem["Memory Database (orchestrator/memory.py)"]
+    Orch --> Disc["RepoDiscovery (github/discovery.py)"]
+    Orch --> CA["CodeAnalyzer & Bloodhound (analysis/analyzer.py)"]
+    Orch --> Gen["ContributionGenerator (generator/engine.py)"]
+    Orch --> PR["PRManager (pr/manager.py)"]
+    Orch --> Sand["DockerSandbox (core/sandbox.py)"]
+
+    Gen --> RAG["Omniscient Context Engine (core/rag.py)"]
+    Gen --> PoC["PoC Generator (generator/poc.py)"]
+
+    CA --> LLM["LLM Provider (llm/provider.py)"]
+    Gen --> LLM
+    PR --> LLM
+    PoC --> LLM
+
+    Sand -- "Validates Patches" --> Gen
+```
+
+---
+
+## 4. Core Execution Pipelines
+
+### 4A. Standard Pipeline — `_process_repo()` ([pipeline.py:1172](file:///c:/Users/USER/Documents/GitHub/Agent-Farm/farm_agent/orchestrator/pipeline.py#L1172))
 
 Processes a single repository through the full contribution pipeline:
 
@@ -161,7 +188,7 @@ _process_repo(repo)
 
 ---
 
-### 3B. Circular target pipeline — `run_circular()` ([pipeline.py:834](file:///c:/Users/USER/Documents/GitHub/Agent-Farm/farm_agent/orchestrator/pipeline.py#L834))
+### 4B. Circular target pipeline — `run_circular()` ([pipeline.py:834](file:///c:/Users/USER/Documents/GitHub/Agent-Farm/farm_agent/orchestrator/pipeline.py#L834))
 
 Circular target pipeline loop extracting target repos from the local SQLite queue:
 
@@ -207,7 +234,7 @@ run_circular()
 
 ---
 
-## 4. Adaptive Concurrency & Throttling
+## 5. Adaptive Concurrency & Throttling
 
 To prevent LLM rate limit exhaustion (HTTP 429 thundering herd) during parallel executions, the system utilizes the `AdaptiveConcurrencyManager` ([pipeline.py:214](file:///c:/Users/USER/Documents/GitHub/Agent-Farm/farm_agent/orchestrator/pipeline.py#L214)):
 
@@ -219,7 +246,7 @@ To prevent LLM rate limit exhaustion (HTTP 429 thundering herd) during parallel 
 
 ---
 
-## 5. PR Patrol Daemon & CI Auto-Fix Loop
+## 6. PR Patrol Daemon & CI Auto-Fix Loop
 
 The `PRPatrol` module ([patrol.py:152](file:///c:/Users/USER/Documents/GitHub/Agent-Farm/farm_agent/pr/patrol.py#L152)) runs continuously to manage active contributions:
 
@@ -241,7 +268,7 @@ The `PRPatrol` module ([patrol.py:152](file:///c:/Users/USER/Documents/GitHub/Ag
 
 ---
 
-## 6. Omniscient Context Engine & Subsystems
+## 7. Omniscient Context Engine & Subsystems
 
 Version 4.0.0 upgrades the system's codebase understanding from superficial file scans to deep documentation and linkage maps:
 
@@ -260,7 +287,7 @@ Version 4.0.0 upgrades the system's codebase understanding from superficial file
 
 ---
 
-## 7. SQLite Schema & Persistence
+## 8. SQLite Schema & Persistence
 
 Database file resides in `data/memory.db` and operates in **WAL (Write-Ahead Logging)** mode. Composite indices prevent full table scans.
 
@@ -300,82 +327,42 @@ Database file resides in `data/memory.db` and operates in **WAL (Write-Ahead Log
 
 ---
 
-## 8. Directory & Module Architecture
+## 9. Directory & Module Architecture
 
 ```
-.                                       # Workspace Root (v4.0.0)
-├── Dockerfile                          # Stage 1 builder (wheel creation) + Stage 2 lean runtime v4.0.0
-├── docker-compose.yml                  # agent-farm service definition with volumes (data/, logs/, secret_findings/)
-├── start.sh                            # Unix quick start wrapper script
-├── start.bat                           # Windows quick start wrapper script
-│
-├── farm_agent/                         # Package root (version = "4.0.0")
-│   ├── __init__.py
-│   │
-│   ├── cli/
-│   │   └── main.py                     # Click CLI — command registrations
-│   │
-│   ├── core/
-│   │   ├── config.py                   # Pydantic v2 config and YAML loading
-│   │   ├── daily_log.py                # Formats daily markdown activity logs
-│   │   ├── exceptions.py               # System exception types hierarchy
-│   │   ├── leaderboard.py              # Leaderboard stat collections
-│   │   ├── logger.py                   # Rotating file logging system setup
-│   │   ├── middleware.py               # Context middleware chain layers
-│   │   ├── models.py                   # Core Pydantic data structures definitions
-│   │   ├── notifier.py                 # Telegram notifications integration
-│   │   ├── profiles.py                 # Thorough, quick, and standard run configurations
-│   │   ├── quotas.py                   # OpenRouter usage quota controllers
-│   │   ├── rag.py                      # ChromaDB vector DB context loaders (with semantic markdown header chunking)
-│   │   ├── retry.py                    # Retry decorators for GitHub/LLM interfaces
-│   │   └── sandbox.py                  # DockerSandbox engine with Polyglot Guillotine, PoC execution context mapping
-│   │
-│   ├── analysis/
-│   │   ├── analyzer.py                 # CodeAnalyzer (parallelized security, quality, UX scanners) & BloodhoundAnalyzer
-│   │   └── mapper.py                   # RepoMapper (AST/regex dependency graphing)
-│   │
-│   ├── generator/
-│   │   ├── engine.py                   # ContributionGenerator (Patch and file correction)
-│   │   ├── poc.py                      # PoCGenerator (PoC validation & LLM evaluation)
-│   │   ├── reviewer.py                 # ReviewerAgent (Self-reflective code auditor with Blast Radius checks)
-│   │   └── scorer.py                   # QAHardcoreScorer (Qwen-based QA grader)
-│   │
-│   ├── github/
-│   │   ├── client.py                   # Async-retrying GitHub REST and GraphQL Client
-│   │   ├── discovery.py                # Target network search and crawler discoverers
-│   │   ├── guidelines.py               # Guidelines, PR templates, and subsystem doc discovery
-│   │   └── security_gate.py            # Identifies private security disclosure files
-│   │
-│   ├── issues/
-│   │   └── solver.py                   # IssueSolver (solves issues, multi-file deep planner)
-│   │
-│   ├── llm/
-│   │   ├── agents.py                   # LLM agent prompts and routing models
-│   │   ├── context.py                  # Generator system instruction builders
-│   │   ├── models.py                   # Model registry definitions
-│   │   ├── provider.py                 # OpenRouter integration handlers
-│   │   └── router.py                   # Task router mapping
-│   │
-│   ├── orchestrator/
-│   │   ├── memory.py                   # Persistence memory sqlite connection interface
-│   │   ├── pipeline.py                 # Pipeline (Standard & Circular pipelines implementation)
-│   │   └── human.py                    # SuperHumanLoop relentless daily scheduler
-│   │
-│   ├── pr/
-│   │   ├── manager.py                  # Pull Request manager (forking, branches, commits)
-│   │   ├── patrol.py                   # PR Patrol (reviews comments, fixes CI errors)
-│   │   └── janitor.py                  # PR Janitor (sweeps and destroys garbage PRs)
-│   │
-│   ├── agents/
-│   │   └── registry.py                 # Task agent configurations
-│   │
-│   └── tools/
-│       └── protocol.py                 # CLI tool protocols
+.
+├── farm_agent/                     # Core application package
+│   ├── agents/                     # Specialized agent registry
+│   ├── analysis/                   # Code analysis, Bloodhound, ast-grep, Semgrep
+│   ├── cli/                        # Click-based CLI entry points (main.py)
+│   ├── core/                       # Core orchestration, configuration, logging, sandbox
+│   ├── generator/                  # Contribution patch/PoC generation and scoring
+│   ├── github/                     # GitHub API client, discovery, guidelines handling
+│   ├── issues/                     # Issue-First Protocol solver
+│   ├── llm/                        # LLM Provider integrations and routing
+│   ├── notifications/              # Telegram, Slack, Discord notifiers
+│   ├── orchestrator/               # Core execution loops (pipeline.py, memory.py, human.py)
+│   ├── plugins/                    # Extensible plugin system
+│   ├── pr/                         # PR management, Janitor, Patrol
+│   ├── templates/                  # Contribution templates
+│   └── tools/                      # Tool registry protocol
+├── tests/                          # Pytest unit tests
+├── scripts/                        # Utility scripts
+├── secret_findings/                # Secure output for private disclosures
+├── sg-extract/                     # External extraction utilities
+├── docker-compose.yml              # Docker environment definitions
+├── Dockerfile                      # Application container build file
+├── Makefile                        # Common project tasks (make install, make test)
+├── pyproject.toml                  # Python package configuration
+├── requirements.txt                # Dependency list
+├── start.bat                       # 1-Click Launch script for Windows
+├── start.sh                        # 1-Click Launch script for Unix
+└── target_repo.json                # Seed file for Circular Target Loop
 ```
 
 ---
 
-## 9. Error Handling & Fallback Matrix
+## 10. Error Handling & Fallback Matrix
 
 | Scenario | Behavior |
 |----------|----------|
