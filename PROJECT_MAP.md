@@ -58,7 +58,7 @@ The CLI is Click-based and located in [main.py](file:///c:/Users/USER/Documents/
 | `farm_agent models` | `show_models()` | List the active LLM routing mappings. |
 | `farm_agent leaderboard` | `show_leaderboard()` | Show leaderboards of merged and submitted contributions. |
 | `farm_agent gc` | `gc()` | Purge knowledge base entries older than N days. |
-| `farm_agent janitor` | `SweepAndDestroy()` | Sweeps all open PRs and closes/deletes low-quality/garbage contributions. |
+
 
 ---
 
@@ -300,9 +300,11 @@ Database file resides in `data/memory.db` and operates in **WAL (Write-Ahead Log
 
 ---
 
+---
+
 ## 8. Directory & Module Architecture
 
-```
+```text
 .                                       # Workspace Root (v4.0.0)
 ├── Dockerfile                          # Stage 1 builder (wheel creation) + Stage 2 lean runtime v4.0.0
 ├── docker-compose.yml                  # agent-farm service definition with volumes (data/, logs/, secret_findings/)
@@ -371,6 +373,38 @@ Database file resides in `data/memory.db` and operates in **WAL (Write-Ahead Log
 │   │
 │   └── tools/
 │       └── protocol.py                 # CLI tool protocols
+```
+
+## 8.5 Core Module Dependency Graph
+
+```mermaid
+graph TD
+    A[CLI / main.py] --> B(Orchestrator / Pipeline)
+    B --> C{Discovery & Memory}
+    C -->|Fetch targets| D[GitHub Client]
+    C -->|Read/Write state| E[(SQLite / memory.db)]
+
+    B --> F[Analysis Phase]
+    F --> G[CodeAnalyzer / Bloodhound]
+    F --> H[RepoMapper AST/Regex]
+    F --> I[Omniscient Context RAG / ChromaDB]
+
+    B --> J[Generator Phase]
+    J --> K[ContributionGenerator]
+    K --> L[PoCGenerator]
+    L --> M((DockerSandbox))
+
+    B --> N[Gatekeepers]
+    N --> O[Qwen Layer 1 Appraiser]
+    N --> P[Gemini Layer 2 Supreme Auditor]
+
+    B --> Q[PR Manager]
+    Q --> D
+
+    R[PR Patrol / patrol.py] --> D
+    R --> M
+    S[Issue Solver / solver.py] --> D
+    S --> M
 ```
 
 ---
