@@ -17,7 +17,6 @@ Version 4.0.0 introduces the **Omniscient Context Engine**, which recursively di
 | Component | Technology | Source |
 |-----------|------------|--------|
 | Language | Python 3.11+ | `pyproject.toml` |
-| HTTP client | `httpx` (async) | `pyproject.toml` |
 | Primary LLM | `deepseek/deepseek-v4-flash` via OpenRouter | `config.py:56` |
 | Code Gen LLM | `deepseek/deepseek-v4-pro` via OpenRouter | `pipeline.py:395` |
 | Layer 1 Appraiser | `qwen/qwen3.7-max` via OpenRouter | `pipeline.py:2790` |
@@ -30,7 +29,6 @@ Version 4.0.0 introduces the **Omniscient Context Engine**, which recursively di
 | CLI | `click>=8.1` + `rich>=13.0` | `main.py` |
 | Vector DB | `chromadb>=0.4` — RAG for file & documentation context | `core/rag.py` |
 | Notifications | Telegram / Slack / Discord | `notifier.py` |
-
 ---
 
 ## 2. CLI Commands
@@ -302,12 +300,14 @@ Database file resides in `data/memory.db` and operates in **WAL (Write-Ahead Log
 
 ## 8. Directory & Module Architecture
 
-```
+```text
 .                                       # Workspace Root (v4.0.0)
 ├── Dockerfile                          # Stage 1 builder (wheel creation) + Stage 2 lean runtime v4.0.0
 ├── docker-compose.yml                  # agent-farm service definition with volumes (data/, logs/, secret_findings/)
 ├── start.sh                            # Unix quick start wrapper script
 ├── start.bat                           # Windows quick start wrapper script
+├── pyproject.toml                      # Build config and dependencies (Hatchling)
+├── requirements.txt                    # Standalone dependencies list
 │
 ├── farm_agent/                         # Package root (version = "4.0.0")
 │   ├── __init__.py
@@ -363,12 +363,14 @@ Database file resides in `data/memory.db` and operates in **WAL (Write-Ahead Log
 │   │
 │   ├── pr/
 │   │   ├── manager.py                  # Pull Request manager (forking, branches, commits)
-│   │   ├── patrol.py                   # PR Patrol (reviews comments, fixes CI errors)
-│   │   └── janitor.py                  # PR Janitor (sweeps and destroys garbage PRs)
+│   │   └── patrol.py                   # PR Patrol (reviews comments, fixes CI errors)
 │   │
 │   ├── agents/
 │   │   └── registry.py                 # Task agent configurations
 │   │
+│   ├── plugins/                        # Plugin extensions
+│   ├── templates/                      # Formatting templates for PR descriptions
+│   ├── notifications/                  # Notification integrations
 │   └── tools/
 │       └── protocol.py                 # CLI tool protocols
 ```
@@ -393,3 +395,43 @@ Database file resides in `data/memory.db` and operates in **WAL (Write-Ahead Log
 ---
 
 *All evidence anchored to source files. All line numbers verified by direct inspection. No speculation.*
+---
+
+## 10. Core Module Dependency Graph
+
+```mermaid
+graph TD
+    subgraph Orchestration
+        CLI[cli/main.py] --> SHL[SuperHumanLoop]
+        CLI --> Pipe[FarmAgentPipeline]
+        SHL --> Pipe
+        SHL --> Patrol[PRPatrol]
+        Pipe --> ISS[IssueSolver]
+    end
+
+    subgraph Data & Storage
+        Pipe --> Mem[Memory/SQLite]
+        Pipe --> RAG[ChromaDB/RAG]
+    end
+
+    subgraph Analysis & Generation
+        Pipe --> CA[CodeAnalyzer]
+        Pipe --> RM[RepoMapper]
+        CA --> L1[Layer 1 Appraiser]
+        Pipe --> PoC[PoCGenerator]
+        Pipe --> CG[ContributionGenerator]
+        PoC --> DB[DockerSandbox]
+        CG --> DB
+        CG --> QS[QAHardcoreScorer]
+        Pipe --> L2[Layer 2 Supreme Audit]
+    end
+
+    subgraph External Interaction
+        Pipe --> GHC[GitHubClient]
+        Patrol --> GHC
+        Pipe --> Notif[Notifier]
+    end
+
+    RM --> CG
+    RAG --> CG
+```
