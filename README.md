@@ -20,7 +20,7 @@ Agent-Farm is an autonomous AI agent ecosystem designed to crawl GitHub, pinpoin
 ### 🧠 Omniscient Context Engine
 Upgraded codebase intelligence using Retrieval-Augmented Generation (RAG) powered by ChromaDB. It recursively discovers internal documentation (`.md`, `.txt`, `.rst`), semantically chunks docs by headers, and indexes them to seed local knowledge. Concurrently, it builds AST-based call graphs (for Python, Rust, Go, TypeScript) to inject precise module dependency links ("imports", "calls", "dependents") directly into the prompt context.
 
-### 🛡️ Zero-Garbage PR Gatekeepers
+### 🛡️ Anti-Farming Filter
 Zero tolerance for typo-fixes, formatting tweaks, or documentation-only PRs (README/doc contributions are strictly banned). Implements a two-layer filter system:
 * **Gate 1: EXPERT APPRAISAL (Qwen-3.7-Max):** Renders strict verdicts on findings to filter out false positives and theoretical edge cases.
 * **Gate 2: REAL-WORLD VALUE CHECK:** Vetoes patches targeting dead or deprecated code blocks to avoid sending low-effort spam to maintainers.
@@ -35,18 +35,30 @@ Validates generated patches in isolated Docker sandboxes through a double-pass c
 
 ---
 
+## 🏗️ System Architecture (High-Level)
+
+Agent-Farm leverages a multi-stage execution pipeline backed by persistent SQLite memory and an isolated Docker sandbox environment. The high-level architecture flows as follows:
+
+1. **Discovery & Targeting**: Repositories are targeted either deterministically (via circular queues) or reactively. The orchestrator clones them to a temporary directory.
+2. **Analysis & Appraisal**: The `CodeAnalyzer` detects potential vulnerabilities using LLMs and Semgrep rulesets. Findings are appraised by a first-layer expert LLM (Qwen).
+3. **PoC & Patch Generation**: `PoCGenerator` validates vulnerabilities dynamically in a sandbox. Then, `ContributionGenerator` writes patches based on the codebase context map (AST dependencies & documentation via ChromaDB RAG).
+4. **DEV-QA Validation Loop**: Patches are subjected to a rigorous sandbox validation (Pass 1: Efficacy, Pass 2: Regression). Failures trigger self-correcting fix attempts.
+5. **Submission**: A final Supreme Audit (Gemini) verifies the work before a Pull Request is submitted or a private security disclosure is logged.
+
+---
+
 ## 🛠️ Getting Started (1-Click Docker Quick-Start)
 
 Agent-Farm provides a robust, pre-configured Docker setup that mounts the Docker socket from the host to spawn sibling containers for isolated PoC and test execution.
 
 ### Prerequisites
-* **Docker Desktop** installed and running.
+* **Docker >= 7.1** installed and running.
+* **Python >= 3.11** (if running outside Docker).
 * **Git** installed on the host machine.
 * A GitHub Personal Access Token (PAT) with `repo` scope.
 * An OpenRouter API Key configured with credits.
 
-### 1-Click Launch
-
+### Installation Steps
 1. **Clone the Repository:**
    ```bash
    git clone https://github.com/hieuit095/Agent-Farm.git
@@ -65,17 +77,33 @@ Agent-Farm provides a robust, pre-configured Docker setup that mounts the Docker
      ```
    * *Note: The script will automatically pull the latest codebase, initialize your `.env` configuration file from `.env.example` if missing, build the Docker image, and launch the daemon in the background.*
 
-3. **Configure Settings:**
-   Open the newly created `.env` file and configure your API tokens:
-   ```env
-   GITHUB_TOKEN=your_github_pat_here
-   OPENROUTER_API_KEY=your_openrouter_key_here
-   ```
+### Environment Variables
+Configure your `.env` file with the following variables:
 
-4. **Attach to the Agent CLI:**
-   ```bash
-   docker exec -it agent-farm farm_agent superhuman
-   ```
+```env
+# Primary GitHub API token (Required)
+GITHUB_TOKEN=your_github_pat_here
+
+# OpenRouter API Key for main LLM operations (Required)
+OPENROUTER_API_KEY=your_openrouter_key_here
+
+# Additional GitHub tokens for GET request load distribution (Optional)
+GITHUB_SECONDARY_TOKENS=token1,token2
+
+# Exclude specific languages from analysis to save LLM budget (Optional)
+EXCLUDED_LANGUAGES=javascript,typescript
+
+# Notifications (Optional)
+TELEGRAM_BOT_TOKEN=your_telegram_bot_token
+TELEGRAM_CHAT_ID=your_telegram_chat_id
+SLACK_WEBHOOK_URL=your_slack_webhook
+DISCORD_WEBHOOK_URL=your_discord_webhook
+```
+
+### Attaching to the CLI
+```bash
+docker exec -it agent-farm farm_agent superhuman
+```
 
 ---
 
@@ -96,14 +124,11 @@ farm_agent solve <repo_url>
 # Run in Hunt Mode: agresively discover repos and solve issues/bugs
 farm_agent hunt [--rounds N] [--mode analysis|issues|both]
 
-# Run the Relentless 24/7 Super Human loop (patrols PRs and hunts targets)
+# Run the Relentless 24/7 Super Human loop (Terminator Mode)
 farm_agent superhuman
 
 # Check open PRs for maintainer comments, answer queries, and push CI auto-fixes
 farm_agent patrol
-
-# Scan and close low-quality/garbage PRs submitted on GitHub
-farm_agent janitor
 
 # Clean up forks where all PRs are closed or merged
 farm_agent cleanup
@@ -113,6 +138,10 @@ farm_agent status
 farm_agent stats
 farm_agent models
 farm_agent leaderboard
+farm_agent system-status
+
+# Monitor and synchronize VIP repository radar list
+farm_agent vips
 
 # Run with thorough, standard, or quick presets
 farm_agent profile <profile_name>
