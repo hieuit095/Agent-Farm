@@ -1495,4 +1495,46 @@ class GitHubClient:
             has_license=data.get("license") is not None,
         )
 
+    # ── Security Advisory & Responsible Disclosure ─────────────────────────
+
+    async def check_private_vulnerability_reporting(self, owner: str, repo: str) -> bool:
+        """Check if private vulnerability reporting is enabled for the repository."""
+        try:
+            repo_data = await self._get(f"/repos/{owner}/{repo}")
+            if repo_data and repo_data.get("private_vulnerability_reporting_enabled") is True:
+                return True
+            return False
+        except Exception as e:
+            logger.debug("Failed to check private vulnerability reporting for %s/%s: %s", owner, repo, e)
+            return False
+
+    async def submit_security_advisory_report(
+        self,
+        owner: str,
+        repo: str,
+        summary: str,
+        description: str,
+        cwe_ids: list[str] | None = None,
+        severity: str = "high",
+    ) -> dict | None:
+        """Submit a private security advisory report directly to repository maintainers via GHSA API.
+
+        Endpoint: POST /repos/{owner}/{repo}/security-advisories/reports
+        """
+        payload = {
+            "summary": summary,
+            "description": description,
+            "severity": severity.lower(),
+        }
+        if cwe_ids:
+            payload["cwe_ids"] = cwe_ids
+
+        try:
+            res = await self._post(f"/repos/{owner}/{repo}/security-advisories/reports", json=payload)
+            logger.info("Successfully submitted private security advisory to %s/%s", owner, repo)
+            return res
+        except Exception as e:
+            logger.warning("Failed to submit security advisory via GHSA API to %s/%s: %s", owner, repo, e)
+            return None
+
 

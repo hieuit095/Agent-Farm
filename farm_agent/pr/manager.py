@@ -165,8 +165,11 @@ class PRManager:
             # GitHub forks take a few seconds to process; 404 without this
             await self._github.wait_for_fork_accessibility(fork_owner, fork_name)
 
-            # 2. Create branch on the fork
-            branch = contribution.branch_name or self._human_branch_name(contribution)
+            # Detect git conventions of target repository (conventional, title-case, lowercase)
+            git_style = await self.detect_repo_git_style(target_repo.owner, target_repo.name)
+
+            # 2. Create branch on the fork (adapted to repo conventions)
+            branch = contribution.branch_name or self.generate_adapted_branch_name(contribution, git_style)
             await self._github.create_branch(fork_owner, fork_name, branch)
 
             # 3. Gather all file changes (patches + tests)
@@ -210,8 +213,9 @@ class PRManager:
                 fork_owner, fork_name, base_tree_sha, tree_entries
             )
 
-            # 4d. Build commit message with DCO signoff
-            commit_msg = contribution.commit_message
+            # 4d. Build commit message with adapted style and DCO signoff
+            raw_msg = contribution.commit_message or contribution.title
+            commit_msg = self.adapt_commit_message(raw_msg, git_style, contribution.title)
             if signoff and "Signed-off-by:" not in commit_msg:
                 commit_msg = f"{commit_msg}\n\nSigned-off-by: {signoff}"
 
@@ -365,10 +369,92 @@ class PRManager:
         # Create fork
         return await self._github.fork_repository(repo.owner, repo.name)
 
-    @staticmethod
-    def _human_branch_name(contribution: Contribution) -> str:
-        """Generate a natural-looking branch name (no tool branding)."""
+    # ── Git Style Adaptation ─────────────────────────────────────────────
 
+    async def detect_repo_git_style(self, owner: str, repo: str) -> dict[str, str]:
+        """Detect git commit message style and branch naming pattern from recent commits."""
+        style = {
+            "commit_style": "conventional",
+            "branch_style": "prefix_slash",
+        }
+        try:
+            commits = await self._github._get(f"/repos/{owner}/{repo}/commits?per_page=5")
+            if not commits or not isinstance(commits, list):
+                return style
+
+            messages = []
+            for c in commits:
+                commit_obj = c.get("commit", {})
+                msg = commit_obj.get("message", "").split("\n")[0].strip()
+                if msg:
+                    messages.append(msg)
+
+            if not messages:
+                return style
+
+            conventional_count = 0
+            title_case_count = 0
+            lowercase_count = 0
+
+            conv_regex = re.compile(r"^(feat|fix|docs|style|refactor|perf|test|chore|build|ci)(\([a-zA-Z0-9_\-\./]+\))?:", re.IGNORECASE)
+
+            for m in messages:
+                if conv_regex.match(m):
+                    conventional_count += 1
+                elif m and m[0].isupper() and ":" not in m[:10]:
+                    title_case_count += 1
+                elif m and m[0].islower() and ":" not in m[:10]:
+                    lowercase_count += 1
+
+            if title_case_count > conventional_count and title_case_count >= 2:
+                style["commit_style"] = "title_case"
+            elif lowercase_count > conventional_count and lowercase_count >= 2:
+                style["commit_style"] = "lowercase"
+            else:
+                style["commit_style"] = "conventional"
+
+        except Exception as e:
+            logger.debug("Failed to detect git style for %s/%s: %s", owner, repo, e)
+
+        return style
+
+    @staticmethod
+    def adapt_commit_message(commit_msg: str, git_style: dict[str, str], fallback_title: str = "") -> str:
+        """Adapt commit message to match repository conventions."""
+        raw_msg = (commit_msg or fallback_title or "fix issue").strip()
+        first_line = raw_msg.split("\n")[0].strip()
+        rest = "\n".join(raw_msg.split("\n")[1:]).strip()
+
+        style = git_style.get("commit_style", "conventional")
+
+        # Strip conventional prefix if present to re-style if needed
+        cleaned = re.sub(
+            r"^(?:feat|fix|docs|style|refactor|perf|test|chore)(?:\([^\)]+\))?:\s*",
+            "",
+            first_line,
+            flags=re.IGNORECASE,
+        ).strip()
+        if not cleaned:
+            cleaned = first_line
+
+        if style == "conventional":
+            if not re.match(r"^(feat|fix|docs|style|refactor|perf|test|chore)", first_line, re.IGNORECASE):
+                adapted_first_line = f"fix: {cleaned[0].lower() + cleaned[1:] if len(cleaned) > 1 else cleaned.lower()}"
+            else:
+                adapted_first_line = first_line
+        elif style == "title_case":
+            adapted_first_line = cleaned[0].upper() + cleaned[1:] if cleaned else "Fix issue"
+        elif style == "lowercase":
+            adapted_first_line = cleaned.lower()
+        else:
+            adapted_first_line = first_line
+
+        if rest:
+            return f"{adapted_first_line}\n\n{rest}"
+        return adapted_first_line
+
+    def generate_adapted_branch_name(self, contribution: Contribution, git_style: dict[str, str]) -> str:
+        """Generate a natural-looking branch name adapted to target repo."""
         type_prefix = {
             ContributionType.SECURITY_FIX: "fix/security",
             ContributionType.CODE_QUALITY: "fix",
@@ -380,10 +466,19 @@ class PRManager:
         }
         prefix = type_prefix.get(contribution.finding.type, "fix")
 
-        # Slugify the title
         slug = contribution.finding.title.lower()
-        slug = re.sub(r"[^a-z0-9]+", "-", slug).strip("-")[:50]
+        slug = re.sub(r"[^a-z0-9]+", "-", slug).strip("-")[:40]
+        if not slug:
+            slug = "patch"
+
+        if git_style.get("branch_style") == "prefix_hyphen":
+            return f"{prefix.replace('/', '-')}-{slug}"
         return f"{prefix}/{slug}"
+
+    @staticmethod
+    def _human_branch_name(contribution: Contribution) -> str:
+        """Generate a natural-looking branch name (no tool branding)."""
+        return PRManager.generate_adapted_branch_name(None, contribution, {})
 
     def _generate_pr_body(self, contribution: Contribution) -> str:
         """Generate a PR description that sounds like a tired senior developer.

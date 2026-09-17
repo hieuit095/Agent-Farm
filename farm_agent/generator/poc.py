@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from typing import TYPE_CHECKING
@@ -143,3 +144,82 @@ class PoCGenerator:
         except Exception as e:
             logger.warning("PoC evaluation failed: %s", e)
             return False, f"PoC evaluation error: {e}"
+
+    async def verify_differential_poc(
+        self,
+        finding: Finding,
+        repo_path: str,
+        poc_filename: str,
+        poc_content: str,
+        poc_command: str,
+        sandbox,
+        apply_patch_func=None,
+        timeout: int = 30,
+    ) -> tuple[bool, str]:
+        """Perform 2-pass Differential PoC Verification:
+
+        Pass 1 (Baseline Verification - Unpatched):
+          - Run PoC on the unpatched codebase.
+          - Evaluate result with LLM / status code: The vulnerability MUST be triggered (True Positive).
+          - If Pass 1 is NOT triggered: this is a False Positive. Reject finding immediately.
+
+        Pass 2 (Fix Verification - Patched):
+          - If apply_patch_func is provided, apply the remediation patch.
+          - Re-run the EXACT same PoC script in the sandbox.
+          - Must exit 0 cleanly with no crash/assertion failure.
+          - If Pass 2 still crashes: The patch failed to resolve the vulnerability.
+
+        Returns:
+          (is_verified: bool, details: str)
+        """
+        # Pass 1: Baseline verification on unpatched codebase
+        pass1_result = await sandbox.verify_vulnerability_with_poc(
+            repo_path=repo_path,
+            poc_filename=poc_filename,
+            poc_content=poc_content,
+            run_command=poc_command,
+            timeout=timeout,
+        )
+
+        is_triggered, trigger_reason = await self.evaluate_poc_result(
+            finding=finding,
+            poc_content=poc_content,
+            sandbox_output=pass1_result,
+        )
+
+        if not is_triggered:
+            logger.info("[DIFFERENTIAL POC] Pass 1 Failed: Finding not triggered on unpatched codebase (%s)", trigger_reason)
+            return False, f"Pass 1 Failed: Finding not triggered on unpatched codebase ({trigger_reason}) - False Positive discarded"
+
+        logger.info("[DIFFERENTIAL POC] Pass 1 verified (Vulnerability triggered): %s", trigger_reason)
+
+        if not apply_patch_func:
+            return True, f"Pass 1 Verified: {trigger_reason}"
+
+        # Pass 2: Apply patch and verify fix
+        try:
+            patch_applied = apply_patch_func()
+            if asyncio.iscoroutine(patch_applied):
+                patch_applied = await patch_applied
+            if not patch_applied:
+                return False, "Pass 2 Failed: Unable to apply remediation patch to workspace"
+        except Exception as exc:
+            return False, f"Pass 2 Failed: Patch application raised exception: {exc}"
+
+        pass2_result = await sandbox.verify_vulnerability_with_poc(
+            repo_path=repo_path,
+            poc_filename=poc_filename,
+            poc_content=poc_content,
+            run_command=poc_command,
+            timeout=timeout,
+        )
+
+        exit_code = pass2_result.get("exit_code", 1)
+        timed_out = pass2_result.get("timed_out", False)
+
+        if exit_code != 0 or timed_out:
+            stderr = str(pass2_result.get("stderr", ""))[:200]
+            return False, f"Pass 2 Failed: PoC still failed on patched code (exit {exit_code}, stderr: {stderr})"
+
+        logger.info("[DIFFERENTIAL POC] Pass 2 verified (Clean pass on patched codebase)")
+        return True, "Differential Verification Passed: Vulnerability reliably reproduced on unpatched code and cleanly resolved by patch."

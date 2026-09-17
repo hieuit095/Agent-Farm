@@ -47,3 +47,10 @@ htmlcov/
 *.log
 logs/
 daily_log/
+
+# Bug Bounty reports
+bounty_reports/*.md
+!bounty_reports/.gitkeep
+
+# Local tooling
+.commandcode/

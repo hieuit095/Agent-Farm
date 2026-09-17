@@ -57,6 +57,15 @@ class PRStatus(StrEnum):
     REVIEW_REQUESTED = "review_requested"
 
 
+class DisclosureRoute(StrEnum):
+    """Routing mechanism for vulnerability disclosure."""
+
+    PUBLIC_PR = "public_pr"
+    PRIVATE_GHSA = "private_ghsa"
+    BOUNTY_DOSSIER = "bounty_dossier"
+    LOCAL_REPORT_ONLY = "local_report_only"
+
+
 # ── GitHub Models ──────────────────────────────────────────────────────────────
 
 
@@ -358,3 +367,35 @@ class PatrolResult(BaseModel):
     assigned_issues: list[dict] = Field(default_factory=list)
     errors: list[str] = Field(default_factory=list)
     prs_merged: list[dict] = Field(default_factory=list)
+
+
+# ── Bug Bounty & Advisory Models ───────────────────────────────────────────────
+
+
+class AdvisoryReport(BaseModel):
+    """Responsible disclosure advisory report for security vulnerabilities.
+    
+    Standardized to adhere to GitHub Security Advisory (GHSA) and
+    HackerOne / Bugcrowd dossier reporting specifications.
+    """
+
+    title: str
+    summary: str
+    cwe_id: str = "CWE-Unknown"
+    cwe_name: str = ""
+    severity: Severity = Severity.HIGH
+    cvss_score: float = 7.5
+    cvss_vector: str = "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"
+    affected_repo: str = ""
+    target_commit: str = ""
+    vulnerable_file: str = ""
+    vulnerable_line: int | None = None
+    vulnerability_details: str = ""
+    reproduction_steps: str = ""
+    poc_script: str = ""
+    remediation_patch: str = ""
+    route: DisclosureRoute = DisclosureRoute.BOUNTY_DOSSIER
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    ghsa_url: str | None = None
+    ghsa_id: str | None = None
+    report_file_path: str | None = None

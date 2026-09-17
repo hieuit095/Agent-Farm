@@ -38,7 +38,7 @@ from farm_agent.generator.scorer import QAHardcoreScorer
 from farm_agent.github.client import GitHubClient
 from farm_agent.github.discovery import DatabaseTargetDiscovery, RepoDiscovery
 from farm_agent.github.guidelines import fetch_repo_guidelines
-from farm_agent.github.security_gate import run_security_gate
+from farm_agent.github.security_gate import handle_responsible_disclosure, run_security_gate
 from farm_agent.issues.solver import IssueSolver
 from farm_agent.llm.provider import create_llm_provider
 from farm_agent.orchestrator.memory import Memory
@@ -1074,7 +1074,14 @@ class FarmAgentPipeline:
                     await discovery.mark_status(target.repo_url, "COMPLETED_TOO_COMPLEX")
                     return result
 
-                # ── Diplomat Protocol: Security Disclosure Gate ──────────────────
+                # ── Route C Enforcement: Responsible Disclosure & Bug Bounty ───
+                allow_public_pr = getattr(getattr(self.config, "bounty", None), "allow_public_pr_for_critical", False)
+                is_high_risk_vuln = (
+                    not allow_public_pr
+                    and winning_contribution.finding.severity in (Severity.CRITICAL, Severity.HIGH)
+                    and winning_contribution.contribution_type == ContributionType.SECURITY_FIX
+                )
+
                 security_gate_result = await run_security_gate(
                     github=self._github,
                     owner=repo.owner,
@@ -1082,13 +1089,40 @@ class FarmAgentPipeline:
                     dossier=dossier,
                     notifier=self._notifier,
                 )
-                if security_gate_result is not None:
+                if is_high_risk_vuln or security_gate_result is not None:
+                    reason = "Critical/High 0-day vulnerability" if is_high_risk_vuln else "Private security policy"
                     logger.warning(
-                        "[COMPLIANCE SKIP] Private security disclosure requested by maintainers. "
-                        "Approved finding saved to secret_findings/. Aborting PR for %s.",
+                        "[ROUTE C PRIVATE DISCLOSURE] %s detected for %s. "
+                        "Generating Bug Bounty Advisory Dossier and aborting public PR.",
+                        reason,
                         target.repo_url,
                     )
-                    await discovery.mark_status(target.repo_url, "COMPLIANCE_SKIP_PRIVATE_DISCLOSURE")
+                    patch_diff = "\n".join(
+                        f"--- a/{c.path}\n+++ b/{c.path}\n@@ -1 +1 @@\n+{c.new_content}"
+                        for c in winning_contribution.changes
+                    )
+                    poc_script = ""
+                    if winning_contribution.tests_added:
+                        poc_script = winning_contribution.tests_added[0].new_content
+                    elif dossier and hasattr(dossier, "vulnerabilities") and dossier.vulnerabilities:
+                        poc_script = dossier.vulnerabilities[0].poc
+
+                    target_commit = getattr(dossier, "target_commit", "") if dossier else ""
+                    advisory = await handle_responsible_disclosure(
+                        github=self._github,
+                        owner=repo.owner,
+                        repo=repo.name,
+                        finding=winning_contribution.finding,
+                        remediation_patch=patch_diff,
+                        poc_script=poc_script,
+                        target_commit=target_commit,
+                        config=self.config,
+                        notifier=self._notifier,
+                    )
+                    status_name = "GHSA_SUBMITTED" if advisory.ghsa_id else "BOUNTY_DOSSIER_SAVED"
+                    await discovery.mark_status(target.repo_url, status_name)
+                    result.repos_analyzed += 1
+                    result.findings_total += len(dossier.vulnerabilities) if dossier else 1
                     return result
 
                 result.repos_analyzed += 1
@@ -1960,7 +1994,14 @@ class FarmAgentPipeline:
                 logger.info("Recorded Layer 2 lesson for %s: %s...", repo.full_name, reject_reason[:50])
                 continue
 
-            # ── Diplomat Protocol: Security Disclosure Gate ──────────────────
+            # ── Route C Enforcement: Responsible Disclosure & Bug Bounty ───
+            allow_public_pr = getattr(getattr(self.config, "bounty", None), "allow_public_pr_for_critical", False)
+            is_high_risk_vuln = (
+                not allow_public_pr
+                and contribution.finding.severity in (Severity.CRITICAL, Severity.HIGH)
+                and contribution.contribution_type == ContributionType.SECURITY_FIX
+            )
+
             from types import SimpleNamespace
             dummy_dossier = SimpleNamespace(
                 vulnerabilities=[contribution.finding],
@@ -1973,10 +2014,25 @@ class FarmAgentPipeline:
                 dossier=dummy_dossier,
                 notifier=self._notifier,
             )
-            if security_gate_result is not None:
+            if is_high_risk_vuln or security_gate_result is not None:
+                patch_diff = "\n".join(
+                    f"--- a/{c.path}\n+++ b/{c.path}\n@@ -1 +1 @@\n+{c.new_content}"
+                    for c in contribution.changes
+                )
+                poc_script = contribution.tests_added[0].new_content if contribution.tests_added else ""
+                await handle_responsible_disclosure(
+                    github=self._github,
+                    owner=repo.owner,
+                    repo=repo.name,
+                    finding=contribution.finding,
+                    remediation_patch=patch_diff,
+                    poc_script=poc_script,
+                    config=self.config,
+                    notifier=self._notifier,
+                )
                 logger.warning(
-                    "[COMPLIANCE SKIP] Private security disclosure requested by maintainers. "
-                    "Approved finding saved to secret_findings/. Aborting PR for %s.",
+                    "[ROUTE C PRIVATE DISCLOSURE] Critical/High finding or private policy triggered. "
+                    "Saved to bounty_reports/. Aborting public PR for %s.",
                     repo.full_name,
                 )
                 continue

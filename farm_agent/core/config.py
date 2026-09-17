@@ -219,6 +219,20 @@ class MultiModelConfig(BaseModel):
     model_overrides: dict[str, str] = Field(default_factory=dict)
 
 
+class BountyConfig(BaseModel):
+    """Bug Bounty, responsible disclosure, and human opsec configuration."""
+
+    bounty_reports_dir: str = "bounty_reports"
+    auto_submit_ghsa: bool = False
+    allow_public_pr_for_critical: bool = False  # By default, NEVER open public PR for Critical/High 0-days
+    circadian_enabled: bool = True
+    work_hours_start: int = 8
+    work_hours_end: int = 19
+    weekend_quiet_mode: bool = True
+    reading_lag_minutes: int = 10
+    default_timezone_offset: int = 7  # Default local UTC offset (e.g. UTC+7)
+
+
 class FarmAgentConfig(BaseModel):
     """Root configuration for FarmAgentConfig."""
 
@@ -232,6 +246,7 @@ class FarmAgentConfig(BaseModel):
     notifications: NotificationConfig = Field(default_factory=NotificationConfig)
     logging: LogConfig = Field(default_factory=LogConfig)
     multi_model: MultiModelConfig = Field(default_factory=MultiModelConfig)
+    bounty: BountyConfig = Field(default_factory=BountyConfig)
 
 
 def load_config(path: str | Path | None = None) -> FarmAgentConfig:

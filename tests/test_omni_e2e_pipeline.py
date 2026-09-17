@@ -297,6 +297,7 @@ async def test_omni_e2e_pipeline(tmp_path):
     config.github.max_prs_per_day = 10
     config.llm.openrouter_api_key = "sk-test"
     config.llm.model = MODEL_PRIMARY
+    config.bounty.allow_public_pr_for_critical = True
 
     pipeline = FarmAgentPipeline(config)
 

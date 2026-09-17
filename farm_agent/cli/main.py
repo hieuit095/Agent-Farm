@@ -1508,5 +1508,37 @@ def sysinfo(ctx):
     asyncio.run(_run())
 
 
+@cli.command()
+@click.pass_context
+def advisories(ctx):
+    """List all Bug Bounty security advisory dossiers generated in bounty_reports/."""
+    from datetime import datetime
+    from pathlib import Path
+
+    config = load_config(ctx.obj["config_path"])
+    bounty_dir = Path(getattr(config.bounty, "bounty_reports_dir", "bounty_reports"))
+
+    if not bounty_dir.exists():
+        console.print(f"[yellow]No advisories directory found at `{bounty_dir}`[/yellow]")
+        return
+
+    reports = sorted(bounty_dir.glob("*.md"), key=lambda p: p.stat().st_mtime, reverse=True)
+    if not reports:
+        console.print(f"[yellow]No security advisory reports found in `{bounty_dir}`[/yellow]")
+        return
+
+    table = Table(title=f"🛡️ Bug Bounty Security Advisories ({len(reports)} files in `{bounty_dir}`)")
+    table.add_column("Dossier File", style="cyan")
+    table.add_column("Last Modified", style="dim")
+    table.add_column("Size", justify="right")
+
+    for r in reports:
+        mtime = datetime.fromtimestamp(r.stat().st_mtime).strftime("%Y-%m-%d %H:%M")
+        size_kb = f"{r.stat().st_size / 1024:.1f} KB"
+        table.add_row(r.name, mtime, size_kb)
+
+    console.print(table)
+
+
 if __name__ == "__main__":
     cli()

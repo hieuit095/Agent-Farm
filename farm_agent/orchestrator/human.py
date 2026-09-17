@@ -34,6 +34,37 @@ LLM_QUOTA_COOLDOWN = 300       # Seconds when LLM quota exhausted (5 min)
 LLM_QUOTA_COOLDOWN_WARP = 3    # Seconds in time-warp mode
 
 
+def is_within_circadian_hours(config=None, target_now: datetime | None = None) -> bool:
+    """Check if current time is within human working hours (Circadian Rhythm).
+
+    Default: 8:00 AM to 7:00 PM (19:00), Monday to Friday.
+    If weekend_quiet_mode is enabled, returns False on Saturday and Sunday.
+    """
+    if config and hasattr(config, "bounty") and not getattr(config.bounty, "circadian_enabled", True):
+        return True
+
+    now = target_now or datetime.now(UTC)
+    tz_offset = 7
+    start_hour = 8
+    end_hour = 19
+    weekend_quiet = True
+
+    if config and hasattr(config, "bounty"):
+        tz_offset = getattr(config.bounty, "default_timezone_offset", 7)
+        start_hour = getattr(config.bounty, "work_hours_start", 8)
+        end_hour = getattr(config.bounty, "work_hours_end", 19)
+        weekend_quiet = getattr(config.bounty, "weekend_quiet_mode", True)
+
+    from datetime import timedelta
+    local_time = now + timedelta(hours=tz_offset)
+
+    # Weekend check (5 = Saturday, 6 = Sunday)
+    if weekend_quiet and local_time.weekday() in (5, 6):
+        return False
+
+    return start_hour <= local_time.hour < end_hour
+
+
 class SuperHumanLoop:
     """Terminator execution loop: relentless continuous operation.
 
@@ -375,6 +406,16 @@ class SuperHumanLoop:
                 except (GitHubAPIError, FarmAgentError, Exception) as exc:
                     logger.error("[TERMINATOR] Patrol error (pending-notify): %s", exc)
                 await asyncio.sleep(TERMINATOR_SLEEP if not time_warp else TERMINATOR_SLEEP_WARP)
+                continue
+
+            # ── Circadian Rhythm Check: Quiet mode outside human working hours ──
+            if not time_warp and not is_within_circadian_hours(self._pipeline.config):
+                logger.info("[CIRCADIAN REST] Outside human working hours or weekend. Running quiet patrol only.")
+                try:
+                    await self._do_patrol()
+                except Exception as exc:
+                    logger.debug("[CIRCADIAN REST] Patrol error during quiet mode: %s", exc)
+                await asyncio.sleep(PATROL_ONLY_SLEEP)
                 continue
 
             # ── Deterministic action: hunt first, then patrol ──
