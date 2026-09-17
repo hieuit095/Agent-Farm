@@ -39,12 +39,13 @@ The CLI is Click-based and located in [main.py](file:///c:/Users/USER/Documents/
 
 | Command | Python Method | Description |
 |---------|--------------|-------------|
+| `farm_agent advisories` | `advisories()` | List all Bug Bounty security advisory dossiers generated in `bounty_reports/`. |
 | `farm_agent run` | `FarmAgentPipeline.run()` | Standard run: discover, analyze, generate fixes, run sandbox, check gates, submit PRs. |
 | `farm_agent target <url>` | `FarmAgentPipeline.run_single()` | Process a single target repository. |
 | `farm_agent hunt` | `FarmAgentPipeline.hunt()` | Run multi-round search and analysis (analysis, issues, or both). |
 | `farm_agent hunt-circular` | `FarmAgentPipeline.run_circular()` | Deterministic round-robin target loop from `target_repo.json`. |
 | `farm_agent patrol` | `PRPatrol.patrol()` | Check open PRs for maintainer review comments, reply to questions, and auto-fix CI failures. |
-| `farm_agent superhuman` | `SuperHumanLoop.run_daily_routine()` | 24/7 relentless loop cycling through circular target hunt and patrol operations. |
+| `farm_agent superhuman` | `SuperHumanLoop.run_daily_routine()` | 24/7 loop cycling through circular target hunt and patrol operations with Circadian awareness. |
 | `farm_agent solve <url>` | `IssueSolver` flow | Proactively search for solvable issues in a repo, construct deep fixes, and generate PRs. |
 | `farm_agent analyze <url>` | `FarmAgentPipeline.analyze_only()` | Perform code analysis pass only; do not generate contributions or open issues. |
 | `farm_agent status` | `_show()` | Show targets queue statuses from `target_repos` table. |
