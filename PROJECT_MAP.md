@@ -53,12 +53,11 @@ The CLI is Click-based and located in [main.py](file:///c:/Users/USER/Documents/
 | `farm_agent reset-db` | `reset_db()` | Recreate database tables and reset memory database. |
 | `farm_agent config` | `show_config()` | Output the current loaded runtime settings. |
 | `farm_agent vips` | `vips()` | Monitor and synchronize VIP repository radar list. |
-| `farm_agent templates` | `list_templates()` | Display formatting templates for PR descriptions. |
+| `farm_agent templates` | `list_templates()` | Display dynamic LLM contribution generation status. |
 | `farm_agent profile` | `run_profile()` | Run the pipeline pre-loaded with quick, standard, or thorough presets. |
 | `farm_agent models` | `show_models()` | List the active LLM routing mappings. |
 | `farm_agent leaderboard` | `show_leaderboard()` | Show leaderboards of merged and submitted contributions. |
 | `farm_agent gc` | `gc()` | Purge knowledge base entries older than N days. |
-| `farm_agent janitor` | `SweepAndDestroy()` | Sweeps all open PRs and closes/deletes low-quality/garbage contributions. |
 
 ---
 
@@ -325,7 +324,6 @@ Database file resides in `data/memory.db` and operates in **WAL (Write-Ahead Log
 │   │   ├── models.py                   # Core Pydantic data structures definitions
 │   │   ├── notifier.py                 # Telegram notifications integration
 │   │   ├── profiles.py                 # Thorough, quick, and standard run configurations
-│   │   ├── quotas.py                   # OpenRouter usage quota controllers
 │   │   ├── rag.py                      # ChromaDB vector DB context loaders (with semantic markdown header chunking)
 │   │   ├── retry.py                    # Retry decorators for GitHub/LLM interfaces
 │   │   └── sandbox.py                  # DockerSandbox engine with Polyglot Guillotine, PoC execution context mapping
@@ -350,7 +348,6 @@ Database file resides in `data/memory.db` and operates in **WAL (Write-Ahead Log
 │   │   └── solver.py                   # IssueSolver (solves issues, multi-file deep planner)
 │   │
 │   ├── llm/
-│   │   ├── agents.py                   # LLM agent prompts and routing models
 │   │   ├── context.py                  # Generator system instruction builders
 │   │   ├── models.py                   # Model registry definitions
 │   │   ├── provider.py                 # OpenRouter integration handlers
@@ -361,16 +358,9 @@ Database file resides in `data/memory.db` and operates in **WAL (Write-Ahead Log
 │   │   ├── pipeline.py                 # Pipeline (Standard & Circular pipelines implementation)
 │   │   └── human.py                    # SuperHumanLoop relentless daily scheduler
 │   │
-│   ├── pr/
-│   │   ├── manager.py                  # Pull Request manager (forking, branches, commits)
-│   │   ├── patrol.py                   # PR Patrol (reviews comments, fixes CI errors)
-│   │   └── janitor.py                  # PR Janitor (sweeps and destroys garbage PRs)
-│   │
-│   ├── agents/
-│   │   └── registry.py                 # Task agent configurations
-│   │
-│   └── tools/
-│       └── protocol.py                 # CLI tool protocols
+│   └── pr/
+│       ├── manager.py                  # Pull Request manager (forking, branches, commits)
+│       └── patrol.py                   # PR Patrol (reviews comments, fixes CI errors)
 ```
 
 ---

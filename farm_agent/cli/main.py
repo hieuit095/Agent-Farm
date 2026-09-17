@@ -68,16 +68,18 @@ def setup_logging(verbose: bool = False, config=None):
 
 
 def print_banner():
-    banner = f"""[bold cyan]
+    banner = (
+        r"""[bold cyan]
      _                    _     _____
     / \   __ _  ___ _ __ | |_  |  ___|_ _ _ __ _ __ ___
-   / _ \ / _` |/ _ \ '_ \| __| | |_ / _` | '__| '_ ` _ \\
+   / _ \ / _` |/ _ \ '_ \| __| | |_ / _` | '__| '_ ` _ \
   / ___ \ (_| |  __/ | | | |_  |  _| (_| | |  | | | | | |
  /_/   \_\__, |\___|_| |_|\__| |_|  \__,_|_|  |_| |_| |_|
          |___/
 
-  [dim]Autonomous Agent Orchestration v{__version__}[/dim]
-[/bold cyan]"""
+"""
+        + f"  [dim]Autonomous Agent Orchestration v{__version__}[/dim]\n[/bold cyan]"
+    )
     console.print(banner)
 
 
@@ -1137,42 +1139,13 @@ def vips(ctx, no_sync):
 
 
 @cli.command("templates")
-@click.option(
-    "--type",
-    "contrib_type",
-    default=None,
-    help="Filter by contribution type",
-)
-def list_templates(contrib_type):
-    """List available contribution templates."""
-    from farm_agent.templates.registry import (
-        TemplateRegistry,
+def list_templates():
+    """List contribution generation mode."""
+    console.print(
+        "[bold cyan]🛠️ Agent-Farm v4.0.0 Dynamic Generator[/bold cyan]\n"
+        "[dim]Static YAML templates for typo/readme fixes have been deprecated under the Zero-Garbage PR policy.[/dim]\n"
+        "All contributions are generated dynamically using Omniscient Context & verified in isolated Docker sandboxes."
     )
-
-    registry = TemplateRegistry()
-    templates = registry.filter_by_type(contrib_type) if contrib_type else registry.list_all()
-
-    if not templates:
-        console.print("[yellow]No templates found[/yellow]")
-        return
-
-    table = Table(title="Contribution Templates")
-    table.add_column("Name", style="cyan")
-    table.add_column("Type", style="green")
-    table.add_column("Severity")
-    table.add_column("Description")
-    table.add_column("Languages")
-
-    for t in templates:
-        table.add_row(
-            t.name,
-            t.type,
-            t.severity,
-            t.description,
-            ", ".join(t.languages) if t.languages else "all",
-        )
-
-    console.print(table)
 
 
 @cli.command("profile")
@@ -1412,38 +1385,27 @@ def show_leaderboard(ctx, limit):
 @cli.command("notify-test")
 @click.pass_context
 def notify_test(ctx):
-    """Send a test notification to configured channels."""
-    from farm_agent.notifications.notifier import (
-        NotificationEvent,
-        Notifier,
-    )
+    """Send a test notification to configured Telegram channel."""
+    from farm_agent.core.notifier import TelegramNotifier
 
     config = load_config(ctx.obj["config_path"])
     nc = config.notifications
 
-    notifier = Notifier(
-        slack_webhook=nc.slack_webhook,
-        discord_webhook=nc.discord_webhook,
-        telegram_token=nc.telegram_token,
-        telegram_chat_id=nc.telegram_chat_id,
+    notifier = TelegramNotifier(
+        token=nc.telegram_token,
+        chat_id=nc.telegram_chat_id,
     )
 
-    if not notifier.is_configured:
-        console.print("[yellow]No notification channels configured in config.yaml[/yellow]")
+    if not notifier.enabled:
+        console.print("[yellow]Telegram notification not configured in config.yaml[/yellow]")
         return
 
     async def _send():
-        await notifier.notify(
-            NotificationEvent(
-                event_type="run_complete",
-                title="Test Notification",
-                message="Farm-Agent notifications working!",
-            )
-        )
+        await notifier.send_message("🚀 <b>[TEST ALERT]</b> Farm-Agent notifications operational!")
         await notifier.close()
 
     asyncio.run(_send())
-    console.print("[green]Test notification sent![/green]")
+    console.print("[green]Test notification sent via Telegram![/green]")
 
 
 @cli.command("system-status")

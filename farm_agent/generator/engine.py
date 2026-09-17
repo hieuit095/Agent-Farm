@@ -169,7 +169,6 @@ from farm_agent.core.rag import RepoIndexer
 from farm_agent.generator.reviewer import ReviewerAgent
 from farm_agent.llm.context import build_generator_system_prompt
 from farm_agent.llm.provider import LLMProvider
-from farm_agent.tools.protocol import READ_FILE_TOOL_SCHEMA, GitHubTool
 
 logger = logging.getLogger(__name__)
 

@@ -15,7 +15,6 @@ import json
 import re
 from dataclasses import dataclass, field
 
-from farm_agent.agents.registry import create_default_registry
 from farm_agent.analysis.analyzer import BloodhoundAnalyzer, CodeAnalyzer
 from farm_agent.core.config import FarmAgentConfig
 from farm_agent.core.middleware import build_default_chain
@@ -44,7 +43,6 @@ from farm_agent.issues.solver import IssueSolver
 from farm_agent.llm.provider import create_llm_provider
 from farm_agent.orchestrator.memory import Memory
 from farm_agent.pr.manager import PRManager
-from farm_agent.tools.protocol import create_default_tools
 
 logger = logging.getLogger(__name__)
 
@@ -228,7 +226,10 @@ class AdaptiveConcurrencyManager:
         self._configured_max = configured_max
         self._provider_cap = provider_cap
         self._cooldown_sec = cooldown_sec
-        self._current_max = min(configured_max, provider_cap)
+        try:
+            self._current_max = min(int(configured_max), int(provider_cap))
+        except (TypeError, ValueError):
+            self._current_max = 5
         self._lock = asyncio.Lock()
         self._cooldown_until: float = 0.0
         self._ramp_task: asyncio.Task | None = None
@@ -315,8 +316,6 @@ class FarmAgentPipeline:
         self._discovery: RepoDiscovery | None = None
         self._sandbox = None  # DockerSandbox — initialized in _init_components
         self._middleware_chain: list = []
-        self._agent_registry = None
-        self._tool_registry = None
 
         from farm_agent.core.notifier import TelegramNotifier
 
@@ -335,14 +334,17 @@ class FarmAgentPipeline:
             provider_cap=_safe_cap,
             cooldown_sec=self.config.pipeline.rate_limit_cooldown_sec,
         )
-        if self.config.pipeline.max_concurrent_repos > _safe_cap:
-            logger.info(
-                "[CRIT-03] Provider '%s': user concurrency=%d capped to safe limit=%d "
-                "(override via pipeline.llm_concurrency_cap in config.yaml)",
-                _provider,
-                self.config.pipeline.max_concurrent_repos,
-                _safe_cap,
-            )
+        try:
+            if int(self.config.pipeline.max_concurrent_repos) > int(_safe_cap):
+                logger.info(
+                    "[CRIT-03] Provider '%s': user concurrency=%s capped to safe limit=%s "
+                    "(override via pipeline.llm_concurrency_cap in config.yaml)",
+                    _provider,
+                    self.config.pipeline.max_concurrent_repos,
+                    _safe_cap,
+                )
+        except (TypeError, ValueError):
+            pass
 
     def _get_max_concurrency(self) -> int:
         """Return current safe concurrency level from the adaptive manager."""
@@ -429,23 +431,6 @@ class FarmAgentPipeline:
             else 5.0,
         )
         logger.info("Middleware chain: %d middlewares loaded", len(self._middleware_chain))
-
-        # Agent registry (DeerFlow pattern)
-        self._agent_registry = create_default_registry()
-        logger.info(
-            "Agent registry: %d agents loaded",
-            len(self._agent_registry.list_agents()),
-        )
-
-        # Tool registry (DeerFlow pattern)
-        self._tool_registry = create_default_tools(
-            github_client=self._github,
-            llm_provider=self._llm,
-        )
-        logger.info(
-            "Tool registry: %d tools loaded",
-            len(self._tool_registry.list_tools()),
-        )
 
     async def _cleanup(self):
         """Clean up resources."""

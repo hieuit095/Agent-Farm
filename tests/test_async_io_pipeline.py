@@ -77,5 +77,6 @@ class TestAsyncIOPipeline(unittest.IsolatedAsyncioTestCase):
 
             # Check if makedirs and open were called
             mock_makedirs.assert_called()
-            mock_open.assert_called_with("/tmp/clone/new.py", "w", encoding="utf-8")
+            expected_path = os.path.normpath(os.path.join(clone_path, "new.py"))
+            mock_open.assert_called_with(expected_path, "w", encoding="utf-8")
             mock_open().__enter__().write.assert_called_with("print('hello')")

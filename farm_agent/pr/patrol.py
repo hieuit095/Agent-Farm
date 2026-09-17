@@ -11,7 +11,7 @@ import contextlib
 import logging
 import random
 import re
-from datetime import UTC
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any
@@ -964,8 +964,7 @@ class PRPatrol:
                 if read_delay < 300:
                     logger.info("  Mới check mail thấy có notification từ Maintainer. Bắt đầu đọc... (Simulating notification lag: %ds)", read_delay)
                 else:
-                    from datetime import datetime
-                    next_run = datetime.now(UTC) + __import__("datetime").timedelta(seconds=read_delay)
+                    next_run = datetime.now(UTC) + timedelta(seconds=read_delay)
                     await self._memory.set_task_schedule(task_key, next_run.isoformat())
                     logger.info("  Long notification lag (%ds) scheduled for %s — skipping this cycle", read_delay, next_run.isoformat())
                     return False
