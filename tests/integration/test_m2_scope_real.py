@@ -24,6 +24,8 @@ def program(*, public: bool = False, private: bool = False) -> ProgramScope:
         allowed_impacts=["read_only"], allow_live_testing=True,
         allow_public_pr=public, allow_private_disclosure=private,
         policy_reference="local authorization fixture", surfaces=["/api/orders/{id}"],
+        risk_classes=["idor"], trust_boundaries=["tenant"], assets=["orders"],
+        attacker_inputs=["order_id"], attacker_stories=["cross-tenant order read"],
     )
 
 

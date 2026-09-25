@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import logging
 import sqlite3
 import uuid
@@ -18,6 +19,8 @@ import aiosqlite
 
 from farm_agent.security.state import CandidateStatus, EvidenceKind, SecurityGateError
 from farm_agent.security.scope import ScanManifest
+from farm_agent.security.threat_model import ThreatModel
+from farm_agent.security.coverage import CoverageOutcome, CoverageSummary
 
 logger = logging.getLogger(__name__)
 
@@ -115,6 +118,22 @@ CREATE TABLE IF NOT EXISTS scan_manifests (
     manifest_hash TEXT NOT NULL,
     requests_used INTEGER NOT NULL DEFAULT 0,
     created_at    TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS scan_threat_models (
+    scan_id    TEXT PRIMARY KEY REFERENCES scan_manifests(scan_id),
+    version    INTEGER NOT NULL,
+    model_json TEXT NOT NULL,
+    model_hash TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS scan_coverage (
+    scan_id       TEXT NOT NULL REFERENCES scan_manifests(scan_id),
+    surface       TEXT NOT NULL,
+    risk_class    TEXT NOT NULL,
+    outcome       TEXT NOT NULL DEFAULT 'not_tested',
+    evidence_hash TEXT,
+    reason_code   TEXT,
+    updated_at    TEXT NOT NULL,
+    PRIMARY KEY (scan_id, surface, risk_class)
 );
 
 CREATE TABLE IF NOT EXISTS pr_outcomes (
@@ -661,6 +680,98 @@ class Memory:
             except Exception:
                 await self._db.rollback()
                 raise
+
+    async def store_threat_model(self, model: ThreatModel, *, expected_version: int = 0) -> None:
+        payload = json.dumps(model.model_dump(mode="json"), sort_keys=True, separators=(",", ":"))
+        async with self._security_lock:
+            await self._db.execute("BEGIN IMMEDIATE")
+            try:
+                manifest = await self.get_scan_manifest(model.scan_id)
+                if manifest is None or manifest.scope.target_commit != model.target_commit:
+                    raise SecurityGateError("Threat model does not match an authorized scan")
+                cursor = await self._db.execute(
+                    "SELECT version FROM scan_threat_models WHERE scan_id = ?", (model.scan_id,)
+                )
+                row = await cursor.fetchone()
+                current = row[0] if row else 0
+                if current != expected_version or model.version != current + 1:
+                    raise SecurityGateError("Threat model version conflict")
+                await self._db.execute(
+                    """INSERT INTO scan_threat_models (scan_id, version, model_json, model_hash)
+                       VALUES (?, ?, ?, ?)
+                       ON CONFLICT(scan_id) DO UPDATE SET
+                       version=excluded.version, model_json=excluded.model_json,
+                       model_hash=excluded.model_hash""",
+                    (model.scan_id, model.version, payload, model.digest),
+                )
+                await self._db.commit()
+            except Exception:
+                await self._db.rollback()
+                raise
+
+    async def get_threat_model(self, scan_id: str) -> ThreatModel | None:
+        cursor = await self._db.execute(
+            "SELECT version, model_json, model_hash FROM scan_threat_models WHERE scan_id = ?",
+            (scan_id,),
+        )
+        row = await cursor.fetchone()
+        if row is None:
+            return None
+        try:
+            model = ThreatModel.model_validate_json(row[1])
+        except Exception as exc:
+            raise SecurityGateError("Stored threat model is invalid") from exc
+        if model.scan_id != scan_id or model.version != row[0] or model.digest != row[2]:
+            raise SecurityGateError("Stored threat model failed integrity validation")
+        return model
+
+    async def initialize_coverage(self, manifest: ScanManifest) -> None:
+        pairs = [(manifest.scan_id, surface, risk, datetime.now(UTC).isoformat())
+                 for surface in manifest.scope.surfaces for risk in manifest.scope.risk_classes]
+        if len(pairs) > 10000:
+            raise SecurityGateError("Coverage matrix exceeds the supported limit")
+        await self._db.executemany(
+            """INSERT INTO scan_coverage (scan_id, surface, risk_class, updated_at)
+               VALUES (?, ?, ?, ?)""",
+            pairs,
+        )
+        await self._db.commit()
+
+    async def record_coverage(
+        self, scan_id: str, surface: str, risk_class: str, outcome: CoverageOutcome,
+        *, evidence_hash: str | None = None, reason_code: str | None = None,
+    ) -> None:
+        if outcome == CoverageOutcome.NOT_TESTED:
+            raise SecurityGateError("Use initialization for not-tested coverage")
+        if outcome == CoverageOutcome.TESTED:
+            if not evidence_hash or not re.fullmatch(r"[0-9a-f]{64}", evidence_hash):
+                raise SecurityGateError("Tested coverage requires an evidence hash")
+        elif not reason_code:
+            raise SecurityGateError("Blocked or inconclusive coverage requires a reason")
+        cursor = await self._db.execute(
+            """UPDATE scan_coverage SET outcome = ?, evidence_hash = ?, reason_code = ?,
+               updated_at = ? WHERE scan_id = ? AND surface = ? AND risk_class = ?
+               AND outcome = 'not_tested'""",
+            (outcome, evidence_hash, reason_code, datetime.now(UTC).isoformat(),
+             scan_id, surface, risk_class),
+        )
+        await self._db.commit()
+        if cursor.rowcount != 1:
+            raise SecurityGateError("Coverage entry missing or already resolved")
+
+    async def get_coverage_summary(self, scan_id: str) -> CoverageSummary:
+        cursor = await self._db.execute(
+            "SELECT outcome, COUNT(*) FROM scan_coverage WHERE scan_id = ? GROUP BY outcome",
+            (scan_id,),
+        )
+        counts = dict(await cursor.fetchall())
+        return CoverageSummary(
+            scan_id=scan_id, total=sum(counts.values()),
+            tested=counts.get(CoverageOutcome.TESTED, 0),
+            not_tested=counts.get(CoverageOutcome.NOT_TESTED, 0),
+            blocked=counts.get(CoverageOutcome.BLOCKED, 0),
+            inconclusive=counts.get(CoverageOutcome.INCONCLUSIVE, 0),
+        )
 
     async def security_candidate_is_confirmed(self, candidate_id: str, repo: str) -> bool:
         cursor = await self._db.execute(

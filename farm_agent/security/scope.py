@@ -31,6 +31,11 @@ class ProgramScope(BaseModel):
     allow_local_report: bool = False
     policy_reference: str = Field(min_length=1)
     surfaces: list[str] = Field(default_factory=list)
+    risk_classes: list[str] = Field(default_factory=list)
+    trust_boundaries: list[str] = Field(default_factory=list)
+    assets: list[str] = Field(default_factory=list)
+    attacker_inputs: list[str] = Field(default_factory=list)
+    attacker_stories: list[str] = Field(default_factory=list)
 
     @field_validator("repo")
     @classmethod
@@ -64,9 +69,11 @@ class ProgramScope(BaseModel):
     def live_requires_limits(self):
         if self.allow_live_testing and (
             not self.allowed_origins or not self.max_requests or not self.test_roles
-            or not self.allowed_impacts
+            or not self.allowed_impacts or not self.surfaces or not self.risk_classes
+            or not self.trust_boundaries or not self.assets
+            or not self.attacker_inputs or not self.attacker_stories
         ):
-            raise ValueError("Live testing requires hosts, budget, roles and allowed impacts")
+            raise ValueError("Live testing requires explicit scope, limits and threat assumptions")
         return self
 
 

@@ -47,6 +47,7 @@ from farm_agent.pr.manager import PRManager
 from farm_agent.security.closure import ClosureService
 from farm_agent.security.evidence import evidence_hash
 from farm_agent.security.scope import manifest_for_scan
+from farm_agent.security.threat_model import ThreatModel
 from farm_agent.security.state import CandidateStatus, EvidenceKind, PoCStatus, SecurityGateError
 
 logger = logging.getLogger(__name__)
@@ -1112,6 +1113,17 @@ class FarmAgentPipeline:
             )
             raise
         finally:
+            if self.config.bounty.program_scopes and self._memory:
+                manifest = await self._memory.get_scan_manifest(scan_id)
+                if manifest:
+                    coverage = await self._memory.get_coverage_summary(scan_id)
+                    logger.info("Scan %s: %s", scan_id, coverage.statement)
+                    await self._m0_event(
+                        scan_id=scan_id, repo=repo.full_name, pipeline="standard",
+                        stage="coverage",
+                        outcome="complete" if coverage.complete else "incomplete",
+                        count=coverage.tested,
+                    )
             await self._m0_event(
                 scan_id=scan_id, repo=repo.full_name, pipeline="standard",
                 stage="scan", outcome=outcome,
@@ -1140,6 +1152,8 @@ class FarmAgentPipeline:
             )
             if manifest:
                 await self._memory.store_scan_manifest(manifest)
+                await self._memory.store_threat_model(ThreatModel.from_manifest(manifest))
+                await self._memory.initialize_coverage(manifest)
         if expected_target_commit and target_commit != expected_target_commit:
             for finding in candidate_findings_override or []:
                 candidate_id = await self._memory.create_security_candidate(
