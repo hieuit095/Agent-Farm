@@ -11,6 +11,7 @@ import yaml
 from pydantic import BaseModel, Field, model_validator
 
 from farm_agent.core.exceptions import ConfigError
+from farm_agent.security.scope import ProgramScope
 
 
 class GitHubConfig(BaseModel):
@@ -223,6 +224,7 @@ class BountyConfig(BaseModel):
     """Bug Bounty, responsible disclosure, and human opsec configuration."""
 
     bounty_reports_dir: str = "bounty_reports"
+    program_scopes: list[ProgramScope] = Field(default_factory=list)
     auto_submit_ghsa: bool = False
     allow_public_pr_for_critical: bool = False  # By default, NEVER open public PR for Critical/High 0-days
     circadian_enabled: bool = True

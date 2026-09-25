@@ -21,7 +21,7 @@ class ClosureService:
 
 
 async def require_confirmed_security_finding(
-    memory, finding, repo: str, *, target_commit: str = "",
+    memory, finding, repo: str, *, target_commit: str = "", channel: str | None = None,
 ) -> None:
     """Reject publication unless this exact finding has commit-bound PoC evidence."""
     metadata = finding.metadata if isinstance(finding.metadata, dict) else {}
@@ -41,3 +41,11 @@ async def require_confirmed_security_finding(
             or candidate["target_commit"] != commit
             or not await memory.security_candidate_is_confirmed(candidate_id, repo)):
         raise SecurityGateError("Security finding does not match confirmed PoC evidence")
+    if not candidate.get("scan_id"):
+        raise SecurityGateError("Confirmed finding has no scan identity")
+    manifest = await memory.get_scan_manifest(candidate["scan_id"])
+    if (manifest is None or manifest.scope.repo != repo
+            or manifest.scope.target_commit != commit):
+        raise SecurityGateError("Confirmed finding has no matching authorized scan manifest")
+    if channel:
+        manifest.require_publication(channel)

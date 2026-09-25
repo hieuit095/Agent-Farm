@@ -7,6 +7,7 @@ to avoid duplicate work and improve over time.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import sqlite3
 import uuid
@@ -16,6 +17,7 @@ from pathlib import Path
 import aiosqlite
 
 from farm_agent.security.state import CandidateStatus, EvidenceKind, SecurityGateError
+from farm_agent.security.scope import ScanManifest
 
 logger = logging.getLogger(__name__)
 
@@ -103,6 +105,15 @@ CREATE TABLE IF NOT EXISTS security_evidence (
     kind          TEXT NOT NULL,
     content_hash  TEXT NOT NULL,
     target_commit TEXT NOT NULL,
+    created_at    TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS scan_manifests (
+    scan_id       TEXT PRIMARY KEY,
+    repo          TEXT NOT NULL,
+    target_commit TEXT NOT NULL,
+    manifest_json TEXT NOT NULL,
+    manifest_hash TEXT NOT NULL,
+    requests_used INTEGER NOT NULL DEFAULT 0,
     created_at    TEXT NOT NULL
 );
 
@@ -588,6 +599,68 @@ class Memory:
         if row is None:
             return None
         return dict(zip((column[0] for column in cursor.description), row, strict=True))
+
+    async def store_scan_manifest(self, manifest: ScanManifest) -> None:
+        payload = json.dumps(manifest.model_dump(mode="json"), sort_keys=True, separators=(",", ":"))
+        await self._db.execute(
+            """INSERT INTO scan_manifests
+               (scan_id, repo, target_commit, manifest_json, manifest_hash, created_at)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (manifest.scan_id, manifest.scope.repo, manifest.scope.target_commit,
+             payload, manifest.digest, datetime.now(UTC).isoformat()),
+        )
+        await self._db.commit()
+
+    async def get_scan_manifest(self, scan_id: str) -> ScanManifest | None:
+        cursor = await self._db.execute(
+            "SELECT repo, target_commit, manifest_json, manifest_hash FROM scan_manifests WHERE scan_id = ?",
+            (scan_id,),
+        )
+        row = await cursor.fetchone()
+        if row is None:
+            return None
+        try:
+            manifest = ScanManifest.model_validate_json(row[2])
+        except Exception as exc:
+            raise SecurityGateError("Stored scan manifest is invalid") from exc
+        if (manifest.scan_id != scan_id or manifest.scope.repo != row[0]
+                or manifest.scope.target_commit != row[1] or manifest.digest != row[3]):
+            raise SecurityGateError("Stored scan manifest failed integrity validation")
+        return manifest
+
+    async def reserve_scoped_request(
+        self, scan_id: str, *, url: str, role: str, impact: str, method: str = "GET",
+    ) -> int:
+        """Atomically spend one request budget unit before network I/O."""
+        async with self._security_lock:
+            await self._db.execute("BEGIN IMMEDIATE")
+            try:
+                cursor = await self._db.execute(
+                    """SELECT manifest_json, manifest_hash, requests_used
+                       FROM scan_manifests WHERE scan_id = ?""",
+                    (scan_id,),
+                )
+                row = await cursor.fetchone()
+                if row is None:
+                    raise SecurityGateError("Live scan has no authorized manifest")
+                try:
+                    manifest = ScanManifest.model_validate_json(row[0])
+                except Exception as exc:
+                    raise SecurityGateError("Stored scan manifest is invalid") from exc
+                if manifest.scan_id != scan_id or manifest.digest != row[1]:
+                    raise SecurityGateError("Stored scan manifest failed integrity validation")
+                manifest.require_request(url, role, impact, method)
+                if row[2] >= manifest.scope.max_requests:
+                    raise SecurityGateError("Program request budget exhausted")
+                await self._db.execute(
+                    "UPDATE scan_manifests SET requests_used = requests_used + 1 WHERE scan_id = ?",
+                    (scan_id,),
+                )
+                await self._db.commit()
+                return row[2] + 1
+            except Exception:
+                await self._db.rollback()
+                raise
 
     async def security_candidate_is_confirmed(self, candidate_id: str, repo: str) -> bool:
         cursor = await self._db.execute(

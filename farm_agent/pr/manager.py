@@ -159,6 +159,7 @@ class PRManager:
                 or contribution.finding.metadata.get("security_candidate_id")):
             await require_confirmed_security_finding(
                 self._memory, contribution.finding, target_repo.full_name,
+                channel="public_pr",
             )
         user = await self._get_user()
         username = user["login"]

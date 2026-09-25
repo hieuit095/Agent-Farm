@@ -12,6 +12,7 @@ from farm_agent.pr.manager import PRManager
 from farm_agent.pr.patrol import PRPatrol
 from farm_agent.security.closure import require_confirmed_security_finding
 from farm_agent.security.evidence import evidence_hash
+from farm_agent.security.scope import ProgramScope, ScanManifest
 from farm_agent.security.state import CandidateStatus, EvidenceKind, SecurityGateError
 
 
@@ -48,6 +49,12 @@ async def test_exact_finding_and_commit_required_for_publication(tmp_path):
             candidate, status=CandidateStatus.CONFIRMED,
             reason_code="POC_TRIGGERED", evidence_id=evidence,
         )
+        await memory.store_scan_manifest(ScanManifest(
+            scan_id="scan", scope=ProgramScope(
+                program_id="test-program", repo="owner/repo", target_commit="a" * 40,
+                policy_reference="local test authorization", allow_public_pr=True,
+            ),
+        ))
         await require_confirmed_security_finding(memory, finding, "owner/repo")
         for changed in (
             finding.model_copy(update={"title": "Other"}),

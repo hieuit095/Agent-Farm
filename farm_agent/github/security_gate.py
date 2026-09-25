@@ -244,6 +244,7 @@ async def handle_responsible_disclosure(
     repo_full_name = f"{owner}/{repo}"
     await require_confirmed_security_finding(
         memory, finding, repo_full_name, target_commit=target_commit,
+        channel="private_disclosure",
     )
     target_commit = target_commit or finding.metadata["security_target_commit"]
     cwe_id, cwe_name, cvss_score, cvss_vector = calculate_vulnerability_metrics(
@@ -500,6 +501,13 @@ async def run_security_gate(
             result.repo_full_name,
         )
         return None
+
+    if dossier and hasattr(dossier, "vulnerabilities"):
+        for vulnerability in dossier.vulnerabilities:
+            if isinstance(vulnerability, Finding) and vulnerability.type == ContributionType.SECURITY_FIX:
+                await require_confirmed_security_finding(
+                    memory, vulnerability, f"{owner}/{repo}", channel="private_disclosure",
+                )
 
     logger.warning(
         "[COMPLIANCE SKIP] Private security disclosure requested by maintainers for %s. "

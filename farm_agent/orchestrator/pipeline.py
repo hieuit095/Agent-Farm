@@ -46,6 +46,7 @@ from farm_agent.orchestrator.memory import Memory
 from farm_agent.pr.manager import PRManager
 from farm_agent.security.closure import ClosureService
 from farm_agent.security.evidence import evidence_hash
+from farm_agent.security.scope import manifest_for_scan
 from farm_agent.security.state import CandidateStatus, EvidenceKind, PoCStatus, SecurityGateError
 
 logger = logging.getLogger(__name__)
@@ -1132,6 +1133,13 @@ class FarmAgentPipeline:
         # Early Clone Initialization
         repo_path = await self._clone_and_patch_repo(repo.clone_url, [], [])
         target_commit = self._repo_head_sha(repo_path)
+        if target_commit and self._memory:
+            manifest = manifest_for_scan(
+                scan_id, repo.full_name, target_commit,
+                self.config.bounty.program_scopes,
+            )
+            if manifest:
+                await self._memory.store_scan_manifest(manifest)
         if expected_target_commit and target_commit != expected_target_commit:
             for finding in candidate_findings_override or []:
                 candidate_id = await self._memory.create_security_candidate(

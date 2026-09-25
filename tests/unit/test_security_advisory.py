@@ -12,6 +12,36 @@ from farm_agent.github.security_gate import (
     handle_responsible_disclosure,
     save_bounty_dossier,
 )
+from farm_agent.orchestrator.memory import Memory
+from farm_agent.security.evidence import evidence_hash
+from farm_agent.security.scope import ProgramScope, ScanManifest
+from farm_agent.security.state import CandidateStatus, EvidenceKind
+
+
+async def _persist_confirmed_finding(tmp_path, finding, repo, sha):
+    memory = Memory(tmp_path / "proof.db")
+    await memory.init()
+    candidate = await memory.create_security_candidate(
+        scan_id="advisory-scan", repo=repo, target_commit=sha,
+        file_path=finding.file_path, title=finding.title,
+    )
+    evidence = await memory.add_security_evidence(
+        candidate_id=candidate, kind=EvidenceKind.POC_TRIGGERED,
+        content_hash=evidence_hash(target_commit=sha, observation={"confirmed": True}),
+        target_commit=sha,
+    )
+    await memory.close_security_candidate(
+        candidate, status=CandidateStatus.CONFIRMED,
+        reason_code="POC_TRIGGERED", evidence_id=evidence,
+    )
+    await memory.store_scan_manifest(ScanManifest(
+        scan_id="advisory-scan", scope=ProgramScope(
+            program_id="test-program", repo=repo, target_commit=sha,
+            policy_reference="local test authorization", allow_private_disclosure=True,
+        ),
+    ))
+    finding.metadata = {"security_candidate_id": candidate, "security_target_commit": sha}
+    return memory
 
 
 def test_calculate_vulnerability_metrics_sqli():
@@ -121,13 +151,9 @@ async def test_handle_responsible_disclosure_local(tmp_path):
     config = MagicMock()
     config.bounty.auto_submit_ghsa = False
     config.bounty.bounty_reports_dir = str(tmp_path)
-    finding.metadata = {"security_candidate_id": "candidate", "security_target_commit": "a" * 40}
-    memory = MagicMock()
-    memory.get_security_candidate = AsyncMock(return_value={
-        "repo": "sec-org/storage-service", "file_path": finding.file_path,
-        "title": finding.title, "target_commit": "a" * 40,
-    })
-    memory.security_candidate_is_confirmed = AsyncMock(return_value=True)
+    memory = await _persist_confirmed_finding(
+        tmp_path, finding, "sec-org/storage-service", "a" * 40,
+    )
 
     advisory = await handle_responsible_disclosure(
         github=github,
@@ -149,6 +175,7 @@ async def test_handle_responsible_disclosure_local(tmp_path):
     assert Path(advisory.report_file_path).exists()
     notifier.send_message.assert_called_once()
     assert "RESPONSIBLE DISCLOSURE" in notifier.send_message.call_args[0][0]
+    await memory.close()
 
 
 @pytest.mark.asyncio
@@ -173,13 +200,7 @@ async def test_handle_responsible_disclosure_ghsa_api(tmp_path):
     config = MagicMock()
     config.bounty.auto_submit_ghsa = True
     config.bounty.bounty_reports_dir = str(tmp_path)
-    finding.metadata = {"security_candidate_id": "candidate", "security_target_commit": "b" * 40}
-    memory = MagicMock()
-    memory.get_security_candidate = AsyncMock(return_value={
-        "repo": "sec-org/repo", "file_path": finding.file_path,
-        "title": finding.title, "target_commit": "b" * 40,
-    })
-    memory.security_candidate_is_confirmed = AsyncMock(return_value=True)
+    memory = await _persist_confirmed_finding(tmp_path, finding, "sec-org/repo", "b" * 40)
 
     advisory = await handle_responsible_disclosure(
         github=github,
@@ -196,3 +217,4 @@ async def test_handle_responsible_disclosure_ghsa_api(tmp_path):
     assert advisory.ghsa_id == "GHSA-1234"
     assert advisory.ghsa_url == "https://github.com/sec-org/repo/security/advisories/GHSA-1234"
     github.submit_security_advisory_report.assert_called_once()
+    await memory.close()
