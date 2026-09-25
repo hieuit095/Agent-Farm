@@ -1,21 +1,4 @@
-"""
-ROUTING TRAP TEST — Multi-Model Dream Team Verification
-=======================================================
-
-Intercepts every `create_llm_provider` call in the circular pipeline and
-asserts that each phase exclusively requests the correct model string.
-
-Expected routing table:
-  ┌──────────────────────────┬─────────────────────────────────────────────────────────┐
-  │ Phase                    │ Model                                                    │
-  ├──────────────────────────┼─────────────────────────────────────────────────────────┤
-  │ Primary Generator (DEV)  │ deepseek/deepseek-v3.2                                   │
-  │ Red Team / Bloodhound    │ cognitivecomputations/dolphin-mistral-24b-venice-edition:free │
-  │ Layer 1 Appraiser        │ moonshotai/kimi-k2.5                                     │
-  │ QA Hardcore Scorer Ph.3  │ moonshotai/kimi-k2.6                                     │
-  │ Layer 2 Supreme Auditor  │ google/gemini-3.1-pro-preview                            │
-  └──────────────────────────┴─────────────────────────────────────────────────────────┘
-"""
+"""Provider factory checks and circular-to-standard security gate delegation."""
 from __future__ import annotations
 
 import asyncio
@@ -236,11 +219,8 @@ def _build_patches(trap: RoutingTrap, cfg: MagicMock, fake_dossier, fake_gen_res
 # ── End-to-End Routing Trap Test ───────────────────────────────────────────────
 
 @pytest.mark.asyncio
-async def test_run_circular_model_routing():
-    """
-    Simulates one full run_circular() pass through the DEV-QA loop and
-    asserts every phase routes to its designated model string.
-    """
+async def test_run_circular_delegates_candidates_to_standard_security_gate():
+    """Circular discovery must hand its candidates to the shared proof gate."""
     from farm_agent.core.models import (
         VulnerabilityDossier, Vulnerability,
         Contribution, FileChange, Finding, ContributionType, Severity, ImpactLevel,
@@ -263,7 +243,7 @@ async def test_run_circular_model_routing():
     )
     fake_dossier = VulnerabilityDossier(
         repo_url="https://github.com/testorg/testrepo",
-        target_commit="abc123",
+        target_commit="a" * 40,
         vulnerabilities=[fake_vuln],
     )
 
@@ -303,7 +283,12 @@ async def test_run_circular_model_routing():
         for target, kwargs in patch_defs:
             stack.enter_context(patch(target, **kwargs))
 
-        from farm_agent.orchestrator.pipeline import FarmAgentPipeline
+        from farm_agent.orchestrator.pipeline import FarmAgentPipeline, PipelineResult
+
+        delegated = stack.enter_context(patch.object(
+            FarmAgentPipeline, "_process_repo", new_callable=AsyncMock,
+            return_value=PipelineResult(),
+        ))
 
         pipeline = FarmAgentPipeline(cfg)
 
@@ -311,31 +296,13 @@ async def test_run_circular_model_routing():
         primary_provider = trap._factory(cfg.llm)
         pipeline._llm    = primary_provider
 
-        # Wire a passing QA score for the kimi-k2.6 provider
-        qa_provider = trap.get_provider(MODEL_QA_SCORER)
-        qa_provider.complete = AsyncMock(return_value=json.dumps({
-            "score": 9.5, "critiques": [], "approved": True,
-        }))
-
         await pipeline.run_circular(json_path="target_repo.json", dry_run=True)
 
-    # ── ROUTING ASSERTIONS ─────────────────────────────────────────────────
-    print("\n[ROUTING TRAP] Models seen during run_circular():")
-    for m in trap.seen_models:
-        print(f"  → {m}")
-
-    assert MODEL_PRIMARY in trap.seen_models, (
-        f"PRIMARY model '{MODEL_PRIMARY}' was NEVER instantiated!\n"
-        f"Seen: {trap.seen_models}"
-    )
-    assert MODEL_QA_SCORER in trap.seen_models, (
-        f"QA Scorer model '{MODEL_QA_SCORER}' was NEVER instantiated!\n"
-        f"Seen: {trap.seen_models}"
-    )
-    assert MODEL_QA_SCORER != MODEL_PRIMARY, (
-        "MODEL_QA_SCORER and MODEL_PRIMARY must differ — deep-copy isolation broken!"
-    )
-    print("\n[ROUTING TRAP] ✅ All run_circular routing assertions PASSED.")
+    delegated.assert_awaited_once()
+    candidate = delegated.await_args.kwargs["candidate_findings_override"][0]
+    assert candidate.type == ContributionType.SECURITY_FIX
+    assert candidate.file_path == "src/auth.py"
+    assert delegated.await_args.kwargs["expected_target_commit"] == "a" * 40
 
 
 # ── Unit tests: factory maps each model correctly ─────────────────────────────

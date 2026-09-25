@@ -19,7 +19,7 @@ import time
 import uuid
 from dataclasses import dataclass, field
 
-from farm_agent.analysis.analyzer import BloodhoundAnalyzer, CodeAnalyzer
+from farm_agent.analysis.analyzer import BloodhoundAnalyzer, CodeAnalyzer, ScanIncompleteError
 from farm_agent.core.config import FarmAgentConfig
 from farm_agent.core.middleware import build_default_chain
 from farm_agent.core.models import (
@@ -31,14 +31,11 @@ from farm_agent.core.models import (
     Finding,
     ImpactLevel,
     PRResult,
-    QAResult,
     RepoContext,
     Repository,
     Severity,
-    VulnerabilityDossier,
 )
-from farm_agent.generator.engine import ContributionGenerator, GenerationResult
-from farm_agent.generator.scorer import QAHardcoreScorer
+from farm_agent.generator.engine import ContributionGenerator
 from farm_agent.github.client import GitHubClient
 from farm_agent.github.discovery import DatabaseTargetDiscovery, RepoDiscovery
 from farm_agent.github.guidelines import fetch_repo_guidelines
@@ -917,7 +914,7 @@ class FarmAgentPipeline:
 
             # ── Bloodhound Pre-Filter ──────────────────────────────────
             # Run Semgrep pre-scan before expensive LLM analysis.
-            # If the target is clean, mark COMPLETED_NO_VULN and skip.
+            # A prefilter miss is partial coverage, never a clean verdict.
             bloodhound = BloodhoundAnalyzer(
                 llm=self._llm,
                 github=self._github,
@@ -948,11 +945,13 @@ class FarmAgentPipeline:
                     stage="prefilter", outcome="stopped", reason_code="NO_MATCHES",
                     count=0,
                 )
-                logger.info(
-                    "Clean sweep, no vulns for %s — marking COMPLETED_NO_VULN",
-                    target.repo_url,
+                logger.info("No prefilter candidates for %s; coverage remains partial", target.repo_url)
+                await discovery.mark_status(target.repo_url, "PARTIAL_SCAN")
+                await self._m0_event(
+                    scan_id=scan_id, repo=target.repo_url, pipeline="circular",
+                    stage="scan", outcome="partial", reason_code="PREFILTER_NO_CANDIDATES",
+                    count=0,
                 )
-                await discovery.mark_status(target.repo_url, "COMPLETED_NO_VULN")
                 return result
 
             logger.info(
@@ -979,11 +978,16 @@ class FarmAgentPipeline:
                     reason_code="NO_PRODUCTION_CANDIDATES", count=0,
                 )
                 logger.info(
-                    "All %d vulnerabilities were in non-production paths for %s — marking COMPLETED_NO_VULN",
+                    "All %d vulnerabilities were in non-production paths for %s — coverage partial",
                     len(dossier.vulnerabilities),
                     target.repo_url,
                 )
-                await discovery.mark_status(target.repo_url, "COMPLETED_NO_VULN")
+                await discovery.mark_status(target.repo_url, "PARTIAL_SCAN")
+                await self._m0_event(
+                    scan_id=scan_id, repo=target.repo_url, pipeline="circular",
+                    stage="scan", outcome="partial",
+                    reason_code="NO_PRODUCTION_CANDIDATES", count=0,
+                )
                 return result
 
             dossier.vulnerabilities = production_vulns
@@ -993,245 +997,49 @@ class FarmAgentPipeline:
                 count=len(production_vulns),
             )
 
-        # ── Build RepoContext with vulnerable file contents ───────────
-            # Use GraphQL for repo tree (falls back to REST on any error)
-            try:
-                file_tree = await self._github.fetch_repo_structure_graphql(
-                    repo.owner, repo.name
+            # Feed Bloodhound candidates into the standard proof and patch gate.
+            candidates = []
+            for vulnerability in production_vulns:
+                impact = vulnerability.impact.upper()
+                severity = (
+                    Severity.CRITICAL if impact.startswith("CRITICAL")
+                    else Severity.HIGH if impact.startswith("HIGH")
+                    else Severity.MEDIUM
                 )
-            except Exception as exc:
-                logger.info("GraphQL tree fetch failed for %s/%s, falling back to REST: %s",
-                             repo.owner, repo.name, exc)
-                file_tree = await self._github.get_file_tree(repo.owner, repo.name)
-            relevant_files: dict[str, str] = {}
-            for vuln in dossier.vulnerabilities:
-                if vuln.file and vuln.file != "NONE" and vuln.file not in relevant_files:
-                    try:
-                        content = await self._github.get_file_content(
-                            repo.owner, repo.name, vuln.file
-                        )
-                        if content:
-                            relevant_files[vuln.file] = content
-                    except Exception as exc:
-                        logger.debug("Could not fetch %s: %s", vuln.file, exc)
-
-            context = RepoContext(
-                repo=repo,
-                file_tree=file_tree,
-                relevant_files=relevant_files,
+                candidates.append(Finding(
+                    type=ContributionType.SECURITY_FIX,
+                    severity=severity,
+                    title=f"Security finding at {vulnerability.file}:{vulnerability.line}",
+                    description=vulnerability.evidence_chain or vulnerability.snippet,
+                    file_path=vulnerability.file,
+                    line_start=vulnerability.line,
+                    suggestion=vulnerability.fix,
+                    impact_level=ImpactLevel.HIGH,
+                ))
+            result = await self._process_repo(
+                repo, dry_run=dry_run, max_prs=max(1, remaining),
+                candidate_findings_override=candidates,
+                expected_target_commit=dossier.target_commit,
             )
+            await discovery.mark_status(
+                target.repo_url, "PR_SUBMITTED" if result.prs_created else "PARTIAL_SCAN"
+            )
+            return result
 
-            # ── 3-Cycle DEV-QA Bounty Loop (FinOps Circuit Breaker) ────────────
-            MAX_DEV_QA_CYCLES = 3
-            qa_passed = False
-            winning_contribution: Contribution | None = None
-            failure_context = ""  # Accumulates sandbox/QA failure traces across cycles
-
-            import copy
-            from farm_agent.llm.provider import create_llm_provider
-            qa_cfg = copy.deepcopy(self.config.llm)
-            qa_cfg.provider = "openrouter"
-            qa_cfg.model = "qwen/qwen3.7-max"
-            self._qa_provider = create_llm_provider(qa_cfg)
-            scorer = QAHardcoreScorer(llm=self._qa_provider)
-
-            # ── Diplomat Protocol Task 2: Load repo style guide for QA penalty ──
-            repo_style_guide_text = ""
-            guidelines = None
-            if self._memory:
-                try:
-                    cached_sg = await self._memory.get_style_guide(repo.full_name)
-                    if cached_sg and cached_sg.get("style_summary"):
-                        repo_style_guide_text = cached_sg["style_summary"]
-                except Exception:
-                    pass
-            if not repo_style_guide_text and guidelines and guidelines.style_guide:
-                repo_style_guide_text = guidelines.style_guide.raw_summary
-
-            for cycle in range(MAX_DEV_QA_CYCLES):
-                logger.info(
-                    "Starting DEV-QA Cycle %d/%d for %s",
-                    cycle + 1, MAX_DEV_QA_CYCLES, target.repo_url,
-                )
-
-                # 1. DEV generates patches (auto-injects QA Lessons + failure context)
-                try:
-                    gen_result: GenerationResult = await self._generator.generate_from_dossier(
-                        dossier, context, github_client=self._github,
-                        failure_context=failure_context,
-                    )
-                    contributions = gen_result.contributions
-                    await self._m0_event(
-                        scan_id=scan_id, repo=target.repo_url, pipeline="circular",
-                        stage="generation", outcome="produced",
-                        count=len(contributions),
-                    )
-                except RuntimeError as e:
-                    logger.error("Generation failed: %s", e)
-                    failure_context += f"\n[CYCLE {cycle + 1} GENERATION FAILURE] {e}"
-                    continue
-                except Exception as e:
-                    logger.error("Generation failed: %s", e)
-                    failure_context += f"\n[CYCLE {cycle + 1} GENERATION FAILURE] {e}"
-                    continue
-
-                # ── False Positive Escape Hatch ─────────────────────────────────
-                # If the DEV agent determined ALL findings are false positives,
-                # gracefully abort the DEV-QA loop — no point forcing code generation.
-                if gen_result.all_false_positives:
-                    logger.info(
-                        "[CONTEXT SKIP] AI determined all findings are False Positives "
-                        "for %s — aborting DEV-QA loop.",
-                        target.repo_url,
-                    )
-                    break
-
-                if not contributions:
-                    logger.warning("No contributions generated in cycle %d", cycle + 1)
-                    failure_context += f"\n[CYCLE {cycle + 1} No valid code generated — anti-template interceptor may have triggered.]"
-                    continue
-
-                # 2. QA evaluates the first (best) contribution
-                qa_result: QAResult = await scorer.evaluate(
-                    dossier, contributions[0],
-                    repo_style_guide=repo_style_guide_text,
-                )
-                await self._m0_event(
-                    scan_id=scan_id, repo=target.repo_url, pipeline="circular",
-                    stage="qa", outcome="approved" if qa_result.approved else "rejected",
-                )
-                logger.info(
-                    "QA Score: %.1f/10.0 — Approved: %s",
-                    qa_result.score, qa_result.approved,
-                )
-
-                if qa_result.approved:
-                    # Success — exit the loop and proceed to PR submission
-                    qa_passed = True
-                    winning_contribution = contributions[0]
-                    logger.info(
-                        "QA PASSED on cycle %d with score %.1f",
-                        cycle + 1, qa_result.score,
-                    )
-                    break
-                else:
-                    # 3. QA rejected — record critiques as lessons and inject into failure context
-                    critique_text = "; ".join(qa_result.critiques)
-                    for critique in qa_result.critiques:
-                        await self._memory.record_qa_lesson(
-                            repo.full_name, critique
-                        )
-                    failure_context += (
-                        f"\n[CYCLE {cycle + 1} QA REJECTED — Score: {qa_result.score:.1f}/10.0]"
-                        f"\nQA Critiques: {critique_text}"
-                    )
-                    logger.warning(
-                        "QA Rejected (score %.1f). %d critiques recorded. Retrying...",
-                        qa_result.score,
-                        len(qa_result.critiques),
-                    )
-
-            if qa_passed and winning_contribution is not None:
-                # ── Proceed to PR submission ─────────────────────────────
-                
-                # Layer 2: Supreme Auditor
-                layer2_approved, reject_reason = await self._layer2_supreme_audit(winning_contribution, failure_context)
-                if not layer2_approved:
-                    logger.warning("🚫 Vetoed by Layer 2 Supreme Auditor (Gemini). Skipping PR.")
-                    if self._memory:
-                        patch_str = "\n".join(f"File: {c.path}\n```\n{c.new_content}\n```" for c in winning_contribution.changes)
-                        await self._memory.add_filter_lesson(repo.full_name, 2, patch_str, reject_reason)
-                    logger.info("Recorded Layer 2 lesson for %s: %s...", repo.full_name, reject_reason[:50])
-                    await discovery.mark_status(target.repo_url, "COMPLETED_TOO_COMPLEX")
-                    return result
-
-                # ── Route C Enforcement: Responsible Disclosure & Bug Bounty ───
-                allow_public_pr = getattr(getattr(self.config, "bounty", None), "allow_public_pr_for_critical", False)
-                is_high_risk_vuln = (
-                    not allow_public_pr
-                    and winning_contribution.finding.severity in (Severity.CRITICAL, Severity.HIGH)
-                    and winning_contribution.contribution_type == ContributionType.SECURITY_FIX
-                )
-
-                security_gate_result = await run_security_gate(
-                    github=self._github,
-                    owner=repo.owner,
-                    repo=repo.name,
-                    dossier=dossier,
-                    notifier=self._notifier,
-                )
-                if is_high_risk_vuln or security_gate_result is not None:
-                    reason = "Critical/High 0-day vulnerability" if is_high_risk_vuln else "Private security policy"
-                    logger.warning(
-                        "[ROUTE C PRIVATE DISCLOSURE] %s detected for %s. "
-                        "Generating Bug Bounty Advisory Dossier and aborting public PR.",
-                        reason,
-                        target.repo_url,
-                    )
-                    patch_diff = "\n".join(
-                        f"--- a/{c.path}\n+++ b/{c.path}\n@@ -1 +1 @@\n+{c.new_content}"
-                        for c in winning_contribution.changes
-                    )
-                    poc_script = ""
-                    if winning_contribution.tests_added:
-                        poc_script = winning_contribution.tests_added[0].new_content
-                    elif dossier and hasattr(dossier, "vulnerabilities") and dossier.vulnerabilities:
-                        poc_script = dossier.vulnerabilities[0].poc
-
-                    target_commit = getattr(dossier, "target_commit", "") if dossier else ""
-                    advisory = await handle_responsible_disclosure(
-                        github=self._github,
-                        owner=repo.owner,
-                        repo=repo.name,
-                        finding=winning_contribution.finding,
-                        remediation_patch=patch_diff,
-                        poc_script=poc_script,
-                        target_commit=target_commit,
-                        config=self.config,
-                        notifier=self._notifier,
-                    )
-                    status_name = "GHSA_SUBMITTED" if advisory.ghsa_id else "BOUNTY_DOSSIER_SAVED"
-                    await discovery.mark_status(target.repo_url, status_name)
-                    result.repos_analyzed += 1
-                    result.findings_total += len(dossier.vulnerabilities) if dossier else 1
-                    return result
-
-                result.repos_analyzed += 1
-                result.findings_total += len(dossier.vulnerabilities)
-                result.contributions_generated += 1
-
-                if not dry_run:
-                    try:
-                        pr_result = await self._pr_manager.create_pr(
-                            contribution=winning_contribution,
-                            target_repo=repo,
-                        )
-                        if pr_result:
-                            result.prs_created += 1
-                            result.prs.append(pr_result)
-                            await discovery.mark_status(target.repo_url, "PR_SUBMITTED")
-                            logger.info("PR submitted: %s", pr_result.pr_url)
-                    except Exception as e:
-                        logger.error("PR submission failed: %s", e)
-                        result.errors.append(f"PR submission failed: {e}")
-                else:
-                    logger.info(
-                        "Dry run — would submit PR for %s",
-                        winning_contribution.title,
-                    )
-                    await discovery.mark_status(target.repo_url, "PR_SUBMITTED")
-            else:
-                logger.warning(
-                    "Bailout: Complexity exceeded after %d DEV-QA cycles for %s. "
-                    "Cutting losses to save tokens.",
-                    MAX_DEV_QA_CYCLES, target.repo_url,
-                )
-                await discovery.mark_status(target.repo_url, "COMPLETED_TOO_COMPLEX")
-
+        except ScanIncompleteError as e:
+            msg = f"Circular scan incomplete for {target.repo_url}: {e.reason_code}"
+            logger.warning(msg)
+            result.errors.append(msg)
+            await discovery.mark_status(target.repo_url, "PARTIAL_SCAN")
+            await self._m0_event(
+                scan_id=scan_id, repo=target.repo_url, pipeline="circular",
+                stage="scan", outcome="partial", reason_code=e.reason_code, count=0,
+            )
         except Exception as e:
             msg = f"Circular loop error for {target.repo_url}: {e}"
             logger.error(msg)
             result.errors.append(msg)
+            await discovery.mark_status(target.repo_url, "PARTIAL_SCAN")
             await self._m0_event(
                 scan_id=scan_id, repo=target.repo_url, pipeline="circular",
                 stage="scan", outcome="error", reason_code=type(e).__name__, count=0,
@@ -1276,6 +1084,8 @@ class FarmAgentPipeline:
         max_prs: int = 5,
         *,
         allow_duplicate_prs: bool = False,
+        candidate_findings_override: list[Finding] | None = None,
+        expected_target_commit: str | None = None,
     ) -> PipelineResult:
         """Process one repository and always close its M0 telemetry span."""
         scan_id = uuid.uuid4().hex
@@ -1290,6 +1100,8 @@ class FarmAgentPipeline:
                 repo, dry_run, max_prs,
                 allow_duplicate_prs=allow_duplicate_prs,
                 scan_id=scan_id, scan_started=scan_started,
+                candidate_findings_override=candidate_findings_override,
+                expected_target_commit=expected_target_commit,
             )
         except Exception as exc:
             outcome = "error"
@@ -1309,6 +1121,8 @@ class FarmAgentPipeline:
     async def _process_repo_impl(
         self, repo: Repository, dry_run: bool, max_prs: int, *,
         allow_duplicate_prs: bool, scan_id: str, scan_started: float,
+        candidate_findings_override: list[Finding] | None,
+        expected_target_commit: str | None,
     ) -> PipelineResult:
         """Existing standard processing flow, annotated with M0 gate counts."""
         result = PipelineResult()
@@ -1318,6 +1132,19 @@ class FarmAgentPipeline:
         # Early Clone Initialization
         repo_path = await self._clone_and_patch_repo(repo.clone_url, [], [])
         target_commit = self._repo_head_sha(repo_path)
+        if expected_target_commit and target_commit != expected_target_commit:
+            for finding in candidate_findings_override or []:
+                candidate_id = await self._memory.create_security_candidate(
+                    scan_id=scan_id, repo=repo.full_name,
+                    target_commit=expected_target_commit,
+                    file_path=finding.file_path, title=finding.title,
+                )
+                await ClosureService(self._memory).close(
+                    candidate_id, CandidateStatus.OPEN_PROOF_GAP,
+                    reason_code="TARGET_COMMIT_CHANGED",
+                )
+            result.errors.append("TARGET_COMMIT_CHANGED")
+            return result
 
         # Run baseline native tests
         baseline_exit_code = None
@@ -1423,7 +1250,11 @@ class FarmAgentPipeline:
         # Analyze — set task context for model routing
         logger.info("🔬 Analyzing code...")
         self._set_task("analysis")
-        analysis = await self._analyzer.analyze(repo)
+        analysis = (
+            AnalysisResult(repo=repo, findings=candidate_findings_override)
+            if candidate_findings_override is not None
+            else await self._analyzer.analyze(repo)
+        )
         result.findings_total = len(analysis.findings)
 
         # Construct dependency graph for findings

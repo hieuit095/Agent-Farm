@@ -37,6 +37,14 @@ from farm_agent.llm.provider import LLMProvider
 
 logger = logging.getLogger(__name__)
 
+
+class ScanIncompleteError(RuntimeError):
+    """A scanner failure or missing prerequisite, never an empty finding set."""
+
+    def __init__(self, reason_code: str):
+        super().__init__(reason_code)
+        self.reason_code = reason_code
+
 # File extensions we can meaningfully analyze
 ANALYZABLE_EXTENSIONS = {
     ".py",
@@ -1093,14 +1101,14 @@ class BloodhoundAnalyzer:
         self, repo_path: Path, extra_rulesets: list[str] | None = None
     ) -> list[dict]:
         if not self._check_semgrep_available():
-            return []
+            raise ScanIncompleteError("SCANNER_UNAVAILABLE")
 
         rulesets = list(getattr(self._config, "semgrep_rulesets", []))
         if extra_rulesets:
             rulesets.extend(extra_rulesets)
         if not rulesets:
             logger.info("No Semgrep rulesets configured — skipping Semgrep radar")
-            return []
+            raise ScanIncompleteError("SCANNER_UNCONFIGURED")
 
         cmd = ["semgrep", "scan", "--json", "--quiet"]
         for ruleset in rulesets:
@@ -1133,6 +1141,7 @@ class BloodhoundAnalyzer:
                     proc.returncode,
                     stderr_text[:1000],
                 )
+                raise ScanIncompleteError("SCANNER_EXIT_ERROR")
 
             # Robust parsing: Clean JSON extractor
             try:
@@ -1152,9 +1161,9 @@ class BloodhoundAnalyzer:
                         logger.info("Successfully extracted Clean JSON from Semgrep output")
                     except json.JSONDecodeError:
                         logger.error("Clean JSON extraction failed. Could not parse Semgrep output.")
-                        return []
+                        raise ScanIncompleteError("SCANNER_INVALID_JSON") from None
                 else:
-                    return []
+                    raise ScanIncompleteError("SCANNER_INVALID_JSON")
 
             results = data.get("results", [])
 
@@ -1185,13 +1194,15 @@ class BloodhoundAnalyzer:
 
         except asyncio.TimeoutError:
             logger.warning("Semgrep scan timed out (%ds) for %s", self.SEMGREP_TIMEOUT, repo_path.name)
-            return []
+            raise ScanIncompleteError("SCANNER_TIMEOUT") from None
         except json.JSONDecodeError:
             logger.warning("Semgrep returned invalid JSON for %s", repo_path.name)
-            return []
+            raise ScanIncompleteError("SCANNER_INVALID_JSON") from None
+        except ScanIncompleteError:
+            raise
         except Exception as exc:
             logger.error("Semgrep scan failed for %s: %s", repo_path.name, exc)
-            return []
+            raise ScanIncompleteError("SCANNER_ERROR") from exc
 
 
     async def _white_hat_audit(
@@ -1457,6 +1468,20 @@ You MUST respond strictly in the following JSON array format. No markdown, no co
 
         return VulnerabilityDossier(repo_url=repo_url, target_commit="unknown", vulnerabilities=vulns)
 
+    async def _resolve_clone_commit(self, clone_path: Path) -> str:
+        proc = await asyncio.create_subprocess_exec(
+            "git", "-C", str(clone_path), "rev-parse", "HEAD",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        sha_output, _ = await asyncio.wait_for(proc.communicate(), timeout=10)
+        target_commit = sha_output.decode("ascii", errors="ignore").strip().lower()
+        if proc.returncode != 0 or not re.fullmatch(
+            r"(?:[0-9a-f]{40}|[0-9a-f]{64})", target_commit
+        ):
+            raise ScanIncompleteError("TARGET_COMMIT_UNKNOWN")
+        return target_commit
+
     async def run_bloodhound(self, repo: Repository) -> VulnerabilityDossier:
         """Execute the full Bloodhound pipeline for a repository.
 
@@ -1472,9 +1497,12 @@ You MUST respond strictly in the following JSON array format. No markdown, no co
         clone_path = await self._clone_repo_shallow(repo)
         if clone_path is None:
             logger.error("Failed to clone %s — aborting bloodhound", repo.full_name)
-            return empty_dossier
+            raise ScanIncompleteError("CLONE_FAILED")
 
         try:
+            target_commit = await self._resolve_clone_commit(clone_path)
+            empty_dossier.target_commit = target_commit
+
             # ── Concurrent Radar: Semgrep ──
             tasks = []
             task_labels = []
@@ -1528,6 +1556,7 @@ You MUST respond strictly in the following JSON array format. No markdown, no co
             dossier = await self._white_hat_audit(
                 repo_url=repo.url, repo_name=repo.full_name, matches=unique_matches,
             )
+            dossier.target_commit = target_commit
 
             if dossier.has_bugs():
                 logger.info(

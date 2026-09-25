@@ -229,17 +229,11 @@ async def _openrouter_complete_side_effect(
         })
 
     if "Vulnerability Verification Auditor" in sys_str:
-        if not AUDITOR_CALLS:
-            AUDITOR_CALLS.append(True)
-            return json.dumps({
-                "is_triggered": True,
-                "reason": "Vulnerability triggered successfully"
-            })
-        else:
-            return json.dumps({
-                "is_triggered": False,
-                "reason": "Vulnerability was not triggered (patched successfully)"
-            })
+        AUDITOR_CALLS.append(True)
+        return json.dumps({
+            "is_triggered": True,
+            "reason": "Vulnerability triggered successfully"
+        })
 
     # Red Team vs Generator check
     if "vulnerabilities" in prompt_str.lower() or "security" in prompt_str.lower() or "red team" in sys_str.lower():
@@ -368,6 +362,8 @@ async def test_omni_e2e_pipeline(tmp_path):
             side_effect=[
                 {"exit_code": 1, "stdout": "", "stderr": "AssertionError: exploit", "timed_out": False},
                 {"exit_code": 0, "stdout": "Fixed", "stderr": "", "timed_out": False},
+                {"exit_code": 1, "stdout": "", "stderr": "AssertionError: exploit", "timed_out": False},
+                {"exit_code": 0, "stdout": "Fixed", "stderr": "", "timed_out": False},
             ],
         ),
         patch.object(PRManager, "create_pr", new_callable=AsyncMock, return_value=fake_pr),
@@ -407,6 +403,8 @@ async def test_omni_e2e_pipeline(tmp_path):
         patch.object(CodeAnalyzer, "check_maintainer_vibe", new_callable=AsyncMock, return_value="FRIENDLY"),
         patch.object(CodeAnalyzer, "analyze", new_callable=AsyncMock, return_value=fake_analysis),
         patch.object(BloodhoundAnalyzer, "_clone_repo_shallow", new=mock_clone_shallow),
+        patch.object(BloodhoundAnalyzer, "_resolve_clone_commit", new_callable=AsyncMock,
+                     return_value="a" * 40),
         patch.object(BloodhoundAnalyzer, "_run_semgrep", new_callable=AsyncMock, return_value=[{"file": "src/app.py", "line": 2, "match": "cursor.execute(f'SELECT * FROM users WHERE id = {user_id}')", "rule": "semgrep:python.sql.injection", "severity": "HIGH"}]),
         patch.object(ContributionGenerator, "generate_from_dossier", new_callable=AsyncMock, return_value=fake_gen_result),
         patch.object(ContributionGenerator, "generate", new_callable=AsyncMock, return_value=fake_contribution),

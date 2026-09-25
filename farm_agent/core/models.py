@@ -292,8 +292,8 @@ class VulnerabilityDossier(BaseModel):
     """Dossier of validated vulnerabilities for a repository.
 
     Produced by BloodhoundAnalyzer after Semgrep pre-filter and
-    LLM White-Hat audit. If has_bugs() returns False, the repo
-    is clean and no further processing is needed.
+    LLM White-Hat audit. An empty dossier only means this sensor
+    produced no candidates; it is not proof that the repo is clean.
     """
 
     repo_url: str
