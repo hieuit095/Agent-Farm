@@ -64,6 +64,23 @@ CREATE TABLE IF NOT EXISTS run_log (
     errors       INTEGER DEFAULT 0,
     metadata     TEXT DEFAULT '{}'
 );
+CREATE TABLE IF NOT EXISTS scan_events (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    scan_id      TEXT NOT NULL,
+    candidate_id TEXT,
+    repo         TEXT NOT NULL,
+    pipeline     TEXT NOT NULL,
+    stage        TEXT NOT NULL,
+    outcome      TEXT NOT NULL,
+    reason_code  TEXT,
+    count        INTEGER NOT NULL DEFAULT 1,
+    duration_ms  INTEGER,
+    model        TEXT,
+    input_tokens INTEGER,
+    output_tokens INTEGER,
+    cost_usd     REAL,
+    created_at   TEXT NOT NULL
+);
 
 CREATE TABLE IF NOT EXISTS pr_outcomes (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -170,6 +187,9 @@ class Memory:
         # for range deletes of old rows — different access pattern from the COUNT queries).
         await self._db.execute(
             "CREATE INDEX IF NOT EXISTS idx_api_usage_cleanup ON api_usage_log(timestamp)"
+        )
+        await self._db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_scan_events_scan ON scan_events(scan_id, stage)"
         )
         await self._db.commit()
 
@@ -441,6 +461,33 @@ class Memory:
         return row[0] if row else 0
 
     # ── Run Log ────────────────────────────────────────────────────────────
+
+    async def record_scan_event(
+        self, *, scan_id: str, repo: str, pipeline: str, stage: str,
+        outcome: str, candidate_id: str | None = None, reason_code: str | None = None,
+        count: int = 1, duration_ms: int | None = None, model: str | None = None,
+        input_tokens: int | None = None, output_tokens: int | None = None,
+        cost_usd: float | None = None,
+    ) -> None:
+        """Store metadata-only M0 gate telemetry; never store prompts or PoC contents."""
+        await self._db.execute(
+            """INSERT INTO scan_events
+               (scan_id, candidate_id, repo, pipeline, stage, outcome, reason_code,
+                count, duration_ms, model, input_tokens, output_tokens, cost_usd, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (scan_id, candidate_id, repo, pipeline, stage, outcome, reason_code,
+             count, duration_ms, model, input_tokens, output_tokens, cost_usd,
+             datetime.now(UTC).isoformat()),
+        )
+        await self._db.commit()
+
+    async def get_scan_events(self, scan_id: str) -> list[dict]:
+        cursor = await self._db.execute(
+            "SELECT * FROM scan_events WHERE scan_id = ? ORDER BY id", (scan_id,)
+        )
+        rows = await cursor.fetchall()
+        columns = [column[0] for column in cursor.description]
+        return [dict(zip(columns, row, strict=True)) for row in rows]
 
     async def start_run(self) -> int:
         """Record the start of a pipeline run. Returns run ID."""

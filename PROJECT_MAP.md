@@ -1,5 +1,13 @@
 # PROJECT_MAP.md — Agent-Farm Ground Truth
 
+> **2026-09-25 audit note:** This map was generated for an older checkout path and contains stale behavioral claims. The verified read-only architecture review and forward plan are in [Agent-Farm v2 — Verified Upgrade Roadmap.md](file:///C:/Users/USER/Documents/GitHub/Bug-Bounty/Agent-Farm/Agent-Farm%20v2%20%E2%80%94%20Verified%20Upgrade%20Roadmap.md). Re-audit source paths and runtime contracts before using this map for implementation.
+
+> **Last Ground-Truth Audit:** 2026-09-25T14:26:53+07:00. **Current milestone: M0 baseline and telemetry implemented; real token/cost usage remains unmeasured until provider integration.** This section is current; the older generated inventory below remains historical and must not be used as proof of present behavior.
+>
+> **M0 active paths:** [pipeline.py](file:///C:/Users/USER/Documents/GitHub/Bug-Bounty/Agent-Farm/farm_agent/orchestrator/pipeline.py) (`run_circular`, `_process_repo`, `_process_repo_impl`, `_m0_event`), [memory.py](file:///C:/Users/USER/Documents/GitHub/Bug-Bounty/Agent-Farm/farm_agent/orchestrator/memory.py) (`scan_events`, `record_scan_event`, `get_scan_events`), [manifest.json](file:///C:/Users/USER/Documents/GitHub/Bug-Bounty/Agent-Farm/tests/corpus/manifest.json), [targets.py](file:///C:/Users/USER/Documents/GitHub/Bug-Bounty/Agent-Farm/tests/corpus/targets.py), [m0_report.py](file:///C:/Users/USER/Documents/GitHub/Bug-Bounty/Agent-Farm/scripts/m0_report.py), [m0-baseline.md](file:///C:/Users/USER/Documents/GitHub/Bug-Bounty/Agent-Farm/docs/m0-baseline.md).
+>
+> **Verification:** Baseline 81 pytest passes with workspace temp directory; after M0, 84 passes with the same warning. Pre-existing Ruff total: 707. M0 is metadata telemetry and offline corpus only. Next: M1 security state and fail-closed gates across both pipelines, followed by PR/patrol integration.
+
 **Generated:** 2026-06-02  
 **Version:** v4.0.0 — Omniscient Context Engine  
 **Entry Point:** `farm_agent/cli/main.py` → `cli()` (Click-based CLI)  
@@ -383,4 +391,4 @@ Database file resides in `data/memory.db` and operates in **WAL (Write-Ahead Log
 
 ---
 
-*All evidence anchored to source files. All line numbers verified by direct inspection. No speculation.*
+*Historical map: verify paths, claims, and line numbers against the current checkout before implementation.*

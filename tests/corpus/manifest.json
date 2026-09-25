@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "purpose": "Offline ground truth; these are not Agent-Farm detection results",
+  "pairs": [
+    {"id": "authz-cross-tenant", "class": "IDOR", "vulnerable": "authz_vulnerable", "fixed": "authz_fixed", "oracle": "cross_tenant_denied"},
+    {"id": "sql-query-construction", "class": "SQLi", "vulnerable": "sqli_vulnerable", "fixed": "sqli_fixed", "oracle": "parameterized_query"},
+    {"id": "internal-url", "class": "SSRF", "vulnerable": "ssrf_vulnerable", "fixed": "ssrf_fixed", "oracle": "internal_host_denied"},
+    {"id": "parent-path", "class": "Traversal", "vulnerable": "traversal_vulnerable", "fixed": "traversal_fixed", "oracle": "parent_segment_denied"}
+  ],
+  "control_cases": [
+    {"id": "clean-authorized-read", "expected": "no_finding"},
+    {"id": "two-independent-findings-one-file", "expected": "two_candidates"},
+    {"id": "missing-dependency", "expected": "proof_gap"},
+    {"id": "scanner-timeout", "expected": "proof_gap"},
+    {"id": "poc-generation-error", "expected": "proof_gap"}
+  ]
+}

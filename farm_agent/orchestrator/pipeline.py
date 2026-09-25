@@ -7,12 +7,16 @@ discover → analyze → generate → PR.
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import inspect
+import json
 import logging
 import os
+import re
 import subprocess
 import tempfile
-import json
-import re
+import time
+import uuid
 from dataclasses import dataclass, field
 
 from farm_agent.analysis.analyzer import BloodhoundAnalyzer, CodeAnalyzer
@@ -345,6 +349,22 @@ class FarmAgentPipeline:
                 )
         except (TypeError, ValueError):
             pass
+
+    async def _m0_event(self, **event) -> None:
+        """Best-effort metadata telemetry; it cannot change scan decisions."""
+        if self._memory is None:
+            return
+        try:
+            pending = self._memory.record_scan_event(**event)
+            if inspect.isawaitable(pending):
+                await pending
+        except Exception:
+            logger.exception("Could not persist M0 scan telemetry")
+
+    @staticmethod
+    def _m0_candidate_id(repo: str, finding: Finding) -> str:
+        key = f"{repo}\0{finding.file_path}\0{finding.title}"
+        return hashlib.sha256(key.encode()).hexdigest()[:16]
 
     def _get_max_concurrency(self) -> int:
         """Return current safe concurrency level from the adaptive manager."""
@@ -844,6 +864,13 @@ class FarmAgentPipeline:
             logger.warning("Circular loop: no targets in target_repos table")
             return result
 
+        scan_id = uuid.uuid4().hex
+        scan_started = time.monotonic()
+        await self._m0_event(
+            scan_id=scan_id, repo=target.repo_url, pipeline="circular",
+            stage="scan", outcome="started", count=0,
+        )
+
         logger.info(
             "Circular loop: selected %s (last scanned: %s)",
             target.repo_url,
@@ -889,6 +916,11 @@ class FarmAgentPipeline:
             except Exception:
                 logger.info("[CPU PROFILING] Starting Bloodhound Semgrep scan.")
             dossier = await bloodhound.run_bloodhound(repo)
+            await self._m0_event(
+                scan_id=scan_id, repo=target.repo_url, pipeline="circular",
+                stage="prefilter", outcome="candidates" if dossier.has_bugs() else "none",
+                count=len(dossier.vulnerabilities),
+            )
             try:
                 load1, load5, load15 = os.getloadavg()
                 logger.info("[CPU PROFILING] Finished Bloodhound Semgrep scan. Load: %.2f, %.2f, %.2f", load1, load5, load15)
@@ -896,6 +928,11 @@ class FarmAgentPipeline:
                 logger.info("[CPU PROFILING] Finished Bloodhound Semgrep scan.")
 
             if not dossier.has_bugs():
+                await self._m0_event(
+                    scan_id=scan_id, repo=target.repo_url, pipeline="circular",
+                    stage="prefilter", outcome="stopped", reason_code="NO_MATCHES",
+                    count=0,
+                )
                 logger.info(
                     "Clean sweep, no vulns for %s — marking COMPLETED_NO_VULN",
                     target.repo_url,
@@ -921,6 +958,11 @@ class FarmAgentPipeline:
                     production_vulns.append(v)
 
             if not production_vulns:
+                await self._m0_event(
+                    scan_id=scan_id, repo=target.repo_url, pipeline="circular",
+                    stage="context_filter", outcome="stopped",
+                    reason_code="NO_PRODUCTION_CANDIDATES", count=0,
+                )
                 logger.info(
                     "All %d vulnerabilities were in non-production paths for %s — marking COMPLETED_NO_VULN",
                     len(dossier.vulnerabilities),
@@ -930,6 +972,11 @@ class FarmAgentPipeline:
                 return result
 
             dossier.vulnerabilities = production_vulns
+            await self._m0_event(
+                scan_id=scan_id, repo=target.repo_url, pipeline="circular",
+                stage="context_filter", outcome="survived",
+                count=len(production_vulns),
+            )
 
         # ── Build RepoContext with vulnerable file contents ───────────
             # Use GraphQL for repo tree (falls back to REST on any error)
@@ -999,6 +1046,11 @@ class FarmAgentPipeline:
                         failure_context=failure_context,
                     )
                     contributions = gen_result.contributions
+                    await self._m0_event(
+                        scan_id=scan_id, repo=target.repo_url, pipeline="circular",
+                        stage="generation", outcome="produced",
+                        count=len(contributions),
+                    )
                 except RuntimeError as e:
                     logger.error("Generation failed: %s", e)
                     failure_context += f"\n[CYCLE {cycle + 1} GENERATION FAILURE] {e}"
@@ -1028,6 +1080,10 @@ class FarmAgentPipeline:
                 qa_result: QAResult = await scorer.evaluate(
                     dossier, contributions[0],
                     repo_style_guide=repo_style_guide_text,
+                )
+                await self._m0_event(
+                    scan_id=scan_id, repo=target.repo_url, pipeline="circular",
+                    stage="qa", outcome="approved" if qa_result.approved else "rejected",
                 )
                 logger.info(
                     "QA Score: %.1f/10.0 — Approved: %s",
@@ -1161,8 +1217,18 @@ class FarmAgentPipeline:
             msg = f"Circular loop error for {target.repo_url}: {e}"
             logger.error(msg)
             result.errors.append(msg)
+            await self._m0_event(
+                scan_id=scan_id, repo=target.repo_url, pipeline="circular",
+                stage="scan", outcome="error", reason_code=type(e).__name__, count=0,
+            )
 
         finally:
+            await self._m0_event(
+                scan_id=scan_id, repo=target.repo_url, pipeline="circular",
+                stage="scan", outcome="finished",
+                duration_ms=int((time.monotonic() - scan_started) * 1000),
+                count=0,
+            )
             await self._cleanup()
 
         logger.info(
@@ -1196,7 +1262,40 @@ class FarmAgentPipeline:
         *,
         allow_duplicate_prs: bool = False,
     ) -> PipelineResult:
-        """Process a single repository through the full pipeline."""
+        """Process one repository and always close its M0 telemetry span."""
+        scan_id = uuid.uuid4().hex
+        scan_started = time.monotonic()
+        await self._m0_event(
+            scan_id=scan_id, repo=repo.full_name, pipeline="standard",
+            stage="scan", outcome="started", count=0,
+        )
+        outcome = "finished"
+        try:
+            return await self._process_repo_impl(
+                repo, dry_run, max_prs,
+                allow_duplicate_prs=allow_duplicate_prs,
+                scan_id=scan_id, scan_started=scan_started,
+            )
+        except Exception as exc:
+            outcome = "error"
+            await self._m0_event(
+                scan_id=scan_id, repo=repo.full_name, pipeline="standard",
+                stage="scan", outcome="error", reason_code=type(exc).__name__, count=0,
+            )
+            raise
+        finally:
+            await self._m0_event(
+                scan_id=scan_id, repo=repo.full_name, pipeline="standard",
+                stage="scan", outcome=outcome,
+                duration_ms=int((time.monotonic() - scan_started) * 1000),
+                count=0,
+            )
+
+    async def _process_repo_impl(
+        self, repo: Repository, dry_run: bool, max_prs: int, *,
+        allow_duplicate_prs: bool, scan_id: str, scan_started: float,
+    ) -> PipelineResult:
+        """Existing standard processing flow, annotated with M0 gate counts."""
         result = PipelineResult()
         logger.info("=" * 60)
         logger.info("📦 Processing: %s", repo.full_name)
@@ -1334,8 +1433,17 @@ class FarmAgentPipeline:
             repo.stars,
             len(analysis.findings),
         )
+        await self._m0_event(
+            scan_id=scan_id, repo=repo.full_name, pipeline="standard",
+            stage="analysis", outcome="raw", count=len(analysis.findings),
+            duration_ms=int((time.monotonic() - scan_started) * 1000),
+        )
 
         if not analysis.findings:
+            await self._m0_event(
+                scan_id=scan_id, repo=repo.full_name, pipeline="standard",
+                stage="analysis", outcome="none", count=0,
+            )
             logger.info("No findings for %s", repo.full_name)
             return result
 
@@ -1397,7 +1505,18 @@ class FarmAgentPipeline:
             )
             analysis.findings = filtered
 
+        await self._m0_event(
+            scan_id=scan_id, repo=repo.full_name, pipeline="standard",
+            stage="path_filter", outcome="survived", count=len(analysis.findings),
+            reason_code="NON_CODE_OR_PROTECTED_PATH" if len(filtered) < pre_filter_count else None,
+        )
+
         if not analysis.findings:
+            await self._m0_event(
+                scan_id=scan_id, repo=repo.full_name, pipeline="standard",
+                stage="path_filter", outcome="stopped", reason_code="ALL_FILTERED",
+                count=0,
+            )
             logger.info("All findings filtered (non-code targets) for %s", repo.full_name)
             return result
 
@@ -1571,8 +1690,19 @@ class FarmAgentPipeline:
                 pre_farming_count - len(high_impact_findings),
             )
         analysis.findings = high_impact_findings
+        await self._m0_event(
+            scan_id=scan_id, repo=repo.full_name, pipeline="standard",
+            stage="impact_filter", outcome="survived", count=len(analysis.findings),
+            reason_code="IMPACT_OR_KEYWORD_FILTER"
+            if len(analysis.findings) < pre_farming_count else None,
+        )
 
         if not analysis.findings:
+            await self._m0_event(
+                scan_id=scan_id, repo=repo.full_name, pipeline="standard",
+                stage="filter", outcome="stopped", reason_code="ALL_FILTERED",
+                count=0,
+            )
             logger.info(
                 "All findings filtered by Anti-Farming gate for %s",
                 repo.full_name,
@@ -1588,6 +1718,16 @@ class FarmAgentPipeline:
 
         candidate_limit = max_prs if not allow_duplicate_prs else max(max_prs, 4)
         candidate_findings = analysis.top_findings[:candidate_limit]
+        await self._m0_event(
+            scan_id=scan_id, repo=repo.full_name, pipeline="standard",
+            stage="analysis", outcome="candidates", count=len(analysis.findings),
+            duration_ms=int((time.monotonic() - scan_started) * 1000),
+        )
+        await self._m0_event(
+            scan_id=scan_id, repo=repo.full_name, pipeline="standard",
+            stage="candidate_limit", outcome="selected", count=len(candidate_findings),
+            reason_code="MAX_PRS_LIMIT" if len(candidate_findings) < len(analysis.findings) else None,
+        )
 
         # Build context for generation — fetch files for all candidate findings
         file_tree = await self._github.get_file_tree(repo.owner, repo.name)
@@ -1722,12 +1862,26 @@ class FarmAgentPipeline:
                 )
 
             if not filtered_findings:
+                await self._m0_event(
+                    scan_id=scan_id, repo=repo.full_name, pipeline="standard",
+                    stage="dedupe", outcome="stopped", reason_code="ALL_DUPLICATE",
+                    count=0,
+                )
                 logger.info("No new findings after duplicate filter")
                 result.repos_analyzed = 1
                 return result
 
+        await self._m0_event(
+            scan_id=scan_id, repo=repo.full_name, pipeline="standard",
+            stage="dedupe", outcome="survived", count=len(filtered_findings),
+        )
+
         # Validate findings against full file content to filter false positives
         validated_findings = await self._validate_findings(filtered_findings, relevant_files)
+        await self._m0_event(
+            scan_id=scan_id, repo=repo.full_name, pipeline="standard",
+            stage="validation", outcome="survived", count=len(validated_findings),
+        )
 
         # Limit to max 2 findings per repo to avoid spamming
         if len(validated_findings) > 2:
@@ -1736,6 +1890,11 @@ class FarmAgentPipeline:
                 len(validated_findings),
             )
             validated_findings = validated_findings[:2]
+            await self._m0_event(
+                scan_id=scan_id, repo=repo.full_name, pipeline="standard",
+                stage="validated_limit", outcome="selected", count=2,
+                reason_code="TWO_FINDING_LIMIT",
+            )
 
         logger.info(
             "🔎 Validated %d/%d findings (filtered %d false positives)",
@@ -1756,9 +1915,14 @@ class FarmAgentPipeline:
                     await self._memory.add_filter_lesson(repo.full_name, 1, file_content, critique)
                 logger.info("Recorded Layer 1 lesson for %s: %s...", repo.full_name, critique[:50])
         validated_findings = surviving_findings
+        await self._m0_event(
+            scan_id=scan_id, repo=repo.full_name, pipeline="standard",
+            stage="appraisal", outcome="survived", count=len(surviving_findings),
+        )
 
         # Generate contributions for validated findings
         for finding in validated_findings:
+            candidate_id = self._m0_candidate_id(repo.full_name, finding)
 
             # ── Hybrid Contribution Router ─────────────────────────────────
             # Route A — Direct PR (Firefighter): SECURITY_FIX or CRITICAL/HIGH severity
@@ -1770,6 +1934,11 @@ class FarmAgentPipeline:
             )
 
             if not is_direct_pr:
+                await self._m0_event(
+                    scan_id=scan_id, candidate_id=candidate_id,
+                    repo=repo.full_name, pipeline="standard", stage="route",
+                    outcome="issue_first",
+                )
                 # Route B: Issue-First Protocol — propose via issue, skip code gen
                 await self._propose_issue_first(finding, repo, context)
                 result.contributions_generated += 1
@@ -1807,6 +1976,11 @@ class FarmAgentPipeline:
                         )
                         
                         if not is_triggered:
+                            await self._m0_event(
+                                scan_id=scan_id, candidate_id=candidate_id,
+                                repo=repo.full_name, pipeline="standard", stage="poc",
+                                outcome="not_triggered", reason_code="EVALUATOR_NEGATIVE",
+                            )
                             logger.warning(
                                 "🚫 [Phase 3] Vulnerability verification FAILED (bug could not be triggered). "
                                 "Reason: %s. Dropping finding '%s' as False Positive.",
@@ -1823,11 +1997,26 @@ class FarmAgentPipeline:
                             continue
                         
                         logger.info("✅ [Phase 3] Vulnerability verified successfully: %s. Proceeding to fix generation.", reason)
+                        await self._m0_event(
+                            scan_id=scan_id, candidate_id=candidate_id,
+                            repo=repo.full_name, pipeline="standard", stage="poc",
+                            outcome="triggered",
+                        )
                     else:
+                        await self._m0_event(
+                            scan_id=scan_id, candidate_id=candidate_id,
+                            repo=repo.full_name, pipeline="standard", stage="poc",
+                            outcome="missing", reason_code="POC_GENERATION_EMPTY",
+                        )
                         logger.warning("⚠️ [Phase 3] PoC Generator did not return a valid script. Falling back to direct fix generation.")
                 finally:
                     await poc_llm.close()
             except Exception as e:
+                await self._m0_event(
+                    scan_id=scan_id, candidate_id=candidate_id,
+                    repo=repo.full_name, pipeline="standard", stage="poc",
+                    outcome="error", reason_code=type(e).__name__,
+                )
                 logger.warning("⚠️ [Phase 3] PoC verification gate encountered an error: %s. Falling back to direct fix generation.", e)
 
             logger.info("🛠️ Generating fix for: %s", finding.title)
@@ -1840,9 +2029,19 @@ class FarmAgentPipeline:
             )
 
             if not contribution:
+                await self._m0_event(
+                    scan_id=scan_id, candidate_id=candidate_id,
+                    repo=repo.full_name, pipeline="standard", stage="generation",
+                    outcome="empty",
+                )
                 continue
 
             result.contributions_generated += 1
+            await self._m0_event(
+                scan_id=scan_id, candidate_id=candidate_id,
+                repo=repo.full_name, pipeline="standard", stage="generation",
+                outcome="produced",
+            )
 
             if dry_run:
                 logger.info("🏃 [DRY RUN] Would create PR: %s", contribution.title)
