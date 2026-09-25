@@ -64,7 +64,10 @@ async def test_manifest_and_publication_are_commit_bound_in_real_sqlite(tmp_path
         with pytest.raises(sqlite3.IntegrityError):
             await memory.store_scan_manifest(manifest)
         await memory._db.rollback()
-        await require_confirmed_security_finding(memory, finding, "owner/repo", channel="public_pr")
+        with pytest.raises(SecurityGateError, match="semantic impact proof"):
+            await require_confirmed_security_finding(
+                memory, finding, "owner/repo", channel="public_pr",
+            )
         with pytest.raises(SecurityGateError, match="outside program scope"):
             await require_confirmed_security_finding(
                 memory, finding, "owner/repo", channel="private_disclosure",

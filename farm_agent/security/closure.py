@@ -49,3 +49,5 @@ async def require_confirmed_security_finding(
         raise SecurityGateError("Confirmed finding has no matching authorized scan manifest")
     if channel:
         manifest.require_publication(channel)
+        if not await memory.security_candidate_has_semantic_proof(candidate_id):
+            raise SecurityGateError("Security publication requires semantic impact proof")

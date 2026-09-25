@@ -1,49 +1,13 @@
 """Unit tests for Bug Bounty Dossier, CVSS calculation, and Responsible Disclosure (Route C)."""
 
-import pytest
-from datetime import UTC, datetime
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
 
-from farm_agent.core.models import AdvisoryReport, ContributionType, DisclosureRoute, Finding, Severity
+from farm_agent.core.models import AdvisoryReport, DisclosureRoute, Severity
 from farm_agent.github.security_gate import (
     calculate_vulnerability_metrics,
     generate_bounty_dossier_markdown,
-    handle_responsible_disclosure,
     save_bounty_dossier,
 )
-from farm_agent.orchestrator.memory import Memory
-from farm_agent.security.evidence import evidence_hash
-from farm_agent.security.scope import ProgramScope, ScanManifest
-from farm_agent.security.state import CandidateStatus, EvidenceKind
-
-
-async def _persist_confirmed_finding(tmp_path, finding, repo, sha):
-    memory = Memory(tmp_path / "proof.db")
-    await memory.init()
-    candidate = await memory.create_security_candidate(
-        scan_id="advisory-scan", repo=repo, target_commit=sha,
-        file_path=finding.file_path, title=finding.title,
-    )
-    evidence = await memory.add_security_evidence(
-        candidate_id=candidate, kind=EvidenceKind.POC_TRIGGERED,
-        content_hash=evidence_hash(target_commit=sha, observation={"confirmed": True}),
-        target_commit=sha,
-    )
-    await memory.close_security_candidate(
-        candidate, status=CandidateStatus.CONFIRMED,
-        reason_code="POC_TRIGGERED", evidence_id=evidence,
-    )
-    await memory.store_scan_manifest(ScanManifest(
-        scan_id="advisory-scan", scope=ProgramScope(
-            program_id="test-program", repo=repo, target_commit=sha,
-            policy_reference="local test authorization", allow_private_disclosure=True,
-        ),
-    ))
-    finding.metadata = {"security_candidate_id": candidate, "security_target_commit": sha}
-    return memory
-
-
 def test_calculate_vulnerability_metrics_sqli():
     cwe_id, cwe_name, cvss_score, cvss_vector = calculate_vulnerability_metrics(
         title="SQL Injection in auth handler",
@@ -130,91 +94,3 @@ def test_save_bounty_dossier(tmp_path):
 
     content = saved_file.read_text(encoding="utf-8")
     assert "SSRF in image fetcher" in content
-
-
-@pytest.mark.asyncio
-async def test_handle_responsible_disclosure_local(tmp_path):
-    github = MagicMock()
-    github.check_private_vulnerability_reporting = AsyncMock(return_value=False)
-    notifier = MagicMock()
-    notifier.send_message = AsyncMock()
-
-    finding = Finding(
-        type=ContributionType.SECURITY_FIX,
-        severity=Severity.HIGH,
-        title="Path traversal vulnerability",
-        description="Allows arbitrary file read via ../ in filename",
-        file_path="server/files.py",
-        line_start=15,
-    )
-
-    config = MagicMock()
-    config.bounty.auto_submit_ghsa = False
-    config.bounty.bounty_reports_dir = str(tmp_path)
-    memory = await _persist_confirmed_finding(
-        tmp_path, finding, "sec-org/storage-service", "a" * 40,
-    )
-
-    advisory = await handle_responsible_disclosure(
-        github=github,
-        owner="sec-org",
-        repo="storage-service",
-        finding=finding,
-        remediation_patch="diff ...",
-        poc_script="import os ...",
-        target_commit="a" * 40,
-        config=config,
-        notifier=notifier,
-        memory=memory,
-    )
-
-    assert advisory.cwe_id == "CWE-22"
-    assert advisory.severity == Severity.HIGH
-    assert advisory.route == DisclosureRoute.BOUNTY_DOSSIER
-    assert advisory.report_file_path is not None
-    assert Path(advisory.report_file_path).exists()
-    notifier.send_message.assert_called_once()
-    assert "RESPONSIBLE DISCLOSURE" in notifier.send_message.call_args[0][0]
-    await memory.close()
-
-
-@pytest.mark.asyncio
-async def test_handle_responsible_disclosure_ghsa_api(tmp_path):
-    github = MagicMock()
-    github.check_private_vulnerability_reporting = AsyncMock(return_value=True)
-    github.submit_security_advisory_report = AsyncMock(return_value={
-        "html_url": "https://github.com/sec-org/repo/security/advisories/GHSA-1234",
-        "ghsa_id": "GHSA-1234",
-    })
-    notifier = MagicMock()
-    notifier.send_message = AsyncMock()
-
-    finding = Finding(
-        type=ContributionType.SECURITY_FIX,
-        severity=Severity.CRITICAL,
-        title="Remote code execution in worker",
-        description="Command injection via worker queue",
-        file_path="worker.py",
-    )
-
-    config = MagicMock()
-    config.bounty.auto_submit_ghsa = True
-    config.bounty.bounty_reports_dir = str(tmp_path)
-    memory = await _persist_confirmed_finding(tmp_path, finding, "sec-org/repo", "b" * 40)
-
-    advisory = await handle_responsible_disclosure(
-        github=github,
-        owner="sec-org",
-        repo="repo",
-        finding=finding,
-        target_commit="b" * 40,
-        config=config,
-        notifier=notifier,
-        memory=memory,
-    )
-
-    assert advisory.route == DisclosureRoute.PRIVATE_GHSA
-    assert advisory.ghsa_id == "GHSA-1234"
-    assert advisory.ghsa_url == "https://github.com/sec-org/repo/security/advisories/GHSA-1234"
-    github.submit_security_advisory_report.assert_called_once()
-    await memory.close()

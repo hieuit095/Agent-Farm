@@ -25,6 +25,11 @@ class ScopedHttpClient:
     async def close(self) -> None:
         await self._client.aclose()
 
+    async def require_target_commit(self, target_commit: str) -> None:
+        manifest = await self._memory.get_scan_manifest(self._scan_id)
+        if manifest is None or manifest.scope.target_commit != target_commit:
+            raise SecurityGateError("HTTP verifier target SHA does not match scan manifest")
+
     async def __aenter__(self):
         return self
 

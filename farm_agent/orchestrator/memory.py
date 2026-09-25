@@ -592,11 +592,12 @@ class Memory:
                         (evidence_id, candidate_id, candidate[1]),
                     )
                     evidence = await cursor.fetchone()
-                    required_kind = (
-                        EvidenceKind.POC_TRIGGERED if status == CandidateStatus.CONFIRMED
-                        else EvidenceKind.COUNTEREVIDENCE
+                    required_kinds = (
+                        {EvidenceKind.POC_TRIGGERED, EvidenceKind.SEMANTIC_PROOF}
+                        if status == CandidateStatus.CONFIRMED
+                        else {EvidenceKind.COUNTEREVIDENCE}
                     )
-                    if evidence is None or evidence[0] != required_kind:
+                    if evidence is None or evidence[0] not in required_kinds:
                         raise SecurityGateError("Evidence does not support closure")
                 await self._db.execute(
                     """UPDATE security_candidates
@@ -778,9 +779,20 @@ class Memory:
             """SELECT 1 FROM security_candidates c JOIN security_evidence e
                ON e.id = c.closing_evidence_id AND e.candidate_id = c.id
                WHERE c.id = ? AND c.repo = ? AND c.status = 'CONFIRMED'
-                 AND e.kind = 'POC_TRIGGERED' AND e.target_commit = c.target_commit
+                 AND e.kind IN ('POC_TRIGGERED', 'SEMANTIC_PROOF')
+                 AND e.target_commit = c.target_commit
                  AND c.target_commit != 'unknown'""",
             (candidate_id, repo),
+        )
+        return await cursor.fetchone() is not None
+
+    async def security_candidate_has_semantic_proof(self, candidate_id: str) -> bool:
+        cursor = await self._db.execute(
+            """SELECT 1 FROM security_candidates c JOIN security_evidence e
+               ON e.candidate_id = c.id AND e.target_commit = c.target_commit
+               WHERE c.id = ? AND c.status = 'CONFIRMED'
+                 AND e.kind = 'SEMANTIC_PROOF'""",
+            (candidate_id,),
         )
         return await cursor.fetchone() is not None
 
