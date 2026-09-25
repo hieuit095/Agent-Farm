@@ -33,7 +33,7 @@ data/
 
 # ChromaDB vector store (persistent, large binary — not git-tracked)
 data/chroma_db/
-
+.pytest*/
 # OS
 .DS_Store
 Thumbs.db
