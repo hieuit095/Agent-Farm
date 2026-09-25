@@ -14,6 +14,8 @@
 >
 > **M1 phase 3 (2026-09-25):** [analyzer.py](file:///C:/Users/USER/Documents/GitHub/Bug-Bounty/Agent-Farm/farm_agent/analysis/analyzer.py) raises `ScanIncompleteError` on missing scanner, timeout, invalid output, clone failure or unknown target SHA. `run_circular` converts Bloodhound results to `Finding` and passes them to `_process_repo` with the scanner SHA; both hunting paths now use the same PoC/fix gate. Empty prefilter results and scanner failures mark `PARTIAL_SCAN`, never `COMPLETED_NO_VULN`. The old circular DEV-QA patch branch was removed. **Next:** central PR/disclosure/patrol publication gate.
 
+> **M1 phase 4 (2026-09-25):** [security/closure.py](file:///C:/Users/USER/Documents/GitHub/Bug-Bounty/Agent-Farm/farm_agent/security/closure.py) verifies a confirmed candidate against the exact repository, file, title, and target SHA before publication. [pr/manager.py](file:///C:/Users/USER/Documents/GitHub/Bug-Bounty/Agent-Farm/farm_agent/pr/manager.py) checks before GitHub writes and blocks public security issues. [github/security_gate.py](file:///C:/Users/USER/Documents/GitHub/Bug-Bounty/Agent-Farm/farm_agent/github/security_gate.py) checks before private dossier, GHSA, or secret-finding output. [pr/patrol.py](file:///C:/Users/USER/Documents/GitHub/Bug-Bounty/Agent-Farm/farm_agent/pr/patrol.py) blocks automatic code/CI updates for security or untyped PRs pending a later independent fix-verification contract. Verification: 107 pytest passes, one pre-existing AsyncMock warning. **M1 gate complete; M2 onward remain planned.**
+
 **Generated:** 2026-06-02  
 **Version:** v4.0.0 — Omniscient Context Engine  
 **Entry Point:** `farm_agent/cli/main.py` → `cli()` (Click-based CLI)  

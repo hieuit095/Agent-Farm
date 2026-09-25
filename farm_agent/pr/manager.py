@@ -17,6 +17,8 @@ from farm_agent.core.exceptions import PRCreationError
 from farm_agent.core.models import Contribution, ContributionType, PRResult, PRStatus, Repository
 from farm_agent.generator.engine import _sanitize_text, escape_html_xss
 from farm_agent.github.client import GitHubClient
+from farm_agent.security.closure import require_confirmed_security_finding
+from farm_agent.security.state import SecurityGateError
 
 logger = logging.getLogger(__name__)
 
@@ -64,9 +66,10 @@ class PRManager:
     PR_LEDGER_PATH = Path("logs/pr_history.csv")
     _LEDGER_HEADER = ["timestamp", "repo_url", "pr_url", "status", "error_details", "vulnerability_type"]
 
-    def __init__(self, github: GitHubClient, llm=None):
+    def __init__(self, github: GitHubClient, llm=None, memory=None):
         self._github = github
         self._llm = llm
+        self._memory = memory
         self._user: dict | None = None
         self._ledger_lock = asyncio.Lock() if hasattr(asyncio, "Lock") else None
 
@@ -151,6 +154,12 @@ class PRManager:
             guidelines: Repo contribution guidelines
             closes_issue: If set, adds 'Closes #N' to PR body
         """
+        if (contribution.contribution_type == ContributionType.SECURITY_FIX
+                or contribution.finding.type == ContributionType.SECURITY_FIX
+                or contribution.finding.metadata.get("security_candidate_id")):
+            await require_confirmed_security_finding(
+                self._memory, contribution.finding, target_repo.full_name,
+            )
         user = await self._get_user()
         username = user["login"]
         signoff = self._build_signoff(user)
@@ -248,7 +257,8 @@ class PRManager:
 
             # 3b. Create linked issue if repo likely requires it
             issue_number = closes_issue
-            if not issue_number and guidelines and guidelines.has_guidelines:
+            if (not issue_number and guidelines and guidelines.has_guidelines
+                    and contribution.contribution_type != ContributionType.SECURITY_FIX):
                 issue_number = await self._create_issue_for_finding(contribution, target_repo)
 
             # 4. Create PR body — Diplomat Protocol Task 3: LLM-powered template filling
@@ -575,6 +585,9 @@ class PRManager:
         Returns the issue number, or None if creation failed.
         """
         finding = contribution.finding
+        if (finding.type == ContributionType.SECURITY_FIX
+                or contribution.contribution_type == ContributionType.SECURITY_FIX):
+            raise SecurityGateError("Security findings cannot be published as public issues")
 
         type_labels = {
             ContributionType.SECURITY_FIX: "bug",

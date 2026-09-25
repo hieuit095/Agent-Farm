@@ -16,7 +16,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from farm_agent.core.models import AdvisoryReport, DisclosureRoute, Finding, Severity
+from farm_agent.core.models import AdvisoryReport, ContributionType, DisclosureRoute, Finding, Severity
+from farm_agent.security.closure import require_confirmed_security_finding
 
 logger = logging.getLogger(__name__)
 
@@ -230,6 +231,7 @@ async def handle_responsible_disclosure(
     target_commit: str = "",
     config=None,
     notifier=None,
+    memory=None,
 ) -> AdvisoryReport:
     """Handle responsible private disclosure for critical/high vulnerabilities.
 
@@ -240,6 +242,10 @@ async def handle_responsible_disclosure(
     5. Dispatches priority notification to researcher.
     """
     repo_full_name = f"{owner}/{repo}"
+    await require_confirmed_security_finding(
+        memory, finding, repo_full_name, target_commit=target_commit,
+    )
+    target_commit = target_commit or finding.metadata["security_target_commit"]
     cwe_id, cwe_name, cvss_score, cvss_vector = calculate_vulnerability_metrics(
         title=finding.title,
         description=finding.description,
@@ -469,6 +475,7 @@ async def run_security_gate(
     dossier=None,
     notifier=None,
     readme_content: str | None = None,
+    memory=None,
 ) -> SecurityGateResult | None:
     """Run the full Security Disclosure Gate check.
 
@@ -477,6 +484,12 @@ async def run_security_gate(
     2. Saves vulnerability details locally
     3. Sends Telegram notification
     """
+    if dossier and hasattr(dossier, "vulnerabilities"):
+        for vulnerability in dossier.vulnerabilities:
+            if isinstance(vulnerability, Finding) and vulnerability.type == ContributionType.SECURITY_FIX:
+                await require_confirmed_security_finding(
+                    memory, vulnerability, f"{owner}/{repo}",
+                )
     result = await check_security_disclosure_policy(
         github, owner, repo, readme_content=readme_content
     )
@@ -501,13 +514,13 @@ async def run_security_gate(
         for v in dossier.vulnerabilities:
             findings_data.append(
                 {
-                    "file": v.file,
-                    "line": v.line,
-                    "snippet": v.snippet,
-                    "poc": v.poc,
-                    "fix": v.fix,
-                    "impact": v.impact,
-                    "context_type": v.context_type,
+                    "file": getattr(v, "file", getattr(v, "file_path", "")),
+                    "line": getattr(v, "line", getattr(v, "line_start", None)),
+                    "snippet": getattr(v, "snippet", getattr(v, "description", "")),
+                    "poc": getattr(v, "poc", ""),
+                    "fix": getattr(v, "fix", getattr(v, "suggestion", "")),
+                    "impact": getattr(v, "impact", getattr(v, "severity", "")),
+                    "context_type": getattr(v, "context_type", ""),
                 }
             )
     elif dossier is None:

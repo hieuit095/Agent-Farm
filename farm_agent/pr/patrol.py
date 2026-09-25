@@ -20,6 +20,7 @@ import yaml
 
 from farm_agent.core.exceptions import GitHubAPIError
 from farm_agent.core.models import (
+    ContributionType,
     FeedbackAction,
     FeedbackItem,
     PatrolResult,
@@ -29,6 +30,8 @@ from farm_agent.github.client import GitHubClient
 from farm_agent.llm.provider import LLMProvider
 
 logger = logging.getLogger(__name__)
+
+_AUTO_FIXABLE_PR_TYPES = {kind.value for kind in ContributionType if kind != ContributionType.SECURITY_FIX}
 
 # Comments we already posted — skip these
 OUR_REPLY_MARKERS = [
@@ -852,6 +855,9 @@ class PRPatrol:
         dry_run: bool = False,
     ) -> bool:
         """Generate and push a code fix based on review feedback."""
+        if pr_record.get("type") not in _AUTO_FIXABLE_PR_TYPES:
+            logger.warning("Blocking unverified automatic fix for security or untyped PR")
+            return False
         try:
             # Get the PR branch and fork info
             head = pr_data.get("head", {})
@@ -1504,6 +1510,9 @@ class PRPatrol:
         starting_attempts: int,
     ) -> str:
         """Use the LLM to fix a CI failure and push only sandbox-validated code."""
+        if pr_record.get("type") not in _AUTO_FIXABLE_PR_TYPES:
+            logger.warning("Blocking unverified automatic CI fix for security or untyped PR")
+            return "blocked"
         try:
             head = pr_data.get("head", {})
             fork_owner = head.get("repo", {}).get("owner", {}).get("login", owner)

@@ -46,7 +46,7 @@ from farm_agent.orchestrator.memory import Memory
 from farm_agent.pr.manager import PRManager
 from farm_agent.security.closure import ClosureService
 from farm_agent.security.evidence import evidence_hash
-from farm_agent.security.state import CandidateStatus, EvidenceKind, PoCStatus
+from farm_agent.security.state import CandidateStatus, EvidenceKind, PoCStatus, SecurityGateError
 
 logger = logging.getLogger(__name__)
 
@@ -438,7 +438,7 @@ class FarmAgentPipeline:
         )
 
         # PR Manager
-        self._pr_manager = PRManager(github=self._github, llm=self._llm)
+        self._pr_manager = PRManager(github=self._github, llm=self._llm, memory=self._memory)
 
         # ── Polyglot Sandbox — Docker-based patch validation ─────────────────
         from farm_agent.core.sandbox import DockerSandbox
@@ -1907,6 +1907,7 @@ class FarmAgentPipeline:
                         reason_code="POC_TRIGGERED", evidence_id=proof_id,
                     )
                     finding.metadata["security_candidate_id"] = security_candidate_id
+                    finding.metadata["security_target_commit"] = target_commit
                 except Exception:
                     logger.exception("Could not persist verified PoC; skipping fix")
                     continue
@@ -1932,6 +1933,17 @@ class FarmAgentPipeline:
                     outcome="empty",
                 )
                 continue
+
+            if security_candidate_id:
+                # The generator may return a copied or altered Finding. Never let
+                # a patch inherit another finding's proof by ID alone.
+                if (contribution.finding.type != ContributionType.SECURITY_FIX
+                        or contribution.finding.file_path != finding.file_path
+                        or contribution.finding.title != finding.title):
+                    logger.warning("Generated security fix changed finding identity; skipping")
+                    continue
+                contribution.finding.metadata["security_candidate_id"] = security_candidate_id
+                contribution.finding.metadata["security_target_commit"] = target_commit
 
             result.contributions_generated += 1
             await self._m0_event(
@@ -2063,6 +2075,13 @@ class FarmAgentPipeline:
                             error_log,
                         )
                         if corrected is not None:
+                            if security_candidate_id:
+                                if (corrected.finding.type != ContributionType.SECURITY_FIX
+                                        or corrected.finding.file_path != finding.file_path
+                                        or corrected.finding.title != finding.title):
+                                    raise SecurityGateError("Corrected security fix changed finding identity")
+                                corrected.finding.metadata["security_candidate_id"] = security_candidate_id
+                                corrected.finding.metadata["security_target_commit"] = target_commit
                             contribution = corrected
                             logger.info(
                                 "🔧 Self-correction attempt %d succeeded for '%s'",
@@ -2119,6 +2138,7 @@ class FarmAgentPipeline:
                 repo=repo.name,
                 dossier=dummy_dossier,
                 notifier=self._notifier,
+                memory=self._memory,
             )
             if is_high_risk_vuln or security_gate_result is not None:
                 patch_diff = "\n".join(
@@ -2133,8 +2153,10 @@ class FarmAgentPipeline:
                     finding=contribution.finding,
                     remediation_patch=patch_diff,
                     poc_script=poc_script,
+                    target_commit=target_commit or "",
                     config=self.config,
                     notifier=self._notifier,
+                    memory=self._memory,
                 )
                 logger.warning(
                     "[ROUTE C PRIVATE DISCLOSURE] Critical/High finding or private policy triggered. "
@@ -2240,6 +2262,9 @@ class FarmAgentPipeline:
         and other non-critical findings where maintainers prefer discussion
         before seeing a large code diff.
         """
+
+        if finding.type == ContributionType.SECURITY_FIX:
+            raise SecurityGateError("Security findings cannot be published as public issues")
 
         logger.info(
             "📝 [Route B] Issue-First for '%s' (type=%s, severity=%s) "
@@ -2577,6 +2602,7 @@ class FarmAgentPipeline:
                 repo=repo.name,
                 dossier=dummy_dossier,
                 notifier=self._notifier,
+                memory=self._memory,
             )
             if security_gate_result is not None:
                 logger.warning(

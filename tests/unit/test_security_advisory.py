@@ -121,6 +121,13 @@ async def test_handle_responsible_disclosure_local(tmp_path):
     config = MagicMock()
     config.bounty.auto_submit_ghsa = False
     config.bounty.bounty_reports_dir = str(tmp_path)
+    finding.metadata = {"security_candidate_id": "candidate", "security_target_commit": "a" * 40}
+    memory = MagicMock()
+    memory.get_security_candidate = AsyncMock(return_value={
+        "repo": "sec-org/storage-service", "file_path": finding.file_path,
+        "title": finding.title, "target_commit": "a" * 40,
+    })
+    memory.security_candidate_is_confirmed = AsyncMock(return_value=True)
 
     advisory = await handle_responsible_disclosure(
         github=github,
@@ -129,9 +136,10 @@ async def test_handle_responsible_disclosure_local(tmp_path):
         finding=finding,
         remediation_patch="diff ...",
         poc_script="import os ...",
-        target_commit="deadbeef",
+        target_commit="a" * 40,
         config=config,
         notifier=notifier,
+        memory=memory,
     )
 
     assert advisory.cwe_id == "CWE-22"
@@ -165,14 +173,23 @@ async def test_handle_responsible_disclosure_ghsa_api(tmp_path):
     config = MagicMock()
     config.bounty.auto_submit_ghsa = True
     config.bounty.bounty_reports_dir = str(tmp_path)
+    finding.metadata = {"security_candidate_id": "candidate", "security_target_commit": "b" * 40}
+    memory = MagicMock()
+    memory.get_security_candidate = AsyncMock(return_value={
+        "repo": "sec-org/repo", "file_path": finding.file_path,
+        "title": finding.title, "target_commit": "b" * 40,
+    })
+    memory.security_candidate_is_confirmed = AsyncMock(return_value=True)
 
     advisory = await handle_responsible_disclosure(
         github=github,
         owner="sec-org",
         repo="repo",
         finding=finding,
+        target_commit="b" * 40,
         config=config,
         notifier=notifier,
+        memory=memory,
     )
 
     assert advisory.route == DisclosureRoute.PRIVATE_GHSA

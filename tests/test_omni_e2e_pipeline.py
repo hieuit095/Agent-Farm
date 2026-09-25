@@ -139,8 +139,8 @@ def _make_fake_pr_result() -> MagicMock:
     )
 
 
-def _make_fake_contribution() -> Contribution:
-    finding = Finding(
+def _make_fake_contribution(finding: Finding | None = None) -> Contribution:
+    finding = finding or Finding(
         id="vuln-1",
         type=ContributionType.SECURITY_FIX,
         severity=Severity.CRITICAL,
@@ -302,7 +302,6 @@ async def test_omni_e2e_pipeline(tmp_path):
     fake_repo = _make_fake_repo()
     fake_target = MagicMock(repo_url="https://github.com/testorg/testrepo", scanned_at=None)
     fake_pr = _make_fake_pr_result()
-    fake_contribution = _make_fake_contribution()
     fake_gen_result = _make_fake_gen_result()
 
     # Build fake AnalysisResult for the analyzer mock
@@ -407,7 +406,10 @@ async def test_omni_e2e_pipeline(tmp_path):
                      return_value="a" * 40),
         patch.object(BloodhoundAnalyzer, "_run_semgrep", new_callable=AsyncMock, return_value=[{"file": "src/app.py", "line": 2, "match": "cursor.execute(f'SELECT * FROM users WHERE id = {user_id}')", "rule": "semgrep:python.sql.injection", "severity": "HIGH"}]),
         patch.object(ContributionGenerator, "generate_from_dossier", new_callable=AsyncMock, return_value=fake_gen_result),
-        patch.object(ContributionGenerator, "generate", new_callable=AsyncMock, return_value=fake_contribution),
+        patch.object(
+            ContributionGenerator, "generate", new_callable=AsyncMock,
+            side_effect=lambda finding, *args, **kwargs: _make_fake_contribution(finding),
+        ),
         patch("farm_agent.github.discovery.DatabaseTargetDiscovery.__init__", return_value=None),
         patch.object(DatabaseTargetDiscovery, "initialize", new_callable=AsyncMock),
         patch.object(DatabaseTargetDiscovery, "get_next_target", new_callable=AsyncMock, return_value=fake_target),
