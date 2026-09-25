@@ -1,5 +1,7 @@
 # PROJECT_MAP.md — Agent-Farm Ground Truth
 
+> **2026-09-25 documentation handoff:** [Agent-Farm v2 — Continuation Implementation Prompts.en.md](file:///C:/Users/USER/Documents/GitHub/Bug-Bounty/Agent-Farm/Agent-Farm%20v2%20%E2%80%94%20Continuation%20Implementation%20Prompts.en.md) now orders the remaining work from review of the uncommitted M2 CLI slice through M3–M6. Current checkout verification: focused M2 integration tests 16 passed; full pytest 124 passed with the existing `AsyncMock` warning. This documentation change does not complete M2 or alter runtime behavior. The five pre-existing modified source/test files and the pre-existing untracked plans remain owned by the current worktree.
+
 > **2026-09-25 audit note:** This map was generated for an older checkout path and contains stale behavioral claims. The verified read-only architecture review and forward plan are in [Agent-Farm v2 — Verified Upgrade Roadmap.md](file:///C:/Users/USER/Documents/GitHub/Bug-Bounty/Agent-Farm/Agent-Farm%20v2%20%E2%80%94%20Verified%20Upgrade%20Roadmap.md). Re-audit source paths and runtime contracts before using this map for implementation.
 
 > **Last Ground-Truth Audit:** 2026-09-25T14:26:53+07:00. **Current milestone: M0 baseline and telemetry implemented; real token/cost usage remains unmeasured until provider integration.** This section is current; the older generated inventory below remains historical and must not be used as proof of present behavior.

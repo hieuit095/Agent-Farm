@@ -620,6 +620,19 @@ class Memory:
             return None
         return dict(zip((column[0] for column in cursor.description), row, strict=True))
 
+    async def list_security_candidates(self, *, limit: int = 50) -> list[dict]:
+        if limit < 1 or limit > 500:
+            raise ValueError("Candidate list limit must be 1..500")
+        cursor = await self._db.execute(
+            """SELECT id, scan_id, repo, target_commit, file_path, title,
+                      status, reason_code
+               FROM security_candidates ORDER BY created_at DESC LIMIT ?""",
+            (limit,),
+        )
+        rows = await cursor.fetchall()
+        keys = [column[0] for column in cursor.description]
+        return [dict(zip(keys, row, strict=True)) for row in rows]
+
     async def store_scan_manifest(self, manifest: ScanManifest) -> None:
         payload = json.dumps(manifest.model_dump(mode="json"), sort_keys=True, separators=(",", ":"))
         await self._db.execute(

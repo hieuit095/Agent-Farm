@@ -42,7 +42,7 @@ console = Console()
 def setup_logging(verbose: bool = False, config=None):
     level = logging.DEBUG if verbose else logging.INFO
     handlers: list[logging.Handler] = [
-        RichHandler(console=console, show_path=False, rich_tracebacks=True)
+        RichHandler(console=Console(stderr=True), show_path=False, rich_tracebacks=True)
     ]
 
     logging.basicConfig(
@@ -1538,6 +1538,231 @@ def advisories(ctx):
         table.add_row(r.name, mtime, size_kb)
 
     console.print(table)
+
+
+@cli.command("security-candidates")
+@click.option("--db-path", type=click.Path(), default=None)
+@click.option("--limit", type=click.IntRange(1, 500), default=50)
+@click.pass_context
+def security_candidates(ctx, db_path, limit):
+    """List stored security candidates with scan IDs and proof states."""
+    import json
+
+    from farm_agent.orchestrator.memory import Memory
+
+    config = load_config(ctx.obj["config_path"])
+
+    async def run_query():
+        memory = Memory(db_path or config.storage.db_path)
+        await memory.init()
+        try:
+            return await memory.list_security_candidates(limit=limit)
+        finally:
+            await memory.close()
+
+    click.echo(json.dumps(asyncio.run(run_query()), ensure_ascii=False))
+
+
+@cli.command("register-live-scan")
+@click.argument("repo")
+@click.argument("target_commit")
+@click.option("--db-path", type=click.Path(), default=None)
+@click.pass_context
+def register_live_scan(ctx, repo, target_commit, db_path):
+    """Register an explicitly authorized live scan and its coverage matrix."""
+    import json
+    import uuid
+
+    from farm_agent.orchestrator.memory import Memory
+    from farm_agent.security.scope import manifest_for_scan
+    from farm_agent.security.threat_model import ThreatModel
+
+    config = load_config(ctx.obj["config_path"])
+    if not config.bounty.live_testing_enabled:
+        raise click.ClickException("Global live testing switch is disabled")
+    scan_id = uuid.uuid4().hex
+    try:
+        manifest = manifest_for_scan(
+            scan_id, repo, target_commit, config.bounty.program_scopes, mode="live",
+        )
+        if manifest is None:
+            raise ValueError("No exact program authorization for repository and SHA")
+    except Exception as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    async def store_scan():
+        memory = Memory(db_path or config.storage.db_path)
+        await memory.init()
+        try:
+            await memory.store_scan_manifest(manifest)
+            await memory.store_threat_model(ThreatModel.from_manifest(manifest))
+            await memory.initialize_coverage(manifest)
+        finally:
+            await memory.close()
+
+    try:
+        asyncio.run(store_scan())
+    except Exception as exc:
+        raise click.ClickException(str(exc)) from exc
+    click.echo(json.dumps({"scan_id": scan_id, "repo": repo, "target_commit": target_commit}))
+
+
+@cli.command("register-candidate")
+@click.argument("scan_id")
+@click.option("--file-path", required=True)
+@click.option("--title", required=True)
+@click.option("--db-path", type=click.Path(), default=None)
+@click.pass_context
+def register_candidate(ctx, scan_id, file_path, title, db_path):
+    """Record an operator-identified candidate under an authorized scan."""
+    import json
+    from pathlib import PurePosixPath
+
+    from farm_agent.orchestrator.memory import Memory
+
+    path = PurePosixPath(file_path)
+    if (not file_path or path.is_absolute() or ".." in path.parts
+            or "\\" in file_path or not title.strip()):
+        raise click.ClickException("Candidate needs a relative file path and a title")
+    config = load_config(ctx.obj["config_path"])
+
+    async def store_candidate():
+        memory = Memory(db_path or config.storage.db_path)
+        await memory.init()
+        try:
+            manifest = await memory.get_scan_manifest(scan_id)
+            if manifest is None or manifest.mode != "live":
+                raise ValueError("Candidate requires an authorized live scan")
+            return await memory.create_security_candidate(
+                scan_id=scan_id, repo=manifest.scope.repo,
+                target_commit=manifest.scope.target_commit,
+                file_path=file_path, title=title,
+            )
+        finally:
+            await memory.close()
+
+    try:
+        candidate_id = asyncio.run(store_candidate())
+    except Exception as exc:
+        raise click.ClickException(str(exc)) from exc
+    click.echo(json.dumps({"candidate_id": candidate_id, "scan_id": scan_id}))
+
+
+@cli.command("register-oracle")
+@click.argument("spec_path", type=click.Path(exists=True, dir_okay=False))
+@click.option("--store-dir", type=click.Path(), default=None)
+@click.pass_context
+def register_oracle(ctx, spec_path, store_dir):
+    """Validate and content-address an operator-authored four-phase oracle."""
+    import json
+    from pathlib import Path
+
+    from farm_agent.security.artifacts import ArtifactStore
+    from farm_agent.security.oracles import OracleSpec
+
+    config = load_config(ctx.obj["config_path"])
+    try:
+        spec = OracleSpec.model_validate_json(Path(spec_path).read_bytes())
+        ref = ArtifactStore(store_dir or config.bounty.oracle_store_dir).save(spec)
+    except Exception as exc:
+        raise click.ClickException(str(exc)) from exc
+    click.echo(json.dumps({"digest": ref.digest, "path": str(ref.path)}))
+
+
+@cli.command("verify-candidate")
+@click.argument("candidate_id")
+@click.option("--oracle-digest", required=True)
+@click.option("--role-headers-file", required=True, type=click.Path(exists=True, dir_okay=False))
+@click.option("--witness-file", type=click.Path(exists=True, dir_okay=False), default=None)
+@click.option("--store-dir", type=click.Path(), default=None)
+@click.option("--db-path", type=click.Path(), default=None)
+@click.pass_context
+def verify_candidate(ctx, candidate_id, oracle_digest, role_headers_file, witness_file, store_dir, db_path):
+    """Run an authorized live semantic proof against a stored candidate."""
+    import json
+    import re
+    from pathlib import Path
+
+    from farm_agent.orchestrator.memory import Memory
+    from farm_agent.security.artifacts import ArtifactRef, ArtifactStore
+    from farm_agent.security.oracles import ProofOutcome
+    from farm_agent.security.verifier import SemanticVerifier
+
+    if not re.fullmatch(r"[0-9a-f]{64}", oracle_digest):
+        raise click.ClickException("Oracle digest must be a lowercase SHA-256")
+    config = load_config(ctx.obj["config_path"])
+    try:
+        role_headers = json.loads(Path(role_headers_file).read_text(encoding="utf-8"))
+        if (not isinstance(role_headers, dict)
+                or not all(isinstance(role, str) and isinstance(headers, dict)
+                           and all(isinstance(k, str) and isinstance(v, str)
+                                   for k, v in headers.items())
+                           for role, headers in role_headers.items())):
+            raise ValueError("Role headers must map role names to string header maps")
+    except (OSError, ValueError) as exc:
+        raise click.ClickException(f"Invalid role headers file: {exc}") from exc
+
+    def witness_counter():
+        count = int(Path(witness_file).read_text(encoding="utf-8").strip())
+        if count < 0:
+            raise ValueError("Witness count cannot be negative")
+        return count
+
+    async def run_proof():
+        memory = Memory(db_path or config.storage.db_path)
+        await memory.init()
+        try:
+            store = ArtifactStore(store_dir or config.bounty.oracle_store_dir)
+            artifact = ArtifactRef(store.root / f"{oracle_digest}.json", oracle_digest)
+            return await SemanticVerifier(memory).verify_candidate(
+                candidate_id, artifact, store, role_headers=role_headers,
+                witness_counter=witness_counter if witness_file else None,
+            )
+        finally:
+            await memory.close()
+
+    try:
+        result = asyncio.run(run_proof())
+    except Exception as exc:
+        raise click.ClickException(str(exc)) from exc
+    click.echo(json.dumps({
+        "candidate_id": candidate_id, "outcome": result.outcome.value,
+        "reason": result.reason, "evidence_hash": result.evidence_hash,
+    }))
+    if result.outcome != ProofOutcome.VERIFIED:
+        raise SystemExit(2)
+
+
+@cli.command("scope-report")
+@click.argument("scan_id")
+@click.option("--db-path", type=click.Path(), default=None)
+@click.pass_context
+def scope_report(ctx, scan_id, db_path):
+    """Show a scan's exact authorized scope and incomplete coverage."""
+    import json
+
+    from farm_agent.orchestrator.memory import Memory
+
+    config = load_config(ctx.obj["config_path"])
+
+    async def run_query():
+        memory = Memory(db_path or config.storage.db_path)
+        await memory.init()
+        try:
+            manifest = await memory.get_scan_manifest(scan_id)
+            if manifest is None:
+                raise click.ClickException("No authorized manifest for this scan")
+            summary = await memory.get_coverage_summary(scan_id)
+            return {
+                "scan_id": scan_id, "repo": manifest.scope.repo,
+                "target_commit": manifest.scope.target_commit, "mode": manifest.mode,
+                "policy_reference": manifest.scope.policy_reference,
+                "coverage": summary.__dict__, "statement": summary.statement,
+            }
+        finally:
+            await memory.close()
+
+    click.echo(json.dumps(asyncio.run(run_query()), ensure_ascii=False))
 
 
 if __name__ == "__main__":

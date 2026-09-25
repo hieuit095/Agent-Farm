@@ -1,6 +1,8 @@
 """Four-phase oracles against running vulnerable and fixed loopback services."""
 
 import json
+import subprocess
+import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from threading import Thread
@@ -355,6 +357,92 @@ async def test_oracle_modified_by_running_target_cannot_create_proof(tmp_path):
         assert (await memory.get_coverage_summary("tamper")).not_tested == 1
     finally:
         await memory.close()
+        for server, thread in (
+            (before_server, before_thread), (after_server, after_thread),
+            (witness_server, witness_thread),
+        ):
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=3)
+
+
+@pytest.mark.asyncio
+async def test_operator_cli_runs_real_idor_proof_and_reports_coverage(tmp_path):
+    witness_server, witness_thread, witness_url, _ = _start_witness()
+    side_effect = tmp_path / "unused"
+    before_server, before_thread, before = _start_service("vulnerable", witness_url, side_effect)
+    after_server, after_thread, after = _start_service("fixed", witness_url, side_effect)
+    db_path = tmp_path / "cli.db"
+    oracle_dir = tmp_path / "oracles"
+    config_path = tmp_path / "config.json"
+    policy = ProgramScope(
+        program_id="cli-local", repo="owner/repo", target_commit="e" * 40,
+        allowed_origins=[before, after], max_requests=4,
+        test_roles=["owner", "attacker"], allowed_impacts=["read_only"],
+        allow_live_testing=True, policy_reference="local fixture authorization",
+        surfaces=["/idor"], risk_classes=["idor"],
+        trust_boundaries=["tenant"], assets=["orders"],
+        attacker_inputs=["id"], attacker_stories=["cross tenant read"],
+    )
+    config_path.write_text(json.dumps({
+        "storage": {"db_path": str(db_path)},
+        "bounty": {
+            "oracle_store_dir": str(oracle_dir),
+            "live_testing_enabled": True,
+            "program_scopes": [policy.model_dump(mode="json")],
+        },
+    }), encoding="utf-8")
+    spec_path = tmp_path / "idor-spec.json"
+    spec_path.write_text(_spec(OracleKind.IDOR, before, after).model_dump_json(), encoding="utf-8")
+    headers_path = tmp_path / "role-headers.json"
+    headers_path.write_text(json.dumps({
+        "owner": {"X-Actor": "owner"}, "attacker": {"X-Actor": "attacker"},
+    }), encoding="utf-8")
+    root = Path(__file__).resolve().parents[2]
+    base = [sys.executable, "-m", "farm_agent.cli.main", "--config", str(config_path)]
+
+    def command(*args):
+        return subprocess.run(
+            [*base, *args], cwd=root, capture_output=True, text=True,
+            timeout=30, check=False,
+        )
+
+    try:
+        scan = command("register-live-scan", "owner/repo", "e" * 40)
+        assert scan.returncode == 0, scan.stderr
+        scan_id = json.loads(scan.stdout)["scan_id"]
+        candidate = command(
+            "register-candidate", scan_id,
+            "--file-path", "src/app.py", "--title", "CLI IDOR",
+        )
+        assert candidate.returncode == 0, candidate.stderr
+        candidate_id = json.loads(candidate.stdout)["candidate_id"]
+        listed = command("security-candidates")
+        assert listed.returncode == 0, listed.stderr
+        assert any(row["id"] == candidate_id for row in json.loads(listed.stdout))
+        registered = command("register-oracle", str(spec_path))
+        assert registered.returncode == 0, registered.stderr
+        digest = json.loads(registered.stdout)["digest"]
+        initial = command("scope-report", scan_id)
+        assert initial.returncode == 0, initial.stderr
+        assert json.loads(initial.stdout)["coverage"]["not_tested"] == 1
+        verified = command(
+            "verify-candidate", candidate_id,
+            "--oracle-digest", digest,
+            "--role-headers-file", str(headers_path),
+        )
+        assert verified.returncode == 0, verified.stderr
+        assert json.loads(verified.stdout)["outcome"] == "verified"
+        final = command("scope-report", scan_id)
+        assert final.returncode == 0, final.stderr
+        assert json.loads(final.stdout)["coverage"]["tested"] == 1
+        reopened = Memory(db_path)
+        await reopened.init()
+        try:
+            assert (await reopened.get_security_candidate(candidate_id))["status"] == CandidateStatus.CONFIRMED
+        finally:
+            await reopened.close()
+    finally:
         for server, thread in (
             (before_server, before_thread), (after_server, after_thread),
             (witness_server, witness_thread),

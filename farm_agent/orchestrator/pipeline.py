@@ -1149,6 +1149,7 @@ class FarmAgentPipeline:
             manifest = manifest_for_scan(
                 scan_id, repo.full_name, target_commit,
                 self.config.bounty.program_scopes,
+                mode="live" if self.config.bounty.live_testing_enabled else "offline",
             )
             if manifest:
                 await self._memory.store_scan_manifest(manifest)

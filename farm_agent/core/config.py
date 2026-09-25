@@ -225,6 +225,8 @@ class BountyConfig(BaseModel):
 
     bounty_reports_dir: str = "bounty_reports"
     program_scopes: list[ProgramScope] = Field(default_factory=list)
+    live_testing_enabled: bool = False
+    oracle_store_dir: str = "data/security-oracles"
     auto_submit_ghsa: bool = False
     allow_public_pr_for_critical: bool = False  # By default, NEVER open public PR for Critical/High 0-days
     circadian_enabled: bool = True
