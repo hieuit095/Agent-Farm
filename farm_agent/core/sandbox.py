@@ -273,6 +273,8 @@ class DockerSandbox:
         timeout: int = 60,
         language: str | None = None,
         repo_info: dict | None = None,
+        oracle_artifact=None,
+        artifact_store=None,
     ) -> dict[str, Any]:
         """Run a shell command inside an ephemeral Docker container.
 
@@ -301,6 +303,8 @@ class DockerSandbox:
             language: Language hint (e.g. 'python', 'rust', 'go'). Auto-detected
                       from repo_info or file extensions if not provided.
             repo_info: Optional GitHub repo metadata dict for language detection.
+            oracle_artifact: Canonical artifact mounted read-only at /oracle/oracle.json.
+            artifact_store: Store that verifies the artifact before and after execution.
 
         Returns:
             A dictionary with execution details including stdout, stderr, exit code,
@@ -328,6 +332,12 @@ class DockerSandbox:
             raise FileNotFoundError(f"Sandbox repository path does not exist: {repo_dir}")
         if not repo_dir.is_dir():
             raise NotADirectoryError(f"Sandbox repository path is not a directory: {repo_dir}")
+        if oracle_artifact is not None:
+            if artifact_store is None:
+                raise ValueError("Oracle artifact requires its verifying store")
+            artifact_store.load(oracle_artifact)
+            if oracle_artifact.path.resolve().is_relative_to(repo_dir):
+                raise ValueError("Canonical oracle must be outside the patch workspace")
             
         resolved_command = self._determine_test_command(repo_dir, fallback_cmd=base_command)
 
@@ -351,7 +361,6 @@ class DockerSandbox:
         }
 
         container: Container | None = None
-        output_task: asyncio.Task[tuple[str, str]] | None = None
         wait_task: asyncio.Task[int | None] | None = None
         timed_out = False
         exit_code: int | None = None
@@ -369,6 +378,7 @@ class DockerSandbox:
                 container_name=container_name,
                 labels=labels,
                 timeout=timeout,
+                oracle_artifact=oracle_artifact,
             )
 
             # ── Hard execution timeout enforced at asyncio level ──────────
@@ -379,9 +389,6 @@ class DockerSandbox:
             # a timeout result.
             try:
                 async def _execute_and_collect() -> dict[str, Any]:
-                    output_task = asyncio.create_task(
-                        asyncio.to_thread(self._capture_output, container.id)
-                    )
                     wait_task = asyncio.create_task(
                         asyncio.to_thread(self._wait_for_exit_code, container.id, timeout=timeout)
                     )
@@ -407,7 +414,10 @@ class DockerSandbox:
                         await asyncio.sleep(self._POLL_INTERVAL_SECONDS)
 
                     exit_code = await self._resolve_exit_code(wait_task, timed_out=False)
-                    stdout, stderr = await self._resolve_output(output_task)
+                    stdout, stderr = await asyncio.wait_for(
+                        asyncio.to_thread(self._capture_output, container.id),
+                        timeout=self._REMOVAL_GRACE_SECONDS,
+                    )
                     return {
                         "exit_code": exit_code,
                         "stdout": stdout,
@@ -453,8 +463,6 @@ class DockerSandbox:
                 stdout = ""
                 stderr = f"Sandbox execution timed out after {self._EXECUTION_TIMEOUT_SECONDS}s"
 
-            await self._wait_for_container_removal(run_id)
-
             return {
                 "stdout": stdout,
                 "stderr": stderr,
@@ -477,6 +485,8 @@ class DockerSandbox:
                     temp_dir_obj.cleanup()
                 except Exception as cleanup_exc:
                     logger.debug("Failed to clean up temp dir %s: %s", temp_dir_obj.name, cleanup_exc)
+            if oracle_artifact is not None:
+                artifact_store.load(oracle_artifact)
 
     async def _start_container(
         self,
@@ -487,6 +497,7 @@ class DockerSandbox:
         container_name: str,
         labels: dict[str, str],
         timeout: int = 120,
+        oracle_artifact=None,
     ) -> Container:
         """Create and start the sandbox container.
 
@@ -503,11 +514,19 @@ class DockerSandbox:
         guarded_command = f"timeout --signal=KILL {timeout}s {command}"
 
         def _run_container() -> Container:
+            mounts = []
+            if oracle_artifact is not None:
+                mounts.append(docker.types.Mount(
+                    target="/oracle/oracle.json",
+                    source=str(oracle_artifact.path.resolve()),
+                    type="bind", read_only=True,
+                ))
             container = self.client.containers.create(
                 image,
                 ["/bin/sh", "-lc", guarded_command],
                 working_dir=self._WORKSPACE_PATH,
                 tmpfs={self._WORKSPACE_PATH: "size=500m,mode=1777"},
+                mounts=mounts,
                 # ── Security hardening: strict isolation ──────────────────────
                 network_mode="none",
                 mem_limit="512m",
@@ -540,46 +559,18 @@ class DockerSandbox:
             return await asyncio.to_thread(_run_container)
 
     def _capture_output(self, container_id: str) -> tuple[str, str]:
-        """Capture stdout and stderr from a running container."""
-        stdout_chunks: list[bytes] = []
-        stderr_chunks: list[bytes] = []
-
-        stream = self.client.api.attach(
-            container=container_id,
-            stdout=True,
-            stderr=True,
-            stream=True,
-            logs=True,
-            demux=True,
+        """Fetch finite stdout/stderr logs after the container has exited."""
+        stdout = self.client.api.logs(
+            container=container_id, stdout=True, stderr=False,
+            stream=False, follow=False,
         )
-
-        if isinstance(stream, tuple):
-            stdout_stream, stderr_stream = stream
-
-            if stdout_stream is not None:
-                for chunk in stdout_stream:
-                    if chunk:
-                        stdout_chunks.append(chunk)
-
-            if stderr_stream is not None:
-                for chunk in stderr_stream:
-                    if chunk:
-                        stderr_chunks.append(chunk)
-        else:
-            for chunk in stream:
-                if isinstance(chunk, tuple):
-                    stdout_chunk, stderr_chunk = chunk
-                else:
-                    stdout_chunk, stderr_chunk = chunk, None
-
-                if stdout_chunk:
-                    stdout_chunks.append(stdout_chunk)
-                if stderr_chunk:
-                    stderr_chunks.append(stderr_chunk)
-
+        stderr = self.client.api.logs(
+            container=container_id, stdout=False, stderr=True,
+            stream=False, follow=False,
+        )
         return (
-            b"".join(stdout_chunks).decode("utf-8", errors="replace"),
-            b"".join(stderr_chunks).decode("utf-8", errors="replace"),
+            (stdout or b"").decode("utf-8", errors="replace"),
+            (stderr or b"").decode("utf-8", errors="replace"),
         )
 
     def _wait_for_exit_code(self, container_id: str, timeout: int = 300) -> int | None:

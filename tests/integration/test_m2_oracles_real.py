@@ -13,6 +13,7 @@ from farm_agent.core.config import FarmAgentConfig
 from farm_agent.core.models import ContributionType, Finding, Severity
 from farm_agent.github.security_gate import handle_responsible_disclosure
 from farm_agent.orchestrator.memory import Memory
+from farm_agent.security.artifacts import ArtifactStore
 from farm_agent.security.closure import require_confirmed_security_finding
 from farm_agent.security.oracles import (
     OracleKind,
@@ -22,13 +23,15 @@ from farm_agent.security.oracles import (
     run_four_phase,
 )
 from farm_agent.security.scope import ProgramScope, ScanManifest
-from farm_agent.security.state import CandidateStatus
+from farm_agent.security.state import CandidateStatus, SecurityGateError
 from farm_agent.security.threat_model import ThreatModel
 from farm_agent.security.transport import ScopedHttpClient
 from farm_agent.security.verifier import SemanticVerifier
 
 
-def _start_service(mode: str, witness_url: str, side_effect: Path):
+def _start_service(
+    mode: str, witness_url: str, side_effect: Path, tamper_paths: list[Path] | None = None,
+):
     class Service(BaseHTTPRequestHandler):
         def do_GET(self):
             parsed = urlsplit(self.path)
@@ -38,6 +41,9 @@ def _start_service(mode: str, witness_url: str, side_effect: Path):
             status = 200
             body = b""
             if parsed.path == "/idor":
+                if mode == "vulnerable" and role == "attacker" and tamper_paths:
+                    tamper_paths[0].chmod(0o666)
+                    tamper_paths[0].write_bytes(b"tampered during attack")
                 if mode == "regression" and role == "owner":
                     status = 503
                 elif mode in {"fixed", "regression"} and role == "attacker":
@@ -172,8 +178,10 @@ async def test_real_four_phase_semantics(tmp_path, kind):
             else (lambda: side_effect.stat().st_size if side_effect.exists() else 0)
             if kind == OracleKind.COMMAND_INJECTION else None
         )
+        store = ArtifactStore(tmp_path / "canonical-oracles")
+        artifact = store.save(_spec(kind, before, after))
         result = await SemanticVerifier(memory).verify_candidate(
-            candidate_id, _spec(kind, before, after),
+            candidate_id, artifact, store,
             role_headers={"owner": {"X-Actor": "owner"},
                           "attacker": {"X-Actor": "attacker"}},
             witness_counter=witness_counter,
@@ -298,6 +306,59 @@ async def test_real_idor_distinguishes_patch_failure_regression_and_transport(
         if after_mode != "closed":
             services.append((after_server, after_thread))
         for server, thread in services:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=3)
+
+
+@pytest.mark.asyncio
+async def test_oracle_modified_by_running_target_cannot_create_proof(tmp_path):
+    witness_server, witness_thread, witness_url, _ = _start_witness()
+    artifact_paths = []
+    side_effect = tmp_path / "unused"
+    before_server, before_thread, before = _start_service(
+        "vulnerable", witness_url, side_effect, artifact_paths,
+    )
+    after_server, after_thread, after = _start_service("fixed", witness_url, side_effect)
+    memory = Memory(tmp_path / "tamper.db")
+    await memory.init()
+    try:
+        policy = ProgramScope(
+            program_id="local-tamper", repo="owner/repo", target_commit="d" * 40,
+            allowed_origins=[before, after], max_requests=4,
+            test_roles=["owner", "attacker"], allowed_impacts=["read_only"],
+            allow_live_testing=True, policy_reference="local fixture authorization",
+            surfaces=["/idor"], risk_classes=["idor"],
+            trust_boundaries=["tenant"], assets=["orders"],
+            attacker_inputs=["id"], attacker_stories=["cross tenant read"],
+        )
+        manifest = ScanManifest(scan_id="tamper", scope=policy, mode="live")
+        await memory.store_scan_manifest(manifest)
+        await memory.store_threat_model(ThreatModel.from_manifest(manifest))
+        await memory.initialize_coverage(manifest)
+        candidate_id = await memory.create_security_candidate(
+            scan_id="tamper", repo="owner/repo", target_commit="d" * 40,
+            file_path="src/app.py", title="IDOR",
+        )
+        store = ArtifactStore(tmp_path / "oracles")
+        artifact = store.save(_spec(OracleKind.IDOR, before, after))
+        artifact_paths.append(artifact.path)
+        with pytest.raises(SecurityGateError, match="hash changed"):
+            await SemanticVerifier(memory).verify_candidate(
+                candidate_id, artifact, store,
+                role_headers={"owner": {"X-Actor": "owner"},
+                              "attacker": {"X-Actor": "attacker"}},
+            )
+        candidate = await memory.get_security_candidate(candidate_id)
+        assert candidate["status"] == CandidateStatus.DISCOVERED
+        assert not await memory.security_candidate_has_semantic_proof(candidate_id)
+        assert (await memory.get_coverage_summary("tamper")).not_tested == 1
+    finally:
+        await memory.close()
+        for server, thread in (
+            (before_server, before_thread), (after_server, after_thread),
+            (witness_server, witness_thread),
+        ):
             server.shutdown()
             server.server_close()
             thread.join(timeout=3)

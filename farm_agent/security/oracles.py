@@ -1,5 +1,6 @@
 """Deterministic four-step security proof over real HTTP observations."""
 
+import hashlib
 import inspect
 import json
 from collections.abc import Callable
@@ -55,6 +56,14 @@ class OracleSpec(BaseModel):
     attacker_tenant: str = ""
     object_id: str = ""
 
+    @property
+    def digest(self) -> str:
+        payload = json.dumps(
+            self.model_dump(mode="json"), sort_keys=True,
+            separators=(",", ":"), ensure_ascii=False,
+        ).encode("utf-8")
+        return hashlib.sha256(payload).hexdigest()
+
 
 @dataclass(frozen=True)
 class StepObservation:
@@ -108,6 +117,7 @@ def evaluate_four_phase(
         target_commit=target_commit,
         observation={
             "oracle": spec.kind.value,
+            "oracle_digest": spec.digest,
             "steps": [
                 {"status": step.http.status_code, "body_hex": step.http.body.hex(),
                  "transport_error": step.http.transport_error,

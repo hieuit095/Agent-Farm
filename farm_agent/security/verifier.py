@@ -2,9 +2,10 @@
 
 from collections.abc import Callable
 
+from farm_agent.security.artifacts import ArtifactRef, ArtifactStore
 from farm_agent.security.closure import ClosureService
 from farm_agent.security.coverage import CoverageOutcome
-from farm_agent.security.oracles import OracleSpec, ProofOutcome, ProofResult, run_four_phase
+from farm_agent.security.oracles import ProofOutcome, ProofResult, run_four_phase
 from farm_agent.security.state import CandidateStatus, EvidenceKind, SecurityGateError
 from farm_agent.security.transport import ScopedHttpClient
 
@@ -14,10 +15,11 @@ class SemanticVerifier:
         self._memory = memory
 
     async def verify_candidate(
-        self, candidate_id: str, spec: OracleSpec, *,
+        self, candidate_id: str, artifact: ArtifactRef, store: ArtifactStore, *,
         role_headers: dict[str, dict[str, str]],
         witness_counter: Callable[[], int] | None = None,
     ) -> ProofResult:
+        spec = store.load(artifact)
         candidate = await self._memory.get_security_candidate(candidate_id)
         if candidate is None or candidate["status"] not in {
             CandidateStatus.DISCOVERED, CandidateStatus.INVESTIGATING,
@@ -40,6 +42,7 @@ class SemanticVerifier:
                 spec, client, target_commit=candidate["target_commit"],
                 role_headers=role_headers, witness_counter=witness_counter,
             )
+        store.load(artifact)  # Fail closed if the oracle changed while requests were running.
         if result.outcome in {
             ProofOutcome.VERIFIED, ProofOutcome.PATCH_FAILED, ProofOutcome.REGRESSION,
         }:
