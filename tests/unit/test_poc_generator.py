@@ -161,13 +161,32 @@ async def test_verify_vulnerability_with_poc():
             assert result["stdout"] == "Success"
             assert result["stderr"] == "Error"
             assert result["timed_out"] is False
-            
+
             # Assert file was cleaned up and is no longer present
             assert not os.path.exists(os.path.join(temp_dir, poc_filename))
-            
+
             # Assert run_in_sandbox was called with correct command
             sandbox.run_in_sandbox.assert_called_once_with(
                 repo_path=temp_dir,
                 command=run_command,
                 timeout=10
             )
+
+
+@pytest.mark.asyncio
+async def test_poc_file_cannot_escape_or_replace_workspace_file(tmp_path):
+    with patch("farm_agent.core.sandbox.DockerSandbox.__init__", return_value=None):
+        sandbox = DockerSandbox()
+    sandbox.run_in_sandbox = AsyncMock(return_value={"exit_code": 0})
+    existing = tmp_path / "existing.py"
+    existing.write_text("keep me", encoding="utf-8")
+
+    with pytest.raises(ValueError):
+        await sandbox.verify_vulnerability_with_poc(
+            str(tmp_path), "../outside.py", "malicious", "python outside.py"
+        )
+    with pytest.raises(FileExistsError):
+        await sandbox.verify_vulnerability_with_poc(
+            str(tmp_path), "existing.py", "malicious", "python existing.py"
+        )
+    assert existing.read_text(encoding="utf-8") == "keep me"

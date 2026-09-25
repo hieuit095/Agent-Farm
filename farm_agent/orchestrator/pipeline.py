@@ -47,7 +47,9 @@ from farm_agent.issues.solver import IssueSolver
 from farm_agent.llm.provider import create_llm_provider
 from farm_agent.orchestrator.memory import Memory
 from farm_agent.pr.manager import PRManager
-from farm_agent.security.state import PoCStatus
+from farm_agent.security.closure import ClosureService
+from farm_agent.security.evidence import evidence_hash
+from farm_agent.security.state import CandidateStatus, EvidenceKind, PoCStatus
 
 logger = logging.getLogger(__name__)
 
@@ -366,6 +368,18 @@ class FarmAgentPipeline:
     def _m0_candidate_id(repo: str, finding: Finding) -> str:
         key = f"{repo}\0{finding.file_path}\0{finding.title}"
         return hashlib.sha256(key.encode()).hexdigest()[:16]
+
+    @staticmethod
+    def _repo_head_sha(repo_path: str) -> str | None:
+        try:
+            result = subprocess.run(
+                ["git", "-C", repo_path, "rev-parse", "HEAD"],
+                capture_output=True, text=True, timeout=5, check=True,
+            )
+            sha = result.stdout.strip().lower()
+            return sha if re.fullmatch(r"(?:[0-9a-f]{40}|[0-9a-f]{64})", sha) else None
+        except (OSError, subprocess.SubprocessError):
+            return None
 
     def _get_max_concurrency(self) -> int:
         """Return current safe concurrency level from the adaptive manager."""
@@ -1303,22 +1317,24 @@ class FarmAgentPipeline:
 
         # Early Clone Initialization
         repo_path = await self._clone_and_patch_repo(repo.clone_url, [], [])
+        target_commit = self._repo_head_sha(repo_path)
 
         # Run baseline native tests
-        baseline_exit_code = 0
-        baseline_test_status = "tests_missing"
+        baseline_exit_code = None
+        baseline_test_status = "not_run"
         if self._sandbox is not None:
             logger.info("🧪 [Phase 4] Running baseline native test suite on unpatched repository...")
             try:
                 baseline_tests = await self._sandbox.run_native_test_suite(repo_path, language=repo.language)
-                baseline_exit_code = baseline_tests.get("exit_code", 0)
-                baseline_test_status = baseline_tests.get("status", "tests_missing")
+                baseline_exit_code = baseline_tests.get("exit_code")
+                baseline_test_status = baseline_tests.get("status", "unknown")
                 logger.info(
                     "🧪 [Phase 4] Baseline native tests completed: status=%s, exit_code=%s",
                     baseline_test_status,
                     baseline_exit_code,
                 )
             except Exception as exc:
+                baseline_test_status = "error"
                 logger.warning("🧪 [Phase 4] Baseline native test suite check failed (non-fatal): %s", exc)
 
         # Check AI policy — skip repos that ban AI-generated PRs
@@ -1924,6 +1940,20 @@ class FarmAgentPipeline:
         # Generate contributions for validated findings
         for finding in validated_findings:
             candidate_id = self._m0_candidate_id(repo.full_name, finding)
+            security_candidate_id = None
+            if finding.type == ContributionType.SECURITY_FIX:
+                if self._memory is None:
+                    logger.error("Security candidate store unavailable; skipping %s", finding.title)
+                    continue
+                try:
+                    security_candidate_id = await self._memory.create_security_candidate(
+                        scan_id=scan_id, repo=repo.full_name,
+                        target_commit=target_commit or "unknown",
+                        file_path=finding.file_path, title=finding.title,
+                    )
+                except Exception:
+                    logger.exception("Could not register security candidate; skipping fix")
+                    continue
 
             # ── Hybrid Contribution Router ─────────────────────────────────
             # Route A — Direct PR (Firefighter): SECURITY_FIX or CRITICAL/HIGH severity
@@ -1935,6 +1965,12 @@ class FarmAgentPipeline:
             )
 
             if not is_direct_pr:
+                if security_candidate_id:
+                    await ClosureService(self._memory).close(
+                        security_candidate_id, CandidateStatus.OPEN_PROOF_GAP,
+                        reason_code="ISSUE_ROUTE_HAS_NO_PROOF",
+                    )
+                    continue
                 await self._m0_event(
                     scan_id=scan_id, candidate_id=candidate_id,
                     repo=repo.full_name, pipeline="standard", stage="route",
@@ -1946,7 +1982,23 @@ class FarmAgentPipeline:
                 continue
 
             # ── Phase 3: Dynamic Bug Verification Gate ─────────────────────
+            poc_filename = poc_content = run_command = None
+            if (self._sandbox is None or (security_candidate_id and not target_commit)
+                    or (security_candidate_id and baseline_test_status in {
+                        "not_run", "error", "skipped", "unknown",
+                    })):
+                if security_candidate_id:
+                    await ClosureService(self._memory).close(
+                        security_candidate_id, CandidateStatus.OPEN_PROOF_GAP,
+                        reason_code="SANDBOX_UNAVAILABLE" if self._sandbox is None
+                        else "TARGET_COMMIT_UNKNOWN" if not target_commit
+                        else "BASELINE_TEST_UNAVAILABLE",
+                    )
+                logger.warning("PoC prerequisites missing; skipping fix for %s", finding.title)
+                continue
             logger.info("🧪 [Phase 3] Generating PoC for: %s", finding.title)
+            poc_verdict = None
+            sandbox_result = None
             try:
                 from farm_agent.generator.poc import PoCGenerator
                 from farm_agent.llm.provider import create_llm_provider
@@ -1975,43 +2027,6 @@ class FarmAgentPipeline:
                             poc_content=poc_content,
                             sandbox_output=sandbox_result,
                         )
-                        is_triggered = poc_verdict.status == PoCStatus.TRIGGERED
-                        reason = poc_verdict.reason
-                        
-                        if not is_triggered:
-                            await self._m0_event(
-                                scan_id=scan_id, candidate_id=candidate_id,
-                                repo=repo.full_name, pipeline="standard", stage="poc",
-                                outcome="not_triggered", reason_code="EVALUATOR_NEGATIVE",
-                            )
-                            logger.warning(
-                                "🚫 [Phase 3] Vulnerability verification FAILED (bug could not be triggered). "
-                                "Reason: %s. Dropping finding '%s' as False Positive.",
-                                reason,
-                                finding.title,
-                            )
-                            if self._memory:
-                                await self._memory.add_filter_lesson(
-                                    repo.full_name,
-                                    1,  # Layer 1 lesson classification
-                                    target_file_content,
-                                    f"PoC did not trigger bug. Reason: {reason}",
-                                )
-                            continue
-                        
-                        logger.info("✅ [Phase 3] Vulnerability verified successfully: %s. Proceeding to fix generation.", reason)
-                        await self._m0_event(
-                            scan_id=scan_id, candidate_id=candidate_id,
-                            repo=repo.full_name, pipeline="standard", stage="poc",
-                            outcome="triggered",
-                        )
-                    else:
-                        await self._m0_event(
-                            scan_id=scan_id, candidate_id=candidate_id,
-                            repo=repo.full_name, pipeline="standard", stage="poc",
-                            outcome="missing", reason_code="POC_GENERATION_EMPTY",
-                        )
-                        logger.warning("⚠️ [Phase 3] PoC Generator did not return a valid script. Falling back to direct fix generation.")
                 finally:
                     await poc_llm.close()
             except Exception as e:
@@ -2020,7 +2035,55 @@ class FarmAgentPipeline:
                     repo=repo.full_name, pipeline="standard", stage="poc",
                     outcome="error", reason_code=type(e).__name__,
                 )
-                logger.warning("⚠️ [Phase 3] PoC verification gate encountered an error: %s. Falling back to direct fix generation.", e)
+                logger.warning("PoC verification failed for %s: %s", finding.title, e)
+
+            if poc_verdict is None or poc_verdict.status != PoCStatus.TRIGGERED:
+                reason_code = (
+                    "POC_GENERATION_EMPTY" if not (poc_filename and poc_content and run_command)
+                    else "POC_GATE_ERROR" if poc_verdict is None
+                    else f"POC_{poc_verdict.status.value.upper()}"
+                )
+                await self._m0_event(
+                    scan_id=scan_id, candidate_id=candidate_id,
+                    repo=repo.full_name, pipeline="standard", stage="poc",
+                    outcome="proof_gap", reason_code=reason_code,
+                )
+                if security_candidate_id:
+                    await ClosureService(self._memory).close(
+                        security_candidate_id, CandidateStatus.OPEN_PROOF_GAP,
+                        reason_code=reason_code,
+                    )
+                continue
+
+            if security_candidate_id:
+                try:
+                    proof_hash = evidence_hash(
+                        target_commit=target_commit,
+                        observation={
+                            "poc": poc_content, "command": run_command,
+                            "exit_code": sandbox_result.get("exit_code"),
+                            "stdout": sandbox_result.get("stdout"),
+                            "stderr": sandbox_result.get("stderr"),
+                        },
+                    )
+                    proof_id = await self._memory.add_security_evidence(
+                        candidate_id=security_candidate_id,
+                        kind=EvidenceKind.POC_TRIGGERED,
+                        content_hash=proof_hash, target_commit=target_commit,
+                    )
+                    await ClosureService(self._memory).close(
+                        security_candidate_id, CandidateStatus.CONFIRMED,
+                        reason_code="POC_TRIGGERED", evidence_id=proof_id,
+                    )
+                    finding.metadata["security_candidate_id"] = security_candidate_id
+                except Exception:
+                    logger.exception("Could not persist verified PoC; skipping fix")
+                    continue
+            await self._m0_event(
+                scan_id=scan_id, candidate_id=candidate_id,
+                repo=repo.full_name, pipeline="standard", stage="poc",
+                outcome="triggered",
+            )
 
             logger.info("🛠️ Generating fix for: %s", finding.title)
             self._set_task("code_gen")
@@ -2085,51 +2148,59 @@ class FarmAgentPipeline:
                     error_log = ""
 
                     # --- Pass 1: Efficacy Validation (PoC checks) ---
-                    if 'poc_filename' in locals() and poc_filename and poc_content and run_command:
+                    if poc_filename and poc_content and run_command:
                         logger.info("🧪 [Phase 4: Efficacy] Executing PoC validation script on patched codebase...")
-                        poc_result = await self._sandbox.verify_vulnerability_with_poc(
-                            repo_path=patched_repo_path,
-                            poc_filename=poc_filename,
-                            poc_content=poc_content,
-                            run_command=run_command,
-                        )
-                        logger.info("🧪 [Phase 4: Efficacy] Evaluating PoC validation outcome via LLM...")
-                        poc_verdict = await poc_gen.evaluate_poc_result(
-                            finding=finding,
-                            poc_content=poc_content,
-                            sandbox_output=poc_result,
-                        )
-                        is_triggered = poc_verdict.status == PoCStatus.TRIGGERED
-                        reason = poc_verdict.reason
-                        if is_triggered:
-                            logger.warning("🚫 [Phase 4: Efficacy] Patch FAILED efficacy validation (vulnerability still triggered!). Reason: %s", reason)
+                        try:
+                            poc_result = await self._sandbox.verify_vulnerability_with_poc(
+                                repo_path=patched_repo_path,
+                                poc_filename=poc_filename,
+                                poc_content=poc_content,
+                                run_command=run_command,
+                            )
+                        except Exception as exc:
+                            poc_result = {"exit_code": None, "timed_out": False}
+                            error_log = f"EFFICACY EXECUTION ERROR: {type(exc).__name__}"
                             is_success = False
-                            error_log = f"EFFICACY FAILURE: The vulnerability could still be triggered after applying the patch. Reason: {reason}\nPoC Stderr: {poc_result.get('stderr')}"
+                        if (poc_result.get("exit_code") != 0
+                                or poc_result.get("timed_out") is not False):
+                            logger.warning("Patch did not pass the same PoC after remediation")
+                            is_success = False
+                            error_log = "EFFICACY FAILURE: PoC did not exit cleanly after patch"
                         else:
                             logger.info("✅ [Phase 4: Efficacy] Patch PASSED efficacy validation.")
+                    else:
+                        is_success = False
+                        error_log = "EFFICACY FAILURE: verified PoC is missing"
 
                     # --- Pass 2: Regression Auditor (Native tests checks) ---
                     if is_success:
                         logger.info("🧪 [Phase 4: Regression] Running native test suite on patched codebase...")
                         patched_tests = await self._sandbox.run_native_test_suite(patched_repo_path, language=repo.language)
-                        patched_exit_code = patched_tests.get("exit_code", 0)
-                        patched_status = patched_tests.get("status", "tests_missing")
+                        patched_exit_code = patched_tests.get("exit_code")
+                        patched_status = patched_tests.get("status", "unknown")
                         
-                        if baseline_exit_code == 0 and patched_exit_code != 0 and patched_status == "failed":
+                        if (patched_status not in {"success", "tests_missing"}
+                                or patched_tests.get("timed_out") is True
+                                or (patched_status == "success" and patched_exit_code != 0)):
                             logger.warning("🚫 [Phase 4: Regression] Patch FAILED native tests (regression detected!). Status: %s, Exit Code: %s", patched_status, patched_exit_code)
                             is_success = False
                             raw_stderr = patched_tests.get("stderr", "")
                             raw_stdout = patched_tests.get("stdout", "")
                             out_trunc = raw_stdout[:500] if raw_stdout else ""
                             err_trunc = raw_stderr[-2000:] if raw_stderr else ""
-                            error_log = f"REGRESSION FAILURE: Native test suite failed after applying the patch (it passed in the baseline).\nSTDOUT:\n{out_trunc}\n\nSTDERR:\n{err_trunc}"
+                            error_log = (
+                                f"REGRESSION UNRESOLVED: baseline={baseline_test_status}/"
+                                f"{baseline_exit_code}, patched={patched_status}/{patched_exit_code}."
+                                f"\nSTDOUT:\n{out_trunc}\n\nSTDERR:\n{err_trunc}"
+                            )
                         elif patched_status == "tests_missing":
                             logger.info("🧪 [Phase 4: Compile Check] No tests found. Running basic compilation/syntax check in sandbox...")
                             compile_result = await self._sandbox.run_in_sandbox(
                                 repo_path=patched_repo_path,
                                 command=None,
                             )
-                            if compile_result.get("exit_code") != 0:
+                            if (compile_result.get("exit_code") != 0
+                                    or compile_result.get("timed_out") is True):
                                 logger.warning("🚫 [Phase 4: Compile Check] Patch FAILED compilation/syntax check!")
                                 is_success = False
                                 raw_stderr = compile_result.get("stderr", "")

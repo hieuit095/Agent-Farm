@@ -710,12 +710,18 @@ class DockerSandbox:
         """Write the PoC script to the workspace directory, execute it inside the sandbox,
         and clean up the script afterwards. Returns the raw sandbox execution results.
         """
-        import os
+        import re
+        from pathlib import Path
 
-        poc_file_path = os.path.join(repo_path, poc_filename)
+        if (not re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}", poc_filename)
+                or poc_filename in {".", ".."}):
+            raise ValueError("PoC filename must be a simple workspace filename")
+        poc_file_path = Path(repo_path).resolve() / poc_filename
         logger.info("Writing PoC verification script to %s", poc_file_path)
+        created = False
         try:
-            with open(poc_file_path, "w", encoding="utf-8") as f:
+            with open(poc_file_path, "x", encoding="utf-8") as f:
+                created = True
                 f.write(poc_content)
             
             # Execute sandbox
@@ -727,9 +733,9 @@ class DockerSandbox:
             return result
         finally:
             # Clean up PoC file
-            if os.path.exists(poc_file_path):
+            if created:
                 try:
-                    os.remove(poc_file_path)
+                    poc_file_path.unlink()
                     logger.debug("Successfully cleaned up PoC script from %s", poc_file_path)
                 except Exception as exc:
                     logger.warning("Failed to remove PoC script from %s: %s", poc_file_path, exc)
