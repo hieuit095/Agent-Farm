@@ -26,6 +26,7 @@ from farm_agent.orchestrator.pipeline import FarmAgentPipeline
         ("invalid_evaluator", "OPEN_PROOF_GAP", False),
         ("unknown_sha", "OPEN_PROOF_GAP", False),
         ("baseline_skipped", "OPEN_PROOF_GAP", False),
+        ("source_missing", "OPEN_PROOF_GAP", False),
         ("triggered", "CONFIRMED", True),
     ],
 )
@@ -47,7 +48,9 @@ async def test_standard_proof_gate(tmp_path, case, expected_status, generator_ca
         pipeline._github.check_interaction_limits = AsyncMock(return_value=False)
         pipeline._github.fetch_recent_maintainer_comments = AsyncMock(return_value=[])
         pipeline._github.get_file_tree = AsyncMock(return_value=[])
-        pipeline._github.get_file_content = AsyncMock(return_value="source")
+        pipeline._github.get_file_content = AsyncMock(
+            return_value="" if case == "source_missing" else "source"
+        )
         pipeline._github.list_pull_requests = AsyncMock(return_value=[])
         pipeline._analyzer = MagicMock()
         pipeline._analyzer.analyze = AsyncMock(
@@ -104,5 +107,9 @@ async def test_standard_proof_gate(tmp_path, case, expected_status, generator_ca
             pipeline._generator.generate.assert_not_awaited()
         cursor = await memory._db.execute("SELECT status FROM security_candidates")
         assert (await cursor.fetchone())[0] == expected_status
+        if case != "unknown_sha":
+            pipeline._github.get_file_content.assert_awaited_with(
+                "owner", "repo", "src/app.py", ref="a" * 40,
+            )
     finally:
         await memory.close()

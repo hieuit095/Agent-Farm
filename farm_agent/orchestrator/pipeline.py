@@ -1595,7 +1595,9 @@ class FarmAgentPipeline:
                 # Micro-sleep to keep RPS below GitHub abuse-detection threshold
                 await asyncio.sleep(0.2)
                 try:
-                    return fpath, await self._github.get_file_content(repo.owner, repo.name, fpath)
+                    return fpath, await self._github.get_file_content(
+                        repo.owner, repo.name, fpath, ref=target_commit,
+                    )
                 except Exception:
                     logger.debug("Could not fetch %s", fpath)
                     return fpath, None
@@ -1784,6 +1786,18 @@ class FarmAgentPipeline:
                     )
                 except Exception:
                     logger.exception("Could not register security candidate; skipping fix")
+                    continue
+                if not relevant_files.get(finding.file_path):
+                    await ClosureService(self._memory).close(
+                        security_candidate_id, CandidateStatus.OPEN_PROOF_GAP,
+                        reason_code="SOURCE_UNAVAILABLE",
+                    )
+                    await self._m0_event(
+                        scan_id=scan_id, candidate_id=candidate_id,
+                        repo=repo.full_name, pipeline="standard", stage="source",
+                        outcome="proof_gap", reason_code="SOURCE_UNAVAILABLE",
+                    )
+                    logger.warning("Source unavailable at target SHA for %s", finding.title)
                     continue
 
             # ── Hybrid Contribution Router ─────────────────────────────────
