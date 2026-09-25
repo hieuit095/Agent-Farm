@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 
 from farm_agent.core.models import Finding
 from farm_agent.generator.engine import _extract_core_payload
+from farm_agent.security.state import PoCResult, PoCStatus
 
 if TYPE_CHECKING:
     from farm_agent.llm.provider import LLMProvider
@@ -93,8 +94,19 @@ class PoCGenerator:
         finding: Finding,
         poc_content: str,
         sandbox_output: dict,
-    ) -> tuple[bool, str]:
-        """Evaluate sandbox output to determine if the vulnerability was successfully triggered (True Positive) or if it is a False Positive."""
+    ) -> PoCResult:
+        """Distinguish a triggered PoC from execution failure or uncertain output."""
+        if sandbox_output.get("timed_out"):
+            return PoCResult(PoCStatus.EXECUTION_ERROR, "PoC execution timed out")
+        exit_code = sandbox_output.get("exit_code")
+        if type(exit_code) is not int:
+            return PoCResult(PoCStatus.EXECUTION_ERROR, "Missing PoC exit code")
+        stderr = str(sandbox_output.get("stderr") or "")
+        if any(marker in stderr for marker in (
+            "SyntaxError", "ModuleNotFoundError", "ImportError",
+            "command not found", "not recognized as an internal or external command",
+        )):
+            return PoCResult(PoCStatus.EXECUTION_ERROR, "PoC failed before reaching the claim")
         system_prompt = (
             "You are a Vulnerability Verification Auditor.\n"
             "Your task is to analyze the execution output of a PoC verification script inside a sandbox container.\n"
@@ -135,15 +147,21 @@ class PoCGenerator:
             payload_str = _extract_core_payload(raw_response)
             if not payload_str:
                 logger.warning("PoC Evaluator returned unparseable response: %s", raw_response)
-                return False, "Failed to parse evaluation response"
+                return PoCResult(PoCStatus.INCONCLUSIVE, "Failed to parse evaluation response")
 
             data = json.loads(payload_str)
-            is_triggered = data.get("is_triggered", False)
+            is_triggered = data.get("is_triggered")
             reason = data.get("reason", "No reason provided by evaluator")
-            return bool(is_triggered), str(reason)
+            if type(is_triggered) is not bool:
+                return PoCResult(PoCStatus.INCONCLUSIVE, "Evaluator omitted a boolean verdict")
+            if is_triggered and exit_code != 0:
+                return PoCResult(PoCStatus.TRIGGERED, str(reason))
+            if not is_triggered and exit_code == 0:
+                return PoCResult(PoCStatus.NOT_TRIGGERED, str(reason))
+            return PoCResult(PoCStatus.INCONCLUSIVE, str(reason))
         except Exception as e:
             logger.warning("PoC evaluation failed: %s", e)
-            return False, f"PoC evaluation error: {e}"
+            return PoCResult(PoCStatus.INCONCLUSIVE, f"PoC evaluation error: {e}")
 
     async def verify_differential_poc(
         self,
@@ -181,20 +199,20 @@ class PoCGenerator:
             timeout=timeout,
         )
 
-        is_triggered, trigger_reason = await self.evaluate_poc_result(
+        verdict = await self.evaluate_poc_result(
             finding=finding,
             poc_content=poc_content,
             sandbox_output=pass1_result,
         )
 
-        if not is_triggered:
-            logger.info("[DIFFERENTIAL POC] Pass 1 Failed: Finding not triggered on unpatched codebase (%s)", trigger_reason)
-            return False, f"Pass 1 Failed: Finding not triggered on unpatched codebase ({trigger_reason}) - False Positive discarded"
+        if verdict.status != PoCStatus.TRIGGERED:
+            logger.info("[DIFFERENTIAL POC] Pass 1 unresolved: %s", verdict.reason)
+            return False, f"Pass 1 Failed: {verdict.status.value} ({verdict.reason})"
 
-        logger.info("[DIFFERENTIAL POC] Pass 1 verified (Vulnerability triggered): %s", trigger_reason)
+        logger.info("[DIFFERENTIAL POC] Pass 1 verified (Vulnerability triggered): %s", verdict.reason)
 
         if not apply_patch_func:
-            return True, f"Pass 1 Verified: {trigger_reason}"
+            return True, f"Pass 1 Verified: {verdict.reason}"
 
         # Pass 2: Apply patch and verify fix
         try:

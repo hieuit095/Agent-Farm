@@ -84,7 +84,7 @@ async def test_differential_poc_fails_pass1_untriggered(finding):
 
     assert verified is False
     assert "Pass 1 Failed" in details
-    assert "False Positive" in details
+    assert "not_triggered" in details
     # Pass 2 should never run if Pass 1 fails!
     assert sandbox.verify_vulnerability_with_poc.call_count == 1
 

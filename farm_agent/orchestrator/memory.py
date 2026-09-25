@@ -9,10 +9,13 @@ from __future__ import annotations
 import asyncio
 import logging
 import sqlite3
+import uuid
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import aiosqlite
+
+from farm_agent.security.state import CandidateStatus, EvidenceKind, SecurityGateError
 
 logger = logging.getLogger(__name__)
 
@@ -80,6 +83,27 @@ CREATE TABLE IF NOT EXISTS scan_events (
     output_tokens INTEGER,
     cost_usd     REAL,
     created_at   TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS security_candidates (
+    id             TEXT PRIMARY KEY,
+    scan_id        TEXT NOT NULL,
+    repo           TEXT NOT NULL,
+    target_commit  TEXT NOT NULL,
+    file_path      TEXT NOT NULL,
+    title          TEXT NOT NULL,
+    status         TEXT NOT NULL DEFAULT 'DISCOVERED',
+    reason_code    TEXT,
+    closing_evidence_id TEXT,
+    created_at     TEXT NOT NULL,
+    updated_at     TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS security_evidence (
+    id            TEXT PRIMARY KEY,
+    candidate_id  TEXT NOT NULL REFERENCES security_candidates(id),
+    kind          TEXT NOT NULL,
+    content_hash  TEXT NOT NULL,
+    target_commit TEXT NOT NULL,
+    created_at    TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS pr_outcomes (
@@ -159,6 +183,7 @@ class Memory:
         self._db_path = Path(db_path).expanduser()
         self._db: aiosqlite.Connection | None = None
         self._quota_lock = asyncio.Lock()
+        self._security_lock = asyncio.Lock()
 
     async def init(self):
         """Initialize database connection and schema."""
@@ -190,6 +215,10 @@ class Memory:
         )
         await self._db.execute(
             "CREATE INDEX IF NOT EXISTS idx_scan_events_scan ON scan_events(scan_id, stage)"
+        )
+        await self._db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_security_candidates_scan "
+            "ON security_candidates(scan_id, status)"
         )
         await self._db.commit()
 
@@ -461,6 +490,115 @@ class Memory:
         return row[0] if row else 0
 
     # ── Run Log ────────────────────────────────────────────────────────────
+
+    async def create_security_candidate(
+        self, *, scan_id: str, repo: str, target_commit: str,
+        file_path: str, title: str,
+    ) -> str:
+        candidate_id = uuid.uuid4().hex
+        now = datetime.now(UTC).isoformat()
+        await self._db.execute(
+            """INSERT INTO security_candidates
+               (id, scan_id, repo, target_commit, file_path, title, status,
+                created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (candidate_id, scan_id, repo, target_commit, file_path, title,
+             CandidateStatus.DISCOVERED, now, now),
+        )
+        await self._db.commit()
+        return candidate_id
+
+    async def add_security_evidence(
+        self, *, candidate_id: str, kind: EvidenceKind,
+        content_hash: str, target_commit: str,
+    ) -> str:
+        evidence_id = uuid.uuid4().hex
+        async with self._security_lock:
+            cursor = await self._db.execute(
+                "SELECT target_commit FROM security_candidates WHERE id = ?", (candidate_id,)
+            )
+            candidate = await cursor.fetchone()
+            if candidate is None or candidate[0] != target_commit:
+                raise SecurityGateError("Evidence target does not match the candidate")
+            await self._db.execute(
+                """INSERT INTO security_evidence
+                   (id, candidate_id, kind, content_hash, target_commit, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (evidence_id, candidate_id, kind, content_hash,
+                 target_commit, datetime.now(UTC).isoformat()),
+            )
+            await self._db.commit()
+        return evidence_id
+
+    async def close_security_candidate(
+        self, candidate_id: str, *, status: CandidateStatus,
+        reason_code: str, evidence_id: str | None = None,
+    ) -> None:
+        if not reason_code:
+            raise SecurityGateError("Candidate closure requires a reason code")
+        if status not in {
+            CandidateStatus.CONFIRMED, CandidateStatus.RULED_OUT,
+            CandidateStatus.OPEN_PROOF_GAP, CandidateStatus.NEEDS_MANUAL_REVIEW,
+        }:
+            raise SecurityGateError("Invalid terminal candidate status")
+        async with self._security_lock:
+            await self._db.execute("BEGIN IMMEDIATE")
+            try:
+                cursor = await self._db.execute(
+                    "SELECT status, target_commit FROM security_candidates WHERE id = ?",
+                    (candidate_id,),
+                )
+                candidate = await cursor.fetchone()
+                if candidate is None or candidate[0] not in {
+                    CandidateStatus.DISCOVERED, CandidateStatus.INVESTIGATING,
+                }:
+                    raise SecurityGateError("Candidate is missing or already closed")
+                if status in {CandidateStatus.CONFIRMED, CandidateStatus.RULED_OUT}:
+                    if not evidence_id:
+                        raise SecurityGateError("Conclusive closure requires evidence")
+                    cursor = await self._db.execute(
+                        """SELECT kind FROM security_evidence
+                           WHERE id = ? AND candidate_id = ? AND target_commit = ?""",
+                        (evidence_id, candidate_id, candidate[1]),
+                    )
+                    evidence = await cursor.fetchone()
+                    required_kind = (
+                        EvidenceKind.POC_TRIGGERED if status == CandidateStatus.CONFIRMED
+                        else EvidenceKind.COUNTEREVIDENCE
+                    )
+                    if evidence is None or evidence[0] != required_kind:
+                        raise SecurityGateError("Evidence does not support closure")
+                await self._db.execute(
+                    """UPDATE security_candidates
+                       SET status = ?, reason_code = ?, closing_evidence_id = ?,
+                           updated_at = ? WHERE id = ?""",
+                    (status, reason_code, evidence_id, datetime.now(UTC).isoformat(),
+                     candidate_id),
+                )
+                await self._db.commit()
+            except Exception:
+                await self._db.rollback()
+                raise
+
+    async def get_security_candidate(self, candidate_id: str) -> dict | None:
+        cursor = await self._db.execute(
+            "SELECT * FROM security_candidates WHERE id = ?", (candidate_id,)
+        )
+        row = await cursor.fetchone()
+        if row is None:
+            return None
+        return dict(zip((column[0] for column in cursor.description), row, strict=True))
+
+    async def security_candidate_is_confirmed(self, candidate_id: str, repo: str) -> bool:
+        cursor = await self._db.execute(
+            """SELECT 1 FROM security_candidates c JOIN security_evidence e
+               ON e.id = c.closing_evidence_id AND e.candidate_id = c.id
+               WHERE c.id = ? AND c.repo = ? AND c.status = 'CONFIRMED'
+                 AND e.kind = 'POC_TRIGGERED' AND e.target_commit = c.target_commit
+                 AND c.target_commit != 'unknown'""",
+            (candidate_id, repo),
+        )
+        return await cursor.fetchone() is not None
 
     async def record_scan_event(
         self, *, scan_id: str, repo: str, pipeline: str, stage: str,

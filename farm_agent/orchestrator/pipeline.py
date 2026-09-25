@@ -47,6 +47,7 @@ from farm_agent.issues.solver import IssueSolver
 from farm_agent.llm.provider import create_llm_provider
 from farm_agent.orchestrator.memory import Memory
 from farm_agent.pr.manager import PRManager
+from farm_agent.security.state import PoCStatus
 
 logger = logging.getLogger(__name__)
 
@@ -1969,11 +1970,13 @@ class FarmAgentPipeline:
                         )
                         
                         logger.info("🧪 [Phase 3] Evaluating PoC validation outcome via LLM...")
-                        is_triggered, reason = await poc_gen.evaluate_poc_result(
+                        poc_verdict = await poc_gen.evaluate_poc_result(
                             finding=finding,
                             poc_content=poc_content,
                             sandbox_output=sandbox_result,
                         )
+                        is_triggered = poc_verdict.status == PoCStatus.TRIGGERED
+                        reason = poc_verdict.reason
                         
                         if not is_triggered:
                             await self._m0_event(
@@ -2091,11 +2094,13 @@ class FarmAgentPipeline:
                             run_command=run_command,
                         )
                         logger.info("🧪 [Phase 4: Efficacy] Evaluating PoC validation outcome via LLM...")
-                        is_triggered, reason = await poc_gen.evaluate_poc_result(
+                        poc_verdict = await poc_gen.evaluate_poc_result(
                             finding=finding,
                             poc_content=poc_content,
                             sandbox_output=poc_result,
                         )
+                        is_triggered = poc_verdict.status == PoCStatus.TRIGGERED
+                        reason = poc_verdict.reason
                         if is_triggered:
                             logger.warning("🚫 [Phase 4: Efficacy] Patch FAILED efficacy validation (vulnerability still triggered!). Reason: %s", reason)
                             is_success = False

@@ -361,6 +361,15 @@ async def test_omni_e2e_pipeline(tmp_path):
             new_callable=AsyncMock,
             return_value={"exit_code": 0, "stdout": "All tests passed", "stderr": ""},
         ),
+        patch.object(
+            DockerSandbox,
+            "verify_vulnerability_with_poc",
+            new_callable=AsyncMock,
+            side_effect=[
+                {"exit_code": 1, "stdout": "", "stderr": "AssertionError: exploit", "timed_out": False},
+                {"exit_code": 0, "stdout": "Fixed", "stderr": "", "timed_out": False},
+            ],
+        ),
         patch.object(PRManager, "create_pr", new_callable=AsyncMock, return_value=fake_pr),
         patch.object(PRManager, "check_compliance_and_fix", new_callable=AsyncMock),
         patch("farm_agent.orchestrator.pipeline.run_security_gate", new_callable=AsyncMock, return_value=None),

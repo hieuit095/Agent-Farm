@@ -25,6 +25,7 @@ sys.modules['docker.models.containers'] = mock_docker_models
 
 from farm_agent.core.models import Finding, ContributionType, Severity, ImpactLevel
 from farm_agent.generator.poc import PoCGenerator
+from farm_agent.security.state import PoCStatus
 from farm_agent.core.sandbox import DockerSandbox
 
 @pytest.fixture
@@ -98,10 +99,10 @@ async def test_evaluate_poc_result_success(mock_llm, finding):
         "timed_out": False
     }
     
-    is_triggered, reason = await generator.evaluate_poc_result(finding, "print('exploit')", sandbox_output)
-    
-    assert is_triggered is True
-    assert reason == "AssertionError: SQL Injection successful"
+    verdict = await generator.evaluate_poc_result(finding, "print('exploit')", sandbox_output)
+
+    assert verdict.status == PoCStatus.TRIGGERED
+    assert verdict.reason == "AssertionError: SQL Injection successful"
     mock_llm.complete.assert_called_once()
 
 @pytest.mark.asyncio
@@ -117,10 +118,10 @@ async def test_evaluate_poc_result_fallback(mock_llm, finding):
         "timed_out": False
     }
     
-    is_triggered, reason = await generator.evaluate_poc_result(finding, "print('exploit')", sandbox_output)
-    
-    assert is_triggered is False
-    assert "Failed to parse evaluation response" in reason
+    verdict = await generator.evaluate_poc_result(finding, "print('exploit')", sandbox_output)
+
+    assert verdict.status == PoCStatus.INCONCLUSIVE
+    assert "Failed to parse evaluation response" in verdict.reason
 
 @pytest.mark.asyncio
 async def test_verify_vulnerability_with_poc():
