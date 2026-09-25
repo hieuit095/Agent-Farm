@@ -121,11 +121,19 @@ class ScanManifest(BaseModel):
             raise SecurityGateError("Endpoint is excluded by program policy")
 
 
+def matching_program(
+    repo: str, target_commit: str, programs: list[ProgramScope],
+) -> ProgramScope | None:
+    """The exact program authorizing this repository and commit, if any."""
+    matches = [p for p in programs if p.repo == repo and p.target_commit == target_commit]
+    if len(matches) > 1:
+        raise SecurityGateError("Ambiguous program scope for repository and commit")
+    return matches[0] if matches else None
+
+
 def manifest_for_scan(
     scan_id: str, repo: str, target_commit: str, programs: list[ProgramScope],
     *, mode: str = "offline",
 ) -> ScanManifest | None:
-    matches = [p for p in programs if p.repo == repo and p.target_commit == target_commit]
-    if len(matches) > 1:
-        raise SecurityGateError("Ambiguous program scope for repository and commit")
-    return ScanManifest(scan_id=scan_id, scope=matches[0], mode=mode) if matches else None
+    scope = matching_program(repo, target_commit, programs)
+    return ScanManifest(scan_id=scan_id, scope=scope, mode=mode) if scope else None

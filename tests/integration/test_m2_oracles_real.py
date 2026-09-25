@@ -1,20 +1,30 @@
 """Four-phase oracles against running vulnerable and fixed loopback services."""
 
 import json
+import sqlite3
 import subprocess
 import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from threading import Thread
+from types import SimpleNamespace
+from unittest.mock import MagicMock
 from urllib.parse import parse_qs, urlsplit
 from urllib.request import urlopen
 
 import pytest
 
 from farm_agent.core.config import FarmAgentConfig
-from farm_agent.core.models import ContributionType, Finding, Severity
-from farm_agent.github.security_gate import handle_responsible_disclosure
+from farm_agent.core.models import (
+    Contribution,
+    ContributionType,
+    Finding,
+    Repository,
+    Severity,
+)
+from farm_agent.github.security_gate import handle_responsible_disclosure, run_security_gate
 from farm_agent.orchestrator.memory import Memory
+from farm_agent.pr.manager import PRManager
 from farm_agent.security.artifacts import ArtifactStore
 from farm_agent.security.closure import require_confirmed_security_finding
 from farm_agent.security.oracles import (
@@ -144,6 +154,137 @@ def _spec(kind: OracleKind, before: str, after: str) -> OracleSpec:
         benign_marker=marker[0], exploit_marker=marker[1],
         owner_tenant="alpha", attacker_tenant="beta", object_id="order-7",
     )
+
+
+def _policy(before: str, after: str, *, commit: str = "e" * 40, **overrides) -> ProgramScope:
+    fields = {
+        "program_id": "cli-local", "repo": "owner/repo", "target_commit": commit,
+        "allowed_origins": [before, after], "max_requests": 4,
+        "test_roles": ["owner", "attacker"], "allowed_impacts": ["read_only"],
+        "allow_live_testing": True, "policy_reference": "local fixture authorization",
+        "surfaces": ["/idor"], "risk_classes": ["idor"],
+        "trust_boundaries": ["tenant"], "assets": ["orders"],
+        "attacker_inputs": ["id"], "attacker_stories": ["cross tenant read"],
+    }
+    fields.update(overrides)
+    return ProgramScope(**fields)
+
+
+def _cli_harness(base_dir: Path, policy: ProgramScope, *, live: bool = True):
+    """Real config file and CLI subprocess runner over one temp SQLite database."""
+    base_dir.mkdir(parents=True, exist_ok=True)
+    db_path = base_dir / "cli.db"
+    config_path = base_dir / "config.json"
+    config_path.write_text(json.dumps({
+        "storage": {"db_path": str(db_path)},
+        "bounty": {
+            "oracle_store_dir": str(base_dir / "oracles"),
+            "live_testing_enabled": live,
+            "program_scopes": [policy.model_dump(mode="json")],
+        },
+    }), encoding="utf-8")
+    root = Path(__file__).resolve().parents[2]
+    base = [sys.executable, "-m", "farm_agent.cli.main", "--config", str(config_path)]
+
+    def command(*args):
+        return subprocess.run(
+            [*base, *args], cwd=root, capture_output=True, text=True,
+            timeout=30, check=False,
+        )
+
+    return db_path, command
+
+
+def _headers_file(path: Path, roles: tuple[str, ...] = ("owner", "attacker")) -> Path:
+    path.write_text(json.dumps({role: {"X-Actor": role} for role in roles}), encoding="utf-8")
+    return path
+
+
+def _write_spec(directory: Path, spec: OracleSpec) -> Path:
+    path = directory / "spec.json"
+    path.write_text(spec.model_dump_json(), encoding="utf-8")
+    return path
+
+
+def _sqlite_column(db_path, query: str, params: tuple = ()) -> list:
+    with sqlite3.connect(db_path) as connection:
+        return [row[0] for row in connection.execute(query, params)]
+
+
+def _candidate_status(db_path, candidate_id: str):
+    return next(iter(_sqlite_column(
+        db_path, "SELECT status FROM security_candidates WHERE id = ?", (candidate_id,),
+    )), None)
+
+
+def _candidate_evidence(db_path, candidate_id: str) -> list:
+    return _sqlite_column(
+        db_path, "SELECT kind FROM security_evidence WHERE candidate_id = ?", (candidate_id,),
+    )
+
+
+def _requests_used(db_path, scan_id: str):
+    return next(iter(_sqlite_column(
+        db_path, "SELECT requests_used FROM scan_manifests WHERE scan_id = ?", (scan_id,),
+    )), None)
+
+
+def _coverage_outcomes(db_path, scan_id: str) -> list:
+    return _sqlite_column(
+        db_path, "SELECT outcome FROM scan_coverage WHERE scan_id = ?", (scan_id,),
+    )
+
+
+def _finding_for(candidate_id, *, file_path="src/app.py", title="IDOR", commit="e" * 40):
+    return Finding(
+        type=ContributionType.SECURITY_FIX, severity=Severity.HIGH,
+        title=title, description="fixture", file_path=file_path,
+        metadata={
+            "security_candidate_id": candidate_id,
+            "security_target_commit": commit,
+        },
+    )
+
+
+async def _assert_publication_blocked(memory, candidate_id, *, file_path, title, commit):
+    """Every real publication sink must refuse a candidate without valid proof."""
+    finding = _finding_for(candidate_id, file_path=file_path, title=title, commit=commit)
+    for channel in ("public_pr", "private_disclosure", "local_report"):
+        with pytest.raises(SecurityGateError):
+            await require_confirmed_security_finding(
+                memory, finding, "owner/repo", target_commit=commit, channel=channel,
+            )
+    github = MagicMock()
+    contribution = Contribution(
+        finding=finding, contribution_type=ContributionType.SECURITY_FIX,
+        title=title, description="fixture",
+    )
+    with pytest.raises(SecurityGateError):
+        await PRManager(github=github, memory=memory).create_pr(
+            contribution, Repository(owner="owner", name="repo", full_name="owner/repo"),
+        )
+    with pytest.raises(SecurityGateError):
+        await run_security_gate(
+            github=github, owner="owner", repo="repo",
+            dossier=SimpleNamespace(vulnerabilities=[finding]), memory=memory,
+        )
+    with pytest.raises(SecurityGateError):
+        await handle_responsible_disclosure(
+            github=github, owner="owner", repo="repo", finding=finding,
+            target_commit=commit, config=FarmAgentConfig(), memory=memory,
+        )
+    assert github.mock_calls == []
+
+
+async def _publication_blocked(db_path, candidate_id, *, file_path, title, commit):
+    memory = Memory(db_path)
+    await memory.init()
+    try:
+        await _assert_publication_blocked(
+            memory, candidate_id, file_path=file_path, title=title, commit=commit,
+        )
+    finally:
+        await memory.close()
 
 
 @pytest.mark.asyncio
@@ -436,12 +577,9 @@ async def test_operator_cli_runs_real_idor_proof_and_reports_coverage(tmp_path):
         final = command("scope-report", scan_id)
         assert final.returncode == 0, final.stderr
         assert json.loads(final.stdout)["coverage"]["tested"] == 1
-        reopened = Memory(db_path)
-        await reopened.init()
-        try:
-            assert (await reopened.get_security_candidate(candidate_id))["status"] == CandidateStatus.CONFIRMED
-        finally:
-            await reopened.close()
+        assert _candidate_status(db_path, candidate_id) == "CONFIRMED"
+        assert _candidate_evidence(db_path, candidate_id) == ["SEMANTIC_PROOF"]
+        assert _requests_used(db_path, scan_id) == 4
     finally:
         for server, thread in (
             (before_server, before_thread), (after_server, after_thread),
@@ -450,3 +588,380 @@ async def test_operator_cli_runs_real_idor_proof_and_reports_coverage(tmp_path):
             server.shutdown()
             server.server_close()
             thread.join(timeout=3)
+
+
+@pytest.mark.asyncio
+async def test_operator_cli_live_authorization_refusals(tmp_path):
+    origins = ("http://127.0.0.1:9", "http://127.0.0.1:10")
+    _, command = _cli_harness(tmp_path / "off", _policy(*origins), live=False)
+    refused = command("register-live-scan", "owner/repo", "e" * 40)
+    assert refused.returncode == 1 and "switch is disabled" in refused.stderr
+    _, command = _cli_harness(tmp_path / "nomatch", _policy(*origins))
+    refused = command("register-live-scan", "owner/other", "e" * 40)
+    assert refused.returncode == 1 and "no exact program" in refused.stderr.lower()
+    _, command = _cli_harness(
+        tmp_path / "nolive", _policy(*origins, allow_live_testing=False),
+    )
+    refused = command("register-live-scan", "owner/repo", "e" * 40)
+    assert refused.returncode == 1 and "live testing" in refused.stderr.lower()
+
+
+@pytest.mark.asyncio
+async def test_operator_cli_verify_rejections_leave_candidate_unproven(tmp_path):
+    witness_server, witness_thread, witness_url, _ = _start_witness()
+    side_effect = tmp_path / "unused"
+    before_server, before_thread, before = _start_service("vulnerable", witness_url, side_effect)
+    after_server, after_thread, after = _start_service("fixed", witness_url, side_effect)
+    base = _spec(OracleKind.IDOR, before, after)
+
+    def retag(spec, field, value):
+        probes = ("benign_before", "malicious_before", "malicious_after", "benign_after")
+        return spec.model_copy(update={
+            name: getattr(spec, name).model_copy(update={field: value}) for name in probes
+        })
+
+    cases = [
+        ("excluded", base, {"excluded_endpoints": ["/idor"]}),
+        ("outside_origin", base, {"allowed_origins": ["http://127.0.0.1:9"]}),
+        ("wrong_role", retag(base, "role", "admin"), {}),
+        ("wrong_impact", retag(base, "impact", "destructive"), {}),
+        ("budget", base, {"max_requests": 1}),
+    ]
+    try:
+        for name, spec, overrides in cases:
+            case_dir = tmp_path / name
+            db_path, command = _cli_harness(case_dir, _policy(before, after, **overrides))
+            spec_path = _write_spec(case_dir, spec)
+            headers = _headers_file(case_dir / "headers.json", ("owner", "attacker", "admin"))
+            scan = command("register-live-scan", "owner/repo", "e" * 40)
+            assert scan.returncode == 0, scan.stderr
+            scan_id = json.loads(scan.stdout)["scan_id"]
+            candidate = command(
+                "register-candidate", scan_id, "--file-path", "src/app.py", "--title", name,
+            )
+            candidate_id = json.loads(candidate.stdout)["candidate_id"]
+            digest = json.loads(
+                command("register-oracle", str(spec_path)).stdout
+            )["digest"]
+            verified = command(
+                "verify-candidate", candidate_id, "--oracle-digest", digest,
+                "--role-headers-file", str(headers),
+            )
+            assert verified.returncode == 1, (name, verified.stdout, verified.stderr)
+            assert _candidate_status(db_path, candidate_id) == "DISCOVERED"
+            assert _candidate_evidence(db_path, candidate_id) == []
+            assert _coverage_outcomes(db_path, scan_id) == ["not_tested"]
+            await _publication_blocked(
+                db_path, candidate_id, file_path="src/app.py", title=name, commit="e" * 40,
+            )
+    finally:
+        for server, thread in (
+            (before_server, before_thread), (after_server, after_thread),
+            (witness_server, witness_thread),
+        ):
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=3)
+
+
+@pytest.mark.asyncio
+async def test_operator_cli_verify_integrity_negatives(tmp_path):
+    witness_server, witness_thread, witness_url, _ = _start_witness()
+    side_effect = tmp_path / "unused"
+    before_server, before_thread, before = _start_service("vulnerable", witness_url, side_effect)
+    after_server, after_thread, after = _start_service("fixed", witness_url, side_effect)
+    try:
+        tamper_dir = tmp_path / "tamper"
+        db_path, command = _cli_harness(tamper_dir, _policy(before, after))
+        spec_path = _write_spec(tamper_dir, _spec(OracleKind.IDOR, before, after))
+        headers = _headers_file(tamper_dir / "headers.json")
+        scan = command("register-live-scan", "owner/repo", "e" * 40)
+        scan_id = json.loads(scan.stdout)["scan_id"]
+        candidate = command(
+            "register-candidate", scan_id, "--file-path", "src/app.py", "--title", "tamper",
+        )
+        candidate_id = json.loads(candidate.stdout)["candidate_id"]
+        registered = json.loads(command("register-oracle", str(spec_path)).stdout)
+        Path(registered["path"]).chmod(0o666)
+        Path(registered["path"]).write_bytes(b"tampered")
+        tampered = command(
+            "verify-candidate", candidate_id, "--oracle-digest", registered["digest"],
+            "--role-headers-file", str(headers),
+        )
+        assert tampered.returncode == 1 and "hash changed" in tampered.stderr
+        assert _candidate_status(db_path, candidate_id) == "DISCOVERED"
+        assert _candidate_evidence(db_path, candidate_id) == []
+        await _publication_blocked(
+            db_path, candidate_id, file_path="src/app.py", title="tamper", commit="e" * 40,
+        )
+
+        ssrf_dir = tmp_path / "ssrf"
+        ssrf_policy = _policy(before, after, surfaces=["/fetch"], risk_classes=["ssrf"])
+        db_path, command = _cli_harness(ssrf_dir, ssrf_policy)
+        spec_path = _write_spec(ssrf_dir, _spec(OracleKind.SSRF, before, after))
+        headers = _headers_file(ssrf_dir / "headers.json")
+        scan = command("register-live-scan", "owner/repo", "e" * 40)
+        scan_id = json.loads(scan.stdout)["scan_id"]
+        candidate = command(
+            "register-candidate", scan_id, "--file-path", "src/app.py", "--title", "ssrf",
+        )
+        candidate_id = json.loads(candidate.stdout)["candidate_id"]
+        digest = json.loads(command("register-oracle", str(spec_path)).stdout)["digest"]
+        unwitnessed = command(
+            "verify-candidate", candidate_id, "--oracle-digest", digest,
+            "--role-headers-file", str(headers),
+        )
+        assert unwitnessed.returncode == 1 and "witness" in unwitnessed.stderr
+        assert _requests_used(db_path, scan_id) == 0  # rejected before any probe
+        assert _candidate_status(db_path, candidate_id) == "DISCOVERED"
+        assert _candidate_evidence(db_path, candidate_id) == []
+        assert _coverage_outcomes(db_path, scan_id) == ["not_tested"]
+        await _publication_blocked(
+            db_path, candidate_id, file_path="src/app.py", title="ssrf", commit="e" * 40,
+        )
+
+        cmd_dir = tmp_path / "cmd"
+        cmd_policy = _policy(
+            before, after, surfaces=["/execute"], risk_classes=["command_injection"],
+        )
+        db_path, command = _cli_harness(cmd_dir, cmd_policy)
+        spec_path = _write_spec(cmd_dir, _spec(OracleKind.COMMAND_INJECTION, before, after))
+        headers = _headers_file(cmd_dir / "headers.json")
+        scan = command("register-live-scan", "owner/repo", "e" * 40)
+        scan_id = json.loads(scan.stdout)["scan_id"]
+        candidate = command(
+            "register-candidate", scan_id, "--file-path", "src/app.py", "--title", "cmd",
+        )
+        candidate_id = json.loads(candidate.stdout)["candidate_id"]
+        digest = json.loads(command("register-oracle", str(spec_path)).stdout)["digest"]
+        unwitnessed = command(
+            "verify-candidate", candidate_id, "--oracle-digest", digest,
+            "--role-headers-file", str(headers),
+        )
+        assert unwitnessed.returncode == 1 and "witness" in unwitnessed.stderr
+        assert _requests_used(db_path, scan_id) == 0  # rejected before any probe
+        assert _candidate_status(db_path, candidate_id) == "DISCOVERED"
+        assert _candidate_evidence(db_path, candidate_id) == []
+        assert _coverage_outcomes(db_path, scan_id) == ["not_tested"]
+        await _publication_blocked(
+            db_path, candidate_id, file_path="src/app.py", title="cmd", commit="e" * 40,
+        )
+    finally:
+        for server, thread in (
+            (before_server, before_thread), (after_server, after_thread),
+            (witness_server, witness_thread),
+        ):
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=3)
+
+
+@pytest.mark.asyncio
+async def test_operator_cli_semantic_negatives_close_open_proof_gap(tmp_path):
+    for name, before_mode, close_after in (
+        ("empty", "empty", False), ("transport", "vulnerable", True),
+    ):
+        witness_server, witness_thread, witness_url, _ = _start_witness()
+        side_effect = tmp_path / "unused"
+        before_server, before_thread, before = _start_service(
+            before_mode, witness_url, side_effect,
+        )
+        after_server, after_thread, after = _start_service("fixed", witness_url, side_effect)
+        if close_after:
+            after_server.shutdown()
+            after_server.server_close()
+            after_thread.join(timeout=3)
+        case_dir = tmp_path / name
+        db_path, command = _cli_harness(case_dir, _policy(before, after))
+        spec_path = _write_spec(case_dir, _spec(OracleKind.IDOR, before, after))
+        headers = _headers_file(case_dir / "headers.json")
+        try:
+            scan = command("register-live-scan", "owner/repo", "e" * 40)
+            scan_id = json.loads(scan.stdout)["scan_id"]
+            candidate = command(
+                "register-candidate", scan_id, "--file-path", "src/app.py", "--title", name,
+            )
+            candidate_id = json.loads(candidate.stdout)["candidate_id"]
+            digest = json.loads(command("register-oracle", str(spec_path)).stdout)["digest"]
+            verified = command(
+                "verify-candidate", candidate_id, "--oracle-digest", digest,
+                "--role-headers-file", str(headers),
+            )
+            assert verified.returncode == 2, (name, verified.stdout, verified.stderr)
+            assert json.loads(verified.stdout)["outcome"] != "verified"
+            assert _candidate_status(db_path, candidate_id) == "OPEN_PROOF_GAP"
+            assert _coverage_outcomes(db_path, scan_id) == ["inconclusive"]
+            await _publication_blocked(
+                db_path, candidate_id, file_path="src/app.py", title=name, commit="e" * 40,
+            )
+        finally:
+            servers = [(before_server, before_thread), (witness_server, witness_thread)]
+            if not close_after:
+                servers.append((after_server, after_thread))
+            for server, thread in servers:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=3)
+
+
+@pytest.mark.asyncio
+async def test_operator_cli_repeat_verification_is_fail_closed(tmp_path):
+    witness_server, witness_thread, witness_url, _ = _start_witness()
+    side_effect = tmp_path / "unused"
+    before_server, before_thread, before = _start_service("vulnerable", witness_url, side_effect)
+    after_server, after_thread, after = _start_service("fixed", witness_url, side_effect)
+    db_path, command = _cli_harness(tmp_path, _policy(before, after))
+    spec_path = _write_spec(tmp_path, _spec(OracleKind.IDOR, before, after))
+    headers = _headers_file(tmp_path / "headers.json")
+    try:
+        scan = command("register-live-scan", "owner/repo", "e" * 40)
+        scan_id = json.loads(scan.stdout)["scan_id"]
+        candidate = command(
+            "register-candidate", scan_id, "--file-path", "src/app.py", "--title", "IDOR",
+        )
+        candidate_id = json.loads(candidate.stdout)["candidate_id"]
+        digest = json.loads(command("register-oracle", str(spec_path)).stdout)["digest"]
+        first = command(
+            "verify-candidate", candidate_id, "--oracle-digest", digest,
+            "--role-headers-file", str(headers),
+        )
+        assert first.returncode == 0, first.stderr
+        used = _requests_used(db_path, scan_id)
+        assert used == 4
+        second = command(
+            "verify-candidate", candidate_id, "--oracle-digest", digest,
+            "--role-headers-file", str(headers),
+        )
+        assert second.returncode == 1 and "already has semantic" in second.stderr
+        assert _requests_used(db_path, scan_id) == used
+        assert _candidate_status(db_path, candidate_id) == "CONFIRMED"
+        assert _candidate_evidence(db_path, candidate_id) == ["SEMANTIC_PROOF"]
+        memory = Memory(db_path)
+        await memory.init()
+        try:
+            finding = _finding_for(
+                candidate_id, file_path="src/app.py", title="IDOR", commit="e" * 40,
+            )
+            for channel in ("public_pr", "private_disclosure", "local_report"):
+                with pytest.raises(SecurityGateError):
+                    await require_confirmed_security_finding(
+                        memory, finding, "owner/repo",
+                        target_commit="e" * 40, channel=channel,
+                    )
+        finally:
+            await memory.close()
+    finally:
+        for server, thread in (
+            (before_server, before_thread), (after_server, after_thread),
+            (witness_server, witness_thread),
+        ):
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=3)
+
+
+@pytest.mark.asyncio
+async def test_operator_cli_rejects_windows_drive_candidate_paths(tmp_path):
+    origins = ("http://127.0.0.1:9", "http://127.0.0.1:10")
+    db_path, command = _cli_harness(tmp_path, _policy(*origins))
+    scan = command("register-live-scan", "owner/repo", "e" * 40)
+    scan_id = json.loads(scan.stdout)["scan_id"]
+    for bad in ("C:/Windows/evil.py", "C:\\Windows\\evil.py", "/etc/passwd", "a/../../b.py"):
+        rejected = command(
+            "register-candidate", scan_id, "--file-path", bad, "--title", "x",
+        )
+        assert rejected.returncode == 1, bad
+    accepted = command(
+        "register-candidate", scan_id, "--file-path", "src/app.py", "--title", "ok",
+    )
+    assert accepted.returncode == 0, accepted.stderr
+    accepted_id = json.loads(accepted.stdout)["candidate_id"]
+    assert _candidate_status(db_path, accepted_id) == "DISCOVERED"
+
+
+@pytest.mark.asyncio
+async def test_operator_cli_other_commit_is_rejected_and_unpublishable(tmp_path):
+    origins = ("http://127.0.0.1:9", "http://127.0.0.1:10")
+    other = "f" * 40
+    db_path, command = _cli_harness(tmp_path, _policy(*origins))
+    refused = command("register-live-scan", "owner/repo", other)
+    assert refused.returncode == 1 and "no exact program" in refused.stderr.lower()
+    assert not db_path.exists(), "a refused live scan must not persist anything"
+    scan = command("register-live-scan", "owner/repo", "e" * 40)
+    assert scan.returncode == 0, scan.stderr
+    scan_id = json.loads(scan.stdout)["scan_id"]
+    candidate = command(
+        "register-candidate", scan_id, "--file-path", "src/app.py", "--title", "IDOR",
+    )
+    candidate_id = json.loads(candidate.stdout)["candidate_id"]
+    assert _candidate_status(db_path, candidate_id) == "DISCOVERED"
+    assert _candidate_evidence(db_path, candidate_id) == []
+    assert _coverage_outcomes(db_path, scan_id) == ["not_tested"]
+    await _publication_blocked(
+        db_path, candidate_id, file_path="src/app.py", title="IDOR", commit="e" * 40,
+    )
+    memory = Memory(db_path)
+    await memory.init()
+    try:
+        with pytest.raises(SecurityGateError):
+            await require_confirmed_security_finding(
+                memory, _finding_for(candidate_id, commit=other), "owner/repo",
+                target_commit=other, channel="public_pr",
+            )
+    finally:
+        await memory.close()
+
+
+@pytest.mark.asyncio
+async def test_operator_cli_does_not_leak_credentials_or_response_secrets(tmp_path):
+    role_secret = "SECRET-ROLE-CREDENTIAL-9137"
+    response_marker = "private-order"
+    witness_server, witness_thread, witness_url, _ = _start_witness()
+    side_effect = tmp_path / "unused"
+    before_server, before_thread, before = _start_service("vulnerable", witness_url, side_effect)
+    after_server, after_thread, after = _start_service("fixed", witness_url, side_effect)
+    db_path, command = _cli_harness(tmp_path, _policy(before, after))
+    spec_path = _write_spec(tmp_path, _spec(OracleKind.IDOR, before, after))
+    headers_path = tmp_path / "headers.json"
+    headers_path.write_text(json.dumps({
+        "owner": {"X-Actor": "owner", "Authorization": f"Bearer {role_secret}"},
+        "attacker": {"X-Actor": "attacker", "Authorization": f"Bearer {role_secret}"},
+    }), encoding="utf-8")
+    observed = []
+
+    def run(*args):
+        proc = command(*args)
+        observed.extend((proc.stdout, proc.stderr))
+        return proc
+
+    try:
+        scan = run("register-live-scan", "owner/repo", "e" * 40)
+        assert scan.returncode == 0, scan.stderr
+        scan_id = json.loads(scan.stdout)["scan_id"]
+        candidate = run(
+            "register-candidate", scan_id, "--file-path", "src/app.py", "--title", "IDOR",
+        )
+        candidate_id = json.loads(candidate.stdout)["candidate_id"]
+        registered = run("register-oracle", str(spec_path))
+        digest = json.loads(registered.stdout)["digest"]
+        verified = run(
+            "verify-candidate", candidate_id, "--oracle-digest", digest,
+            "--role-headers-file", str(headers_path),
+        )
+        assert verified.returncode == 0, verified.stderr
+        run("security-candidates")
+        run("scope-report", scan_id)
+    finally:
+        for server, thread in (
+            (before_server, before_thread), (after_server, after_thread),
+            (witness_server, witness_thread),
+        ):
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=3)
+
+    assert role_secret in headers_path.read_text(encoding="utf-8")
+    assert response_marker == _spec(OracleKind.IDOR, before, after).exploit_marker
+    assert all(role_secret not in text for text in observed)
+    assert all(response_marker not in text for text in observed)
+    assert _candidate_status(db_path, candidate_id) == "CONFIRMED"

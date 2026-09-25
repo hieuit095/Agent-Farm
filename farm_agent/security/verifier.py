@@ -26,6 +26,8 @@ class SemanticVerifier:
             CandidateStatus.CONFIRMED,
         }:
             raise SecurityGateError("Candidate is missing or cannot be verified")
+        if await self._memory.security_candidate_has_semantic_proof(candidate_id):
+            raise SecurityGateError("Candidate already has semantic impact proof")
         scan_id = candidate["scan_id"]
         manifest = await self._memory.get_scan_manifest(scan_id)
         threat_model = await self._memory.get_threat_model(scan_id)

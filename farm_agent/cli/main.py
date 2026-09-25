@@ -1616,13 +1616,15 @@ def register_live_scan(ctx, repo, target_commit, db_path):
 def register_candidate(ctx, scan_id, file_path, title, db_path):
     """Record an operator-identified candidate under an authorized scan."""
     import json
-    from pathlib import PurePosixPath
+    from pathlib import PurePosixPath, PureWindowsPath
 
     from farm_agent.orchestrator.memory import Memory
 
     path = PurePosixPath(file_path)
+    windows = PureWindowsPath(file_path)
     if (not file_path or path.is_absolute() or ".." in path.parts
-            or "\\" in file_path or not title.strip()):
+            or "\\" in file_path or windows.drive or windows.root
+            or not title.strip()):
         raise click.ClickException("Candidate needs a relative file path and a title")
     config = load_config(ctx.obj["config_path"])
 
@@ -1677,7 +1679,9 @@ def register_oracle(ctx, spec_path, store_dir):
 @click.option("--store-dir", type=click.Path(), default=None)
 @click.option("--db-path", type=click.Path(), default=None)
 @click.pass_context
-def verify_candidate(ctx, candidate_id, oracle_digest, role_headers_file, witness_file, store_dir, db_path):
+def verify_candidate(
+    ctx, candidate_id, oracle_digest, role_headers_file, witness_file, store_dir, db_path,
+):
     """Run an authorized live semantic proof against a stored candidate."""
     import json
     import re

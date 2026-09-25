@@ -46,7 +46,7 @@ from farm_agent.orchestrator.memory import Memory
 from farm_agent.pr.manager import PRManager
 from farm_agent.security.closure import ClosureService
 from farm_agent.security.evidence import evidence_hash
-from farm_agent.security.scope import manifest_for_scan
+from farm_agent.security.scope import manifest_for_scan, matching_program
 from farm_agent.security.threat_model import ThreatModel
 from farm_agent.security.state import CandidateStatus, EvidenceKind, PoCStatus, SecurityGateError
 
@@ -1146,10 +1146,24 @@ class FarmAgentPipeline:
         repo_path = await self._clone_and_patch_repo(repo.clone_url, [], [])
         target_commit = self._repo_head_sha(repo_path)
         if target_commit and self._memory:
+            program = matching_program(
+                repo.full_name, target_commit, self.config.bounty.program_scopes,
+            )
+            live = bool(
+                program is not None and program.allow_live_testing
+                and self.config.bounty.live_testing_enabled
+            )
+            if (program is not None and self.config.bounty.live_testing_enabled
+                    and not program.allow_live_testing):
+                await self._m0_event(
+                    scan_id=scan_id, repo=repo.full_name, pipeline="standard",
+                    stage="scope", outcome="blocked",
+                    reason_code="LIVE_TESTING_NOT_AUTHORIZED", count=0,
+                )
             manifest = manifest_for_scan(
                 scan_id, repo.full_name, target_commit,
                 self.config.bounty.program_scopes,
-                mode="live" if self.config.bounty.live_testing_enabled else "offline",
+                mode="live" if live else "offline",
             )
             if manifest:
                 await self._memory.store_scan_manifest(manifest)
