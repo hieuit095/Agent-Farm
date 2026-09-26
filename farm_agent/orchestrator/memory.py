@@ -7,6 +7,7 @@ to avoid duplicate work and improve over time.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import re
 import logging
@@ -109,6 +110,23 @@ CREATE TABLE IF NOT EXISTS security_evidence (
     content_hash  TEXT NOT NULL,
     target_commit TEXT NOT NULL,
     created_at    TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS security_proofs (
+    proof_id                TEXT PRIMARY KEY,
+    candidate_id            TEXT NOT NULL REFERENCES security_candidates(id),
+    scan_id                 TEXT NOT NULL,
+    repo                    TEXT NOT NULL,
+    target_commit           TEXT NOT NULL,
+    oracle_digest           TEXT NOT NULL,
+    surface                 TEXT NOT NULL,
+    risk_class              TEXT NOT NULL,
+    outcome                 TEXT NOT NULL,
+    vulnerability_confirmed INTEGER,
+    patch_status            TEXT NOT NULL,
+    record_json             TEXT NOT NULL,
+    record_hash             TEXT NOT NULL,
+    valid                   INTEGER NOT NULL DEFAULT 1,
+    created_at              TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS scan_manifests (
     scan_id       TEXT PRIMARY KEY,
@@ -560,6 +578,70 @@ class Memory:
             await self._db.commit()
         return evidence_id
 
+    async def store_security_proof(
+        self, *, candidate_id: str, scan_id: str, repo: str,
+        target_commit: str, result,
+    ) -> str:
+        """Persist a retrievable redacted proof; a non-confirming run invalidates priors."""
+        proof_id = uuid.uuid4().hex
+        record_json = json.dumps(
+            result.record, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
+        )
+        record_hash = hashlib.sha256(record_json.encode("utf-8")).hexdigest()
+        confirmed = result.vulnerability_confirmed
+        async with self._security_lock:
+            await self._db.execute("BEGIN IMMEDIATE")
+            try:
+                cursor = await self._db.execute(
+                    "SELECT target_commit FROM security_candidates WHERE id = ?",
+                    (candidate_id,),
+                )
+                row = await cursor.fetchone()
+                if row is None or row[0] != target_commit:
+                    raise SecurityGateError("Proof target does not match the candidate")
+                if confirmed is not True:
+                    await self._db.execute(
+                        "UPDATE security_proofs SET valid = 0 WHERE candidate_id = ? AND valid = 1",
+                        (candidate_id,),
+                    )
+                await self._db.execute(
+                    """INSERT INTO security_proofs
+                       (proof_id, candidate_id, scan_id, repo, target_commit, oracle_digest,
+                        surface, risk_class, outcome, vulnerability_confirmed, patch_status,
+                        record_json, record_hash, valid, created_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)""",
+                    (proof_id, candidate_id, scan_id, repo, target_commit,
+                     result.record.get("oracle_digest", ""),
+                     result.record.get("surface", ""), result.record.get("risk_class", ""),
+                     result.outcome.value,
+                     None if confirmed is None else int(confirmed),
+                     result.patch_status, record_json, record_hash,
+                     datetime.now(UTC).isoformat()),
+                )
+                await self._db.commit()
+            except Exception:
+                await self._db.rollback()
+                raise
+        return proof_id
+
+    async def get_security_proof(self, proof_id: str) -> dict | None:
+        cursor = await self._db.execute(
+            "SELECT * FROM security_proofs WHERE proof_id = ?", (proof_id,)
+        )
+        row = await cursor.fetchone()
+        if row is None:
+            return None
+        return dict(zip((column[0] for column in cursor.description), row, strict=True))
+
+    async def list_security_proofs(self, candidate_id: str) -> list[dict]:
+        cursor = await self._db.execute(
+            "SELECT * FROM security_proofs WHERE candidate_id = ? ORDER BY created_at",
+            (candidate_id,),
+        )
+        rows = await cursor.fetchall()
+        keys = [column[0] for column in cursor.description]
+        return [dict(zip(keys, row, strict=True)) for row in rows]
+
     async def close_security_candidate(
         self, candidate_id: str, *, status: CandidateStatus,
         reason_code: str, evidence_id: str | None = None,
@@ -581,6 +663,7 @@ class Memory:
                 candidate = await cursor.fetchone()
                 if candidate is None or candidate[0] not in {
                     CandidateStatus.DISCOVERED, CandidateStatus.INVESTIGATING,
+                    CandidateStatus.NEEDS_MANUAL_REVIEW,
                 }:
                     raise SecurityGateError("Candidate is missing or already closed")
                 if status in {CandidateStatus.CONFIRMED, CandidateStatus.RULED_OUT}:
@@ -764,14 +847,13 @@ class Memory:
             raise SecurityGateError("Blocked or inconclusive coverage requires a reason")
         cursor = await self._db.execute(
             """UPDATE scan_coverage SET outcome = ?, evidence_hash = ?, reason_code = ?,
-               updated_at = ? WHERE scan_id = ? AND surface = ? AND risk_class = ?
-               AND outcome = 'not_tested'""",
+               updated_at = ? WHERE scan_id = ? AND surface = ? AND risk_class = ?""",
             (outcome, evidence_hash, reason_code, datetime.now(UTC).isoformat(),
              scan_id, surface, risk_class),
         )
         await self._db.commit()
         if cursor.rowcount != 1:
-            raise SecurityGateError("Coverage entry missing or already resolved")
+            raise SecurityGateError("Coverage entry missing for this surface and risk class")
 
     async def get_coverage_summary(self, scan_id: str) -> CoverageSummary:
         cursor = await self._db.execute(
@@ -801,10 +883,10 @@ class Memory:
 
     async def security_candidate_has_semantic_proof(self, candidate_id: str) -> bool:
         cursor = await self._db.execute(
-            """SELECT 1 FROM security_candidates c JOIN security_evidence e
-               ON e.candidate_id = c.id AND e.target_commit = c.target_commit
+            """SELECT 1 FROM security_candidates c JOIN security_proofs p
+               ON p.candidate_id = c.id AND p.target_commit = c.target_commit
                WHERE c.id = ? AND c.status = 'CONFIRMED'
-                 AND e.kind = 'SEMANTIC_PROOF'""",
+                 AND p.valid = 1 AND p.vulnerability_confirmed = 1""",
             (candidate_id,),
         )
         return await cursor.fetchone() is not None

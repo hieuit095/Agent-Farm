@@ -54,11 +54,11 @@ async def test_threat_versions_and_coverage_are_persisted_without_false_clean(tm
             "scan-coverage", "/files/{name}", "traversal", CoverageOutcome.BLOCKED,
             reason_code="SANDBOX_UNAVAILABLE",
         )
-        with pytest.raises(SecurityGateError, match="already resolved"):
-            await memory.record_coverage(
-                "scan-coverage", "/orders/{id}", "idor", CoverageOutcome.TESTED,
-                evidence_hash="c" * 64,
-            )
+        # A later observation updates the same coverage cell instead of being rejected.
+        await memory.record_coverage(
+            "scan-coverage", "/orders/{id}", "idor", CoverageOutcome.TESTED,
+            evidence_hash="c" * 64,
+        )
     finally:
         await memory.close()
 
@@ -69,6 +69,12 @@ async def test_threat_versions_and_coverage_are_persisted_without_false_clean(tm
         assert (summary.tested, summary.blocked, summary.not_tested) == (1, 1, 2)
         assert not summary.complete
         assert "1 blocked" in summary.statement
+        cursor = await reopened._db.execute(
+            "SELECT evidence_hash FROM scan_coverage "
+            "WHERE scan_id = ? AND surface = ? AND risk_class = ?",
+            ("scan-coverage", "/orders/{id}", "idor"),
+        )
+        assert (await cursor.fetchone())[0] == "c" * 64
         assert (await reopened.get_threat_model("scan-coverage")).version == 2
     finally:
         await reopened.close()

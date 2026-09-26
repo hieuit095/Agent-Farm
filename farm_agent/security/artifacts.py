@@ -49,7 +49,10 @@ class ArtifactStore:
         if (ref.path.resolve().parent != self.root
                 or ref.path.name != f"{ref.digest}.json"):
             raise SecurityGateError("Oracle artifact is outside its protected store")
-        data = ref.path.read_bytes()
+        try:
+            data = ref.path.read_bytes()
+        except OSError as exc:
+            raise SecurityGateError("Canonical oracle artifact is missing") from exc
         if hashlib.sha256(data).hexdigest() != ref.digest:
             raise SecurityGateError("Canonical oracle artifact hash changed")
         try:

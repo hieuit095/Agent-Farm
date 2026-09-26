@@ -4,7 +4,7 @@ import hashlib
 import inspect
 import json
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict
@@ -76,6 +76,27 @@ class ProofResult:
     outcome: ProofOutcome
     reason: str
     evidence_hash: str
+    record: dict = field(default_factory=dict)
+
+    @property
+    def vulnerability_confirmed(self) -> bool | None:
+        """Whether the malicious phase reproduced impact (independent of a patch)."""
+        if self.outcome in {
+            ProofOutcome.VERIFIED, ProofOutcome.PATCH_FAILED, ProofOutcome.REGRESSION,
+        }:
+            return True
+        if self.outcome is ProofOutcome.NOT_TRIGGERED:
+            return False
+        return None
+
+    @property
+    def patch_status(self) -> str:
+        """Mitigation state of the after-deployment, kept separate from confirmation."""
+        return {
+            ProofOutcome.VERIFIED: "effective",
+            ProofOutcome.PATCH_FAILED: "failed",
+            ProofOutcome.REGRESSION: "regressed",
+        }.get(self.outcome, "unknown")
 
 
 def _json(response: HttpObservation) -> dict | None:
@@ -107,28 +128,49 @@ def _row_markers(response: HttpObservation) -> set[str] | None:
     return {row["marker"] for row in rows}
 
 
+_PHASES = ("benign_before", "malicious_before", "malicious_after", "benign_after")
+
+
+def _redacted_step(phase: str, probe: ProbeRequest, step: StepObservation) -> dict:
+    """Retrievable per-step observation with no headers, tokens or raw bodies."""
+    return {
+        "phase": phase,
+        "method": probe.method,
+        "url": probe.url,
+        "role": probe.role,
+        "impact": probe.impact,
+        "status": step.http.status_code,
+        "transport_error": step.http.transport_error,
+        "body_sha256": hashlib.sha256(step.http.body).hexdigest(),
+        "body_len": len(step.http.body),
+        "witness_hits": step.witness_hits,
+    }
+
+
 def evaluate_four_phase(
     spec: OracleSpec,
     steps: tuple[StepObservation, StepObservation, StepObservation, StepObservation],
     *, target_commit: str,
 ) -> ProofResult:
     a, b, c, d = steps
-    digest = evidence_hash(
-        target_commit=target_commit,
-        observation={
-            "oracle": spec.kind.value,
-            "oracle_digest": spec.digest,
-            "steps": [
-                {"status": step.http.status_code, "body_hex": step.http.body.hex(),
-                 "transport_error": step.http.transport_error,
-                 "witness_hits": step.witness_hits}
-                for step in steps
-            ],
-        },
-    )
+    record = {
+        "oracle": spec.kind.value,
+        "oracle_digest": spec.digest,
+        "target_commit": target_commit,
+        "surface": spec.surface,
+        "risk_class": spec.risk_class,
+        "owner_tenant": spec.owner_tenant,
+        "attacker_tenant": spec.attacker_tenant,
+        "object_id": spec.object_id,
+        "steps": [
+            _redacted_step(phase, getattr(spec, phase), step)
+            for phase, step in zip(_PHASES, steps, strict=True)
+        ],
+    }
+    digest = evidence_hash(target_commit=target_commit, observation=record)
 
     def result(outcome: ProofOutcome, reason: str) -> ProofResult:
-        return ProofResult(outcome, reason, digest)
+        return ProofResult(outcome, reason, digest, record)
 
     if any(step.http.transport_error or step.http.status_code is None for step in steps):
         return result(ProofOutcome.INCONCLUSIVE, "Transport or response-limit error")

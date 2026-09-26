@@ -27,7 +27,7 @@ from farm_agent.orchestrator.pipeline import FarmAgentPipeline
         ("unknown_sha", "OPEN_PROOF_GAP", False),
         ("baseline_skipped", "OPEN_PROOF_GAP", False),
         ("source_missing", "OPEN_PROOF_GAP", False),
-        ("triggered", "CONFIRMED", True),
+        ("triggered", "NEEDS_MANUAL_REVIEW", True),
     ],
 )
 async def test_standard_proof_gate(tmp_path, case, expected_status, generator_called):

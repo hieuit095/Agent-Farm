@@ -5,7 +5,7 @@ from collections.abc import Callable
 from farm_agent.security.artifacts import ArtifactRef, ArtifactStore
 from farm_agent.security.closure import ClosureService
 from farm_agent.security.coverage import CoverageOutcome
-from farm_agent.security.oracles import ProofOutcome, ProofResult, run_four_phase
+from farm_agent.security.oracles import ProofResult, run_four_phase
 from farm_agent.security.state import CandidateStatus, EvidenceKind, SecurityGateError
 from farm_agent.security.transport import ScopedHttpClient
 
@@ -23,11 +23,9 @@ class SemanticVerifier:
         candidate = await self._memory.get_security_candidate(candidate_id)
         if candidate is None or candidate["status"] not in {
             CandidateStatus.DISCOVERED, CandidateStatus.INVESTIGATING,
-            CandidateStatus.CONFIRMED,
+            CandidateStatus.CONFIRMED, CandidateStatus.NEEDS_MANUAL_REVIEW,
         }:
             raise SecurityGateError("Candidate is missing or cannot be verified")
-        if await self._memory.security_candidate_has_semantic_proof(candidate_id):
-            raise SecurityGateError("Candidate already has semantic impact proof")
         scan_id = candidate["scan_id"]
         manifest = await self._memory.get_scan_manifest(scan_id)
         threat_model = await self._memory.get_threat_model(scan_id)
@@ -45,9 +43,11 @@ class SemanticVerifier:
                 role_headers=role_headers, witness_counter=witness_counter,
             )
         store.load(artifact)  # Fail closed if the oracle changed while requests were running.
-        if result.outcome in {
-            ProofOutcome.VERIFIED, ProofOutcome.PATCH_FAILED, ProofOutcome.REGRESSION,
-        }:
+        await self._memory.store_security_proof(
+            candidate_id=candidate_id, scan_id=scan_id, repo=candidate["repo"],
+            target_commit=candidate["target_commit"], result=result,
+        )
+        if result.vulnerability_confirmed:
             evidence_id = await self._memory.add_security_evidence(
                 candidate_id=candidate_id, kind=EvidenceKind.SEMANTIC_PROOF,
                 content_hash=result.evidence_hash,

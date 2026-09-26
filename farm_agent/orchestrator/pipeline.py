@@ -1954,8 +1954,8 @@ class FarmAgentPipeline:
                         content_hash=proof_hash, target_commit=target_commit,
                     )
                     await ClosureService(self._memory).close(
-                        security_candidate_id, CandidateStatus.CONFIRMED,
-                        reason_code="POC_TRIGGERED", evidence_id=proof_id,
+                        security_candidate_id, CandidateStatus.NEEDS_MANUAL_REVIEW,
+                        reason_code="SEMANTIC_PROOF_PENDING", evidence_id=proof_id,
                     )
                     finding.metadata["security_candidate_id"] = security_candidate_id
                     finding.metadata["security_target_commit"] = target_commit

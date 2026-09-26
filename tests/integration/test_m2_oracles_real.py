@@ -805,12 +805,12 @@ async def test_operator_cli_semantic_negatives_close_open_proof_gap(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_operator_cli_repeat_verification_is_fail_closed(tmp_path):
+async def test_operator_cli_reverification_is_budget_bounded(tmp_path):
     witness_server, witness_thread, witness_url, _ = _start_witness()
     side_effect = tmp_path / "unused"
     before_server, before_thread, before = _start_service("vulnerable", witness_url, side_effect)
     after_server, after_thread, after = _start_service("fixed", witness_url, side_effect)
-    db_path, command = _cli_harness(tmp_path, _policy(before, after))
+    db_path, command = _cli_harness(tmp_path, _policy(before, after, max_requests=8))
     spec_path = _write_spec(tmp_path, _spec(OracleKind.IDOR, before, after))
     headers = _headers_file(tmp_path / "headers.json")
     try:
@@ -821,21 +821,21 @@ async def test_operator_cli_repeat_verification_is_fail_closed(tmp_path):
         )
         candidate_id = json.loads(candidate.stdout)["candidate_id"]
         digest = json.loads(command("register-oracle", str(spec_path)).stdout)["digest"]
-        first = command(
-            "verify-candidate", candidate_id, "--oracle-digest", digest,
-            "--role-headers-file", str(headers),
-        )
-        assert first.returncode == 0, first.stderr
-        used = _requests_used(db_path, scan_id)
-        assert used == 4
-        second = command(
-            "verify-candidate", candidate_id, "--oracle-digest", digest,
-            "--role-headers-file", str(headers),
-        )
-        assert second.returncode == 1 and "already has semantic" in second.stderr
-        assert _requests_used(db_path, scan_id) == used
+        for expected_used in (4, 8):
+            verified = command(
+                "verify-candidate", candidate_id, "--oracle-digest", digest,
+                "--role-headers-file", str(headers),
+            )
+            assert verified.returncode == 0, verified.stderr
+            assert _requests_used(db_path, scan_id) == expected_used
         assert _candidate_status(db_path, candidate_id) == "CONFIRMED"
-        assert _candidate_evidence(db_path, candidate_id) == ["SEMANTIC_PROOF"]
+        assert _candidate_evidence(db_path, candidate_id) == ["SEMANTIC_PROOF"] * 2
+        third = command(
+            "verify-candidate", candidate_id, "--oracle-digest", digest,
+            "--role-headers-file", str(headers),
+        )
+        assert third.returncode == 1 and "budget exhausted" in third.stderr
+        assert _requests_used(db_path, scan_id) == 8
         memory = Memory(db_path)
         await memory.init()
         try:
@@ -848,6 +848,9 @@ async def test_operator_cli_repeat_verification_is_fail_closed(tmp_path):
                         memory, finding, "owner/repo",
                         target_commit="e" * 40, channel=channel,
                     )
+            proofs = await memory.list_security_proofs(candidate_id)
+            assert [proof["valid"] for proof in proofs] == [1, 1]
+            assert all(proof["vulnerability_confirmed"] == 1 for proof in proofs)
         finally:
             await memory.close()
     finally:
