@@ -91,7 +91,8 @@ async def test_semantic_proof_is_retrievable_redacted_and_bound(tmp_path):
         proof = proofs[0]
         assert proof["valid"] == 1
         assert proof["vulnerability_confirmed"] == 1
-        assert proof["patch_status"] == "effective"
+        assert proof["patch_status"] == "unverified"
+        assert proof["after_endpoint"] == "blocked"
         assert proof["oracle_digest"] == artifact.digest
         assert proof["surface"] == "/idor" and proof["risk_class"] == "idor"
 

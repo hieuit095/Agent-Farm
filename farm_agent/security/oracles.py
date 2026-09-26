@@ -6,6 +6,7 @@ import json
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import StrEnum
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from pydantic import BaseModel, ConfigDict
 
@@ -90,13 +91,18 @@ class ProofResult:
         return None
 
     @property
-    def patch_status(self) -> str:
-        """Mitigation state of the after-deployment, kept separate from confirmation."""
+    def after_endpoint(self) -> str:
+        """What the supplied after-endpoint did; a patch is not implied by this."""
         return {
-            ProofOutcome.VERIFIED: "effective",
-            ProofOutcome.PATCH_FAILED: "failed",
+            ProofOutcome.VERIFIED: "blocked",
+            ProofOutcome.PATCH_FAILED: "exposed",
             ProofOutcome.REGRESSION: "regressed",
-        }.get(self.outcome, "unknown")
+        }.get(self.outcome, "inconclusive")
+
+    @property
+    def patch_status(self) -> str:
+        """M2 observes endpoints only; a patch verdict requires the M5 fix contract."""
+        return "unverified"
 
 
 def _json(response: HttpObservation) -> dict | None:
@@ -131,12 +137,23 @@ def _row_markers(response: HttpObservation) -> set[str] | None:
 _PHASES = ("benign_before", "malicious_before", "malicious_after", "benign_after")
 
 
+def _redacted_url(url: str) -> str:
+    """Keep scheme/host/port/path and query keys; drop userinfo, values and fragment."""
+    parsed = urlsplit(url)
+    host = parsed.hostname or ""
+    netloc = host if parsed.port is None else f"{host}:{parsed.port}"
+    query = urlencode([
+        (key, "REDACTED") for key, _ in parse_qsl(parsed.query, keep_blank_values=True)
+    ])
+    return urlunsplit((parsed.scheme, netloc, parsed.path, query, ""))
+
+
 def _redacted_step(phase: str, probe: ProbeRequest, step: StepObservation) -> dict:
     """Retrievable per-step observation with no headers, tokens or raw bodies."""
     return {
         "phase": phase,
         "method": probe.method,
-        "url": probe.url,
+        "url": _redacted_url(probe.url),
         "role": probe.role,
         "impact": probe.impact,
         "status": step.http.status_code,

@@ -123,6 +123,8 @@ CREATE TABLE IF NOT EXISTS security_proofs (
     outcome                 TEXT NOT NULL,
     vulnerability_confirmed INTEGER,
     patch_status            TEXT NOT NULL,
+    after_endpoint          TEXT NOT NULL DEFAULT 'inconclusive',
+    evidence_hash           TEXT NOT NULL DEFAULT '',
     record_json             TEXT NOT NULL,
     record_hash             TEXT NOT NULL,
     valid                   INTEGER NOT NULL DEFAULT 1,
@@ -288,6 +290,20 @@ class Memory:
             except Exception as e:
                 logger.error("Unexpected DB error during migration: %s", e)
                 raise
+
+        for col in (
+            "after_endpoint TEXT NOT NULL DEFAULT 'inconclusive'",
+            "evidence_hash TEXT NOT NULL DEFAULT ''",
+        ):
+            try:
+                await self._db.execute(f"ALTER TABLE security_proofs ADD COLUMN {col}")
+                await self._db.commit()
+            except sqlite3.OperationalError as e:
+                if "duplicate column name" in str(e).lower():
+                    logger.debug("Schema migration skipped: %s", e)
+                else:
+                    logger.error("Schema migration failed critically: %s", e)
+                    raise
 
         await self.cleanup_old_records()
         logger.info("Memory initialized at %s", self._db_path)
@@ -608,14 +624,15 @@ class Memory:
                     """INSERT INTO security_proofs
                        (proof_id, candidate_id, scan_id, repo, target_commit, oracle_digest,
                         surface, risk_class, outcome, vulnerability_confirmed, patch_status,
-                        record_json, record_hash, valid, created_at)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)""",
+                        after_endpoint, evidence_hash, record_json, record_hash, valid, created_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)""",
                     (proof_id, candidate_id, scan_id, repo, target_commit,
                      result.record.get("oracle_digest", ""),
                      result.record.get("surface", ""), result.record.get("risk_class", ""),
                      result.outcome.value,
                      None if confirmed is None else int(confirmed),
-                     result.patch_status, record_json, record_hash,
+                     result.patch_status, result.after_endpoint, result.evidence_hash,
+                     record_json, record_hash,
                      datetime.now(UTC).isoformat()),
                 )
                 await self._db.commit()
@@ -881,15 +898,77 @@ class Memory:
         )
         return await cursor.fetchone() is not None
 
+    @staticmethod
+    def _canonical_record(record_json: str, record_hash: str) -> dict | None:
+        """Return the record only when its canonical hash matches the stored hash."""
+        try:
+            canonical = json.dumps(
+                json.loads(record_json), sort_keys=True,
+                separators=(",", ":"), ensure_ascii=False,
+            )
+        except (TypeError, ValueError):
+            return None
+        if hashlib.sha256(canonical.encode("utf-8")).hexdigest() != record_hash:
+            return None
+        return json.loads(canonical)
+
     async def security_candidate_has_semantic_proof(self, candidate_id: str) -> bool:
+        """True only for a self-consistent proof bound to this candidate's evidence."""
         cursor = await self._db.execute(
-            """SELECT 1 FROM security_candidates c JOIN security_proofs p
-               ON p.candidate_id = c.id AND p.target_commit = c.target_commit
-               WHERE c.id = ? AND c.status = 'CONFIRMED'
-                 AND p.valid = 1 AND p.vulnerability_confirmed = 1""",
+            "SELECT scan_id, repo, target_commit, status, closing_evidence_id "
+            "FROM security_candidates WHERE id = ?",
             (candidate_id,),
         )
-        return await cursor.fetchone() is not None
+        candidate = await cursor.fetchone()
+        if candidate is None or candidate[3] != CandidateStatus.CONFIRMED:
+            return False
+        scan_id, repo, commit, _status, closing_id = candidate
+        if not closing_id:
+            return False
+        cursor = await self._db.execute(
+            "SELECT kind, content_hash, candidate_id, target_commit "
+            "FROM security_evidence WHERE id = ?",
+            (closing_id,),
+        )
+        evidence = await cursor.fetchone()
+        if (evidence is None or evidence[0] != EvidenceKind.SEMANTIC_PROOF
+                or evidence[2] != candidate_id or evidence[3] != commit):
+            return False
+        evidence_hash = evidence[1]
+        manifest = await self.get_scan_manifest(scan_id)
+        if (manifest is None or manifest.scope.repo != repo
+                or manifest.scope.target_commit != commit):
+            return False
+        threat = await self.get_threat_model(scan_id)
+        if threat is None or threat.target_commit != commit:
+            return False
+        cursor = await self._db.execute(
+            """SELECT candidate_id, scan_id, repo, target_commit, oracle_digest, surface,
+                      risk_class, evidence_hash, record_json, record_hash
+               FROM security_proofs
+               WHERE candidate_id = ? AND valid = 1 AND vulnerability_confirmed = 1""",
+            (candidate_id,),
+        )
+        for row in await cursor.fetchall():
+            (p_candidate, p_scan, p_repo, p_commit, p_oracle, p_surface,
+             p_risk, p_evidence_hash, p_record_json, p_record_hash) = row
+            if (p_candidate != candidate_id or p_scan != scan_id or p_repo != repo
+                    or p_commit != commit or p_evidence_hash != evidence_hash):
+                continue
+            if p_surface not in manifest.scope.surfaces:
+                continue
+            if p_risk not in manifest.scope.risk_classes:
+                continue
+            record = self._canonical_record(p_record_json, p_record_hash)
+            if record is None:
+                continue
+            if (record.get("oracle_digest") != p_oracle
+                    or record.get("surface") != p_surface
+                    or record.get("risk_class") != p_risk
+                    or record.get("target_commit") != commit):
+                continue
+            return True
+        return False
 
     async def record_scan_event(
         self, *, scan_id: str, repo: str, pipeline: str, stage: str,
