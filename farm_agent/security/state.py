@@ -7,6 +7,7 @@ from enum import StrEnum
 class CandidateStatus(StrEnum):
     DISCOVERED = "DISCOVERED"
     INVESTIGATING = "INVESTIGATING"
+    DEFERRED = "DEFERRED"
     CONFIRMED = "CONFIRMED"
     RULED_OUT = "RULED_OUT"
     OPEN_PROOF_GAP = "OPEN_PROOF_GAP"

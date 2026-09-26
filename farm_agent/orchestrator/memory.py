@@ -100,6 +100,8 @@ CREATE TABLE IF NOT EXISTS security_candidates (
     status         TEXT NOT NULL DEFAULT 'DISCOVERED',
     reason_code    TEXT,
     closing_evidence_id TEXT,
+    root_cause_fingerprint TEXT,
+    defer_reason   TEXT,
     created_at     TEXT NOT NULL,
     updated_at     TEXT NOT NULL
 );
@@ -109,6 +111,7 @@ CREATE TABLE IF NOT EXISTS security_evidence (
     kind          TEXT NOT NULL,
     content_hash  TEXT NOT NULL,
     target_commit TEXT NOT NULL,
+    origin        TEXT NOT NULL DEFAULT 'unknown',
     created_at    TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS security_proofs (
@@ -304,6 +307,28 @@ class Memory:
                 else:
                     logger.error("Schema migration failed critically: %s", e)
                     raise
+
+        for table, col in (
+            ("security_candidates", "root_cause_fingerprint TEXT"),
+            ("security_candidates", "defer_reason TEXT"),
+            ("security_evidence", "origin TEXT NOT NULL DEFAULT 'unknown'"),
+        ):
+            try:
+                await self._db.execute(f"ALTER TABLE {table} ADD COLUMN {col}")
+                await self._db.commit()
+            except sqlite3.OperationalError as e:
+                if "duplicate column name" in str(e).lower():
+                    logger.debug("Schema migration skipped: %s", e)
+                else:
+                    logger.error("Schema migration failed critically: %s", e)
+                    raise
+
+        await self._db.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_security_candidates_root_cause "
+            "ON security_candidates(repo, target_commit, root_cause_fingerprint) "
+            "WHERE root_cause_fingerprint IS NOT NULL"
+        )
+        await self._db.commit()
 
         await self.cleanup_old_records()
         logger.info("Memory initialized at %s", self._db_path)
@@ -557,10 +582,38 @@ class Memory:
 
     async def create_security_candidate(
         self, *, scan_id: str, repo: str, target_commit: str,
-        file_path: str, title: str,
+        file_path: str, title: str, root_cause_fingerprint: str | None = None,
     ) -> str:
+        """Admit one candidate. Idempotent when a root-cause fingerprint is given."""
         candidate_id = uuid.uuid4().hex
         now = datetime.now(UTC).isoformat()
+        if root_cause_fingerprint:
+            async with self._security_lock:
+                await self._db.execute("BEGIN IMMEDIATE")
+                try:
+                    cursor = await self._db.execute(
+                        "SELECT id FROM security_candidates "
+                        "WHERE repo = ? AND target_commit = ? "
+                        "AND root_cause_fingerprint = ?",
+                        (repo, target_commit, root_cause_fingerprint),
+                    )
+                    row = await cursor.fetchone()
+                    if row is not None:
+                        await self._db.commit()
+                        return row[0]
+                    await self._db.execute(
+                        """INSERT INTO security_candidates
+                           (id, scan_id, repo, target_commit, file_path, title, status,
+                            root_cause_fingerprint, created_at, updated_at)
+                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                        (candidate_id, scan_id, repo, target_commit, file_path, title,
+                         CandidateStatus.DISCOVERED, root_cause_fingerprint, now, now),
+                    )
+                    await self._db.commit()
+                    return candidate_id
+                except Exception:
+                    await self._db.rollback()
+                    raise
         await self._db.execute(
             """INSERT INTO security_candidates
                (id, scan_id, repo, target_commit, file_path, title, status,
@@ -572,9 +625,58 @@ class Memory:
         await self._db.commit()
         return candidate_id
 
+    async def defer_security_candidate(self, candidate_id: str, *, reason_code: str) -> None:
+        """Park an uninvestigated candidate without closing it."""
+        if not reason_code:
+            raise SecurityGateError("Deferral requires a reason code")
+        cursor = await self._db.execute(
+            "UPDATE security_candidates SET status = ?, defer_reason = ?, updated_at = ? "
+            "WHERE id = ? AND status IN ('DISCOVERED', 'DEFERRED')",
+            (CandidateStatus.DEFERRED, reason_code, datetime.now(UTC).isoformat(), candidate_id),
+        )
+        await self._db.commit()
+        if cursor.rowcount != 1:
+            raise SecurityGateError("Candidate is missing or cannot be deferred")
+
+    async def mark_candidate_investigating(self, candidate_id: str) -> None:
+        cursor = await self._db.execute(
+            "UPDATE security_candidates SET status = ?, updated_at = ? "
+            "WHERE id = ? AND status IN ('DISCOVERED', 'DEFERRED')",
+            (CandidateStatus.INVESTIGATING, datetime.now(UTC).isoformat(), candidate_id),
+        )
+        await self._db.commit()
+        if cursor.rowcount != 1:
+            raise SecurityGateError("Candidate is missing or already closed")
+
+    async def list_candidate_fingerprints(self, repo: str, target_commit: str) -> set[str]:
+        """Every root-cause fingerprint already admitted for this repo/commit."""
+        cursor = await self._db.execute(
+            "SELECT root_cause_fingerprint FROM security_candidates "
+            "WHERE repo = ? AND target_commit = ? AND root_cause_fingerprint IS NOT NULL",
+            (repo, target_commit),
+        )
+        return {row[0] for row in await cursor.fetchall()}
+
+    async def list_pending_security_candidates(
+        self, repo: str, target_commit: str,
+    ) -> list[dict]:
+        """Durable, resumable queue of admitted-but-uninvestigated candidates."""
+        cursor = await self._db.execute(
+            """SELECT id, scan_id, file_path, title, status, root_cause_fingerprint,
+                      defer_reason
+               FROM security_candidates
+               WHERE repo = ? AND target_commit = ?
+                 AND status IN ('DISCOVERED', 'DEFERRED')
+               ORDER BY created_at""",
+            (repo, target_commit),
+        )
+        rows = await cursor.fetchall()
+        keys = [column[0] for column in cursor.description]
+        return [dict(zip(keys, row, strict=True)) for row in rows]
+
     async def add_security_evidence(
         self, *, candidate_id: str, kind: EvidenceKind,
-        content_hash: str, target_commit: str,
+        content_hash: str, target_commit: str, origin: str = "unknown",
     ) -> str:
         evidence_id = uuid.uuid4().hex
         async with self._security_lock:
@@ -586,10 +688,10 @@ class Memory:
                 raise SecurityGateError("Evidence target does not match the candidate")
             await self._db.execute(
                 """INSERT INTO security_evidence
-                   (id, candidate_id, kind, content_hash, target_commit, created_at)
-                   VALUES (?, ?, ?, ?, ?, ?)""",
+                   (id, candidate_id, kind, content_hash, target_commit, origin, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
                 (evidence_id, candidate_id, kind, content_hash,
-                 target_commit, datetime.now(UTC).isoformat()),
+                 target_commit, origin, datetime.now(UTC).isoformat()),
             )
             await self._db.commit()
         return evidence_id
@@ -680,7 +782,7 @@ class Memory:
                 candidate = await cursor.fetchone()
                 if candidate is None or candidate[0] not in {
                     CandidateStatus.DISCOVERED, CandidateStatus.INVESTIGATING,
-                    CandidateStatus.NEEDS_MANUAL_REVIEW,
+                    CandidateStatus.DEFERRED, CandidateStatus.NEEDS_MANUAL_REVIEW,
                 }:
                     raise SecurityGateError("Candidate is missing or already closed")
                 if status in {CandidateStatus.CONFIRMED, CandidateStatus.RULED_OUT}:

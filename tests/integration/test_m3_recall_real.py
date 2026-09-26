@@ -92,16 +92,19 @@ async def test_same_file_distinct_findings_survive_investigation(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_investigation_limit_is_separate_from_publication_cap(tmp_path):
+async def test_all_findings_admitted_with_active_limit_and_deferral(tmp_path):
     memory = await _run(tmp_path, "limit", 2, [])
     try:
-        cursor = await memory._db.execute("SELECT COUNT(*) FROM security_candidates")
-        # Bounded by max_candidates_investigated=2, not by max_prs=1.
-        assert (await cursor.fetchone())[0] == 2
+        cursor = await memory._db.execute(
+            "SELECT status, COUNT(*) FROM security_candidates GROUP BY status"
+        )
+        counts = dict(await cursor.fetchall())
+        assert sum(counts.values()) == 3, "every distinct finding must be admitted durably"
+        assert counts.get("DEFERRED") == 1, "surplus work must be visible and resumable"
         events = await memory._db.execute(
-            "SELECT reason_code FROM scan_events "
+            "SELECT outcome, count, reason_code FROM scan_events "
             "WHERE repo = 'owner/repo' AND stage = 'candidate_limit'"
         )
-        assert ("INVESTIGATION_LIMIT",) in await events.fetchall()
+        assert ("admitted", 3, "INVESTIGATION_LIMIT") in await events.fetchall()
     finally:
         await memory.close()

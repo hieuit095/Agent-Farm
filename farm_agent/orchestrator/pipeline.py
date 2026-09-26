@@ -46,6 +46,7 @@ from farm_agent.orchestrator.memory import Memory
 from farm_agent.pr.manager import PRManager
 from farm_agent.security.closure import ClosureService
 from farm_agent.security.evidence import evidence_hash
+from farm_agent.security.identity import root_cause_identity
 from farm_agent.security.scope import manifest_for_scan, matching_program
 from farm_agent.security.threat_model import ThreatModel
 from farm_agent.security.state import CandidateStatus, EvidenceKind, PoCStatus, SecurityGateError
@@ -1079,6 +1080,46 @@ class FarmAgentPipeline:
 
     # ── Internal ───────────────────────────────────────────────────────────
 
+    async def _admission_queue(
+        self, repo: Repository, target_commit: str | None,
+        validated_findings: list[Finding], scan_id: str,
+    ) -> list[dict]:
+        """Resume durable pending candidates, then add this run's distinct findings."""
+        queue: list[dict] = []
+        seen: set[str] = set()
+        if self._memory is not None and target_commit:
+            # Never re-queue a root cause already admitted (including closed ones).
+            seen |= await self._memory.list_candidate_fingerprints(
+                repo.full_name, target_commit,
+            )
+            for row in await self._memory.list_pending_security_candidates(
+                repo.full_name, target_commit,
+            ):
+                fingerprint = row["root_cause_fingerprint"] or f"row:{row['id']}"
+                seen.add(fingerprint)
+                queue.append({
+                    "finding": Finding(
+                        type=ContributionType.SECURITY_FIX, severity=Severity.MEDIUM,
+                        title=row["title"], description="", file_path=row["file_path"],
+                    ),
+                    "fingerprint": fingerprint,
+                    "candidate_id": row["id"],
+                })
+        for finding in validated_findings:
+            if not target_commit or not finding.file_path:
+                queue.append(
+                    {"finding": finding, "fingerprint": None, "candidate_id": None}
+                )
+                continue
+            fingerprint = root_cause_identity(finding, target_commit=target_commit)
+            if fingerprint in seen:
+                continue
+            seen.add(fingerprint)
+            queue.append(
+                {"finding": finding, "fingerprint": fingerprint, "candidate_id": None}
+            )
+        return queue
+
     async def _process_repo(
         self,
         repo: Repository,
@@ -1601,11 +1642,9 @@ class FarmAgentPipeline:
             analysis.analysis_duration_sec,
         )
 
-        # Investigation is bounded by its own expensive-analysis limit, not by the
-        # publication cap, so distinct same-repository candidates are not dropped.
-        candidate_findings = analysis.top_findings[
-            : self.config.pipeline.max_candidates_investigated
-        ]
+        # Admit every distinct detected finding at the pinned SHA. Active
+        # investigation is bounded separately (below); nothing is discarded here.
+        candidate_findings = analysis.top_findings
         await self._m0_event(
             scan_id=scan_id, repo=repo.full_name, pipeline="standard",
             stage="analysis", outcome="candidates", count=len(analysis.findings),
@@ -1613,10 +1652,11 @@ class FarmAgentPipeline:
         )
         await self._m0_event(
             scan_id=scan_id, repo=repo.full_name, pipeline="standard",
-            stage="candidate_limit", outcome="selected", count=len(candidate_findings),
+            stage="candidate_limit", outcome="admitted", count=len(candidate_findings),
             reason_code=(
                 "INVESTIGATION_LIMIT"
-                if len(candidate_findings) < len(analysis.findings) else None
+                if len(candidate_findings) > self.config.pipeline.max_candidates_investigated
+                else None
             ),
         )
 
@@ -1626,7 +1666,9 @@ class FarmAgentPipeline:
         # Deduplicate file paths across all findings we'll process
         file_paths_to_fetch = []
         for finding in candidate_findings:
-            if finding.file_path and finding.file_path not in relevant_files:
+            if (finding.file_path and finding.file_path not in file_paths_to_fetch
+                    and len(file_paths_to_fetch)
+                    < self.config.pipeline.max_candidates_investigated):
                 file_paths_to_fetch.append(finding.file_path)
 
         # Strict GitHub API semaphore — keep LOW to avoid Secondary Rate Limits.
@@ -1776,20 +1818,63 @@ class FarmAgentPipeline:
             stage="appraisal", outcome="survived", count=len(surviving_findings),
         )
 
-        # Generate contributions for validated findings
-        for finding in validated_findings:
+        # Durable, resumable admission: every distinct finding becomes a candidate
+        # at this pinned SHA. Only a bounded number are investigated now; the rest
+        # stay DEFERRED with a coverage reason and resume on the next run.
+        investigation_limit = max(1, self.config.pipeline.max_candidates_investigated)
+        queue = await self._admission_queue(
+            repo, target_commit, validated_findings, scan_id,
+        )
+        active, deferred = queue[:investigation_limit], queue[investigation_limit:]
+
+        for entry in deferred:
+            if entry["candidate_id"] is None:
+                try:
+                    entry["candidate_id"] = await self._memory.create_security_candidate(
+                        scan_id=scan_id, repo=repo.full_name,
+                        target_commit=target_commit or "unknown",
+                        file_path=entry["finding"].file_path, title=entry["finding"].title,
+                        root_cause_fingerprint=entry["fingerprint"],
+                    )
+                except Exception:
+                    logger.exception("Could not admit deferred candidate")
+                    continue
+            try:
+                await self._memory.defer_security_candidate(
+                    entry["candidate_id"], reason_code="INVESTIGATION_DEFERRED",
+                )
+            except Exception:
+                logger.debug("Candidate already resolved before deferral")
+            await self._m0_event(
+                scan_id=scan_id, repo=repo.full_name, pipeline="standard",
+                stage="investigation", outcome="deferred", count=1,
+                reason_code="INVESTIGATION_DEFERRED",
+            )
+        await self._m0_event(
+            scan_id=scan_id, repo=repo.full_name, pipeline="standard",
+            stage="investigation", outcome="active", count=len(active),
+            reason_code="INVESTIGATION_LIMIT" if deferred else None,
+        )
+
+        # Generate contributions for the active investigation set
+        for entry in active:
+            finding = entry["finding"]
             candidate_id = self._m0_candidate_id(repo.full_name, finding)
-            security_candidate_id = None
+            security_candidate_id = entry["candidate_id"]
             if finding.type == ContributionType.SECURITY_FIX:
                 if self._memory is None:
                     logger.error("Security candidate store unavailable; skipping %s", finding.title)
                     continue
                 try:
-                    security_candidate_id = await self._memory.create_security_candidate(
-                        scan_id=scan_id, repo=repo.full_name,
-                        target_commit=target_commit or "unknown",
-                        file_path=finding.file_path, title=finding.title,
-                    )
+                    if security_candidate_id is None:
+                        security_candidate_id = await self._memory.create_security_candidate(
+                            scan_id=scan_id, repo=repo.full_name,
+                            target_commit=target_commit or "unknown",
+                            file_path=finding.file_path, title=finding.title,
+                            root_cause_fingerprint=entry["fingerprint"],
+                        )
+                    else:
+                        await self._memory.mark_candidate_investigating(security_candidate_id)
                 except Exception:
                     logger.exception("Could not register security candidate; skipping fix")
                     continue
