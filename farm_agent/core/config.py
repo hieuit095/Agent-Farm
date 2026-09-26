@@ -192,6 +192,10 @@ class PipelineConfig(BaseModel):
     # Cooldown period (seconds) when a 429 rate-limit is hit during parallel execution.
     # Concurrency is reduced to 1 for this duration, then ramped back up.
     rate_limit_cooldown_sec: int = 300  # 5 minutes
+    # Investigation breadth (expensive analysis). Kept separate from the PR
+    # publication cap so a second distinct flaw in the same repository/file is
+    # investigated rather than silently dropped.
+    max_candidates_investigated: int = 25
 
 
 class NotificationConfig(BaseModel):

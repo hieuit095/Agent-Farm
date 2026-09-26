@@ -1601,8 +1601,11 @@ class FarmAgentPipeline:
             analysis.analysis_duration_sec,
         )
 
-        candidate_limit = max_prs if not allow_duplicate_prs else max(max_prs, 4)
-        candidate_findings = analysis.top_findings[:candidate_limit]
+        # Investigation is bounded by its own expensive-analysis limit, not by the
+        # publication cap, so distinct same-repository candidates are not dropped.
+        candidate_findings = analysis.top_findings[
+            : self.config.pipeline.max_candidates_investigated
+        ]
         await self._m0_event(
             scan_id=scan_id, repo=repo.full_name, pipeline="standard",
             stage="analysis", outcome="candidates", count=len(analysis.findings),
@@ -1611,7 +1614,10 @@ class FarmAgentPipeline:
         await self._m0_event(
             scan_id=scan_id, repo=repo.full_name, pipeline="standard",
             stage="candidate_limit", outcome="selected", count=len(candidate_findings),
-            reason_code="MAX_PRS_LIMIT" if len(candidate_findings) < len(analysis.findings) else None,
+            reason_code=(
+                "INVESTIGATION_LIMIT"
+                if len(candidate_findings) < len(analysis.findings) else None
+            ),
         )
 
         # Build context for generation — fetch files for all candidate findings
@@ -1688,7 +1694,6 @@ class FarmAgentPipeline:
             # Filter out findings that overlap with previously submitted PRs
             # Check BOTH local memory AND GitHub API for existing PRs
             past_titles_lower: set[str] = set()
-            past_file_paths: set[str] = set()
 
             # 1) Local memory
             past_prs = await self._memory.get_repo_prs(repo.full_name)
@@ -1702,18 +1707,6 @@ class FarmAgentPipeline:
                 )
                 for gpr in github_prs:
                     past_titles_lower.add(gpr.get("title", "").lower())
-                    # Extract file paths from branch name (farm_agent branches encode the topic)
-                    head = gpr.get("head", {})
-                    branch_label = head.get("label", "")
-                    if "farm_agent/" in branch_label:
-                        past_titles_lower.add(gpr.get("title", "").lower())
-                    # Track all recently-targeted file info from PR body
-                    body = gpr.get("body", "") or ""
-                    # Extract file paths mentioned in PR bodies (e.g. `src/foo/bar.ts`)
-                    import re
-
-                    for match in re.findall(r"`(src/[^\s`]+\.\w+)`", body):
-                        past_file_paths.add(match)
             except Exception:
                 logger.debug("Could not fetch GitHub PRs for dedup, using memory only")
 
@@ -1721,22 +1714,12 @@ class FarmAgentPipeline:
             filtered_findings = []
             for finding in candidate_findings:
                 title_lower = finding.title.lower()
-                # Check title similarity
-                is_title_dup = any(_titles_similar(title_lower, pt) for pt in past_titles_lower)
-                # Check if same file was already targeted
-                is_file_dup = finding.file_path in past_file_paths if finding.file_path else False
-
-                if is_title_dup:
+                # Only title similarity against published PRs is a duplicate here;
+                # sharing a file with an earlier PR never drops a distinct finding.
+                if any(_titles_similar(title_lower, pt) for pt in past_titles_lower):
                     logger.info(
                         "⏭️ Skipping duplicate finding: %s (similar PR exists)",
                         finding.title,
-                    )
-                    continue
-                if is_file_dup:
-                    logger.info(
-                        "⏭️ Skipping finding on already-targeted file: %s → %s",
-                        finding.title,
-                        finding.file_path,
                     )
                     continue
                 filtered_findings.append(finding)
@@ -1770,24 +1753,10 @@ class FarmAgentPipeline:
             stage="validation", outcome="survived", count=len(validated_findings),
         )
 
-        # Limit to max 2 findings per repo to avoid spamming
-        if len(validated_findings) > 2:
-            logger.info(
-                "📉 Limiting to 2 findings per repo (had %d)",
-                len(validated_findings),
-            )
-            validated_findings = validated_findings[:2]
-            await self._m0_event(
-                scan_id=scan_id, repo=repo.full_name, pipeline="standard",
-                stage="validated_limit", outcome="selected", count=2,
-                reason_code="TWO_FINDING_LIMIT",
-            )
-
         logger.info(
-            "🔎 Validated %d/%d findings (filtered %d false positives)",
+            "🔎 Validated %d of %d candidate findings",
             len(validated_findings),
-            min(len(candidate_findings), max_prs),
-            min(len(candidate_findings), max_prs) - len(validated_findings),
+            len(candidate_findings),
         )
 
         # Filter findings via Layer 1 Appraiser before generating contributions
