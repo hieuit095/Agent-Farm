@@ -211,3 +211,121 @@ async def test_candidate_cannot_borrow_another_candidates_proof(tmp_path):
         assert not await memory.security_candidate_has_semantic_proof(ids[1])
     finally:
         await memory.close()
+
+
+def _structural(title, *, actor="unauthenticated", resource=FILE, sink="src/app.py:10"):
+    return Finding(
+        type=ContributionType.SECURITY_FIX, severity=Severity.HIGH, title=title,
+        description="cross tenant read", file_path=FILE, line_start=10,
+        impact_level=ImpactLevel.HIGH,
+        metadata={"actor": actor, "resource": resource, "sink": sink},
+    )
+
+
+def test_conflicting_structure_stays_distinct_and_unknowns_do_not_merge():
+    common = dict(
+        type=ContributionType.SECURITY_FIX, title="Missing authorization check",
+        severity=Severity.HIGH, description="cross tenant read",
+        file_path=FILE, line_start=10, impact_level=ImpactLevel.HIGH,
+    )
+    first = Finding(
+        **common,
+        metadata={"actor": "owner", "resource": "order:1", "sink": "db:orders"},
+    )
+    second = Finding(
+        **common,
+        metadata={"actor": "attacker", "resource": "order:2", "sink": "db:admin"},
+    )
+    assert root_cause_identity(first, target_commit=COMMIT) != root_cause_identity(
+        second, target_commit=COMMIT,
+    )
+    # With no structural information at all, the title keeps unrelated findings apart.
+    plain = dict(
+        type=ContributionType.SECURITY_FIX, severity=Severity.HIGH,
+        description="cross tenant read", file_path=FILE, line_start=None,
+        impact_level=ImpactLevel.HIGH, metadata={},
+    )
+    plain_a = Finding(**plain, title="Missing authorization check")
+    plain_b = Finding(**plain, title="Different unrelated issue")
+    assert root_cause_identity(plain_a, target_commit=COMMIT) != root_cause_identity(
+        plain_b, target_commit=COMMIT,
+    )
+
+
+@pytest.mark.asyncio
+async def test_pipeline_merges_two_sensors_for_one_root_cause(tmp_path):
+    memory = Memory(tmp_path / "multisensor.db")
+    await memory.init()
+    try:
+        first = _structural("IDOR in orders", actor="attacker", sink="db:orders")
+        first.metadata["sensor"] = "sensor-a"
+        second = _structural("Order read without ownership", actor="attacker", sink="db:orders")
+        second.metadata["sensor"] = "sensor-b"
+        await _run_pipeline(memory, tmp_path, [first, second], 25)
+        cursor = await memory._db.execute("SELECT COUNT(*) FROM security_candidates")
+        assert (await cursor.fetchone())[0] == 1, "one root cause must be one candidate"
+        cursor = await memory._db.execute(
+            "SELECT origin, kind FROM security_evidence ORDER BY origin"
+        )
+        rows = await cursor.fetchall()
+        assert [row[0] for row in rows] == ["sensor-a", "sensor-b"]
+        assert all(row[1] == "SENSOR_OBSERVATION" for row in rows)
+    finally:
+        await memory.close()
+
+
+@pytest.mark.asyncio
+async def test_concurrent_close_and_evidence_are_consistent(tmp_path):
+    db_path = tmp_path / "concurrency.db"
+    worker_a = Memory(db_path)
+    worker_b = Memory(db_path)
+    await worker_a.init()
+    await worker_b.init()
+    try:
+        finding = MANY[0]
+        candidate_id = await worker_a.create_security_candidate(
+            scan_id="s", repo="owner/repo", target_commit=COMMIT, file_path=FILE,
+            title=finding.title, root_cause_fingerprint=root_cause_identity(
+                finding, target_commit=COMMIT,
+            ),
+        )
+        evidence_ids = await asyncio.gather(
+            worker_a.add_security_evidence(
+                candidate_id=candidate_id, kind=EvidenceKind.SENSOR_OBSERVATION,
+                content_hash="a" * 64, target_commit=COMMIT, origin="sensor-a",
+            ),
+            worker_b.add_security_evidence(
+                candidate_id=candidate_id, kind=EvidenceKind.SENSOR_OBSERVATION,
+                content_hash="b" * 64, target_commit=COMMIT, origin="sensor-b",
+            ),
+        )
+        assert len(set(evidence_ids)) == 2
+        proof = await worker_a.add_security_evidence(
+            candidate_id=candidate_id, kind=EvidenceKind.POC_TRIGGERED,
+            content_hash="c" * 64, target_commit=COMMIT, origin="poc",
+        )
+        outcomes = await asyncio.gather(
+            worker_a.close_security_candidate(
+                candidate_id, status=CandidateStatus.CONFIRMED,
+                reason_code="RACE-A", evidence_id=proof,
+            ),
+            worker_b.close_security_candidate(
+                candidate_id, status=CandidateStatus.CONFIRMED,
+                reason_code="RACE-B", evidence_id=proof,
+            ),
+            return_exceptions=True,
+        )
+        failures = [item for item in outcomes if isinstance(item, Exception)]
+        assert len(failures) == 1 and isinstance(failures[0], SecurityGateError)
+        cursor = await worker_a._db.execute(
+            "SELECT COUNT(*) FROM security_evidence WHERE candidate_id = ?", (candidate_id,)
+        )
+        assert (await cursor.fetchone())[0] == 3
+        cursor = await worker_a._db.execute(
+            "SELECT COUNT(*) FROM security_candidates WHERE id = ? AND status = 'CONFIRMED'",
+            (candidate_id,),
+        )
+        assert (await cursor.fetchone())[0] == 1
+    finally:
+        await worker_a.close()
+        await worker_b.close()

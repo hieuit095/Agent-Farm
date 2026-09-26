@@ -99,7 +99,7 @@ def _wire(pipeline, memory, tmp_path):
     pipeline._generator.generate = AsyncMock(return_value=MagicMock(title="Fix IDOR"))
     pipeline._check_ai_policy = AsyncMock(return_value=False)
     pipeline._clone_and_patch_repo = AsyncMock(return_value=str(tmp_path))
-    pipeline._validate_findings = AsyncMock(return_value=[FINDING])
+    pipeline._validate_findings = AsyncMock(side_effect=lambda items, _files: list(items))
     pipeline._layer1_expert_appraisal = AsyncMock(return_value=(True, "valid"))
 
 
@@ -127,11 +127,14 @@ def _shutdown(*servers):
 
 async def _only_candidate(memory):
     cursor = await memory._db.execute(
-        "SELECT id, status, reason_code FROM security_candidates"
+        "SELECT id, status, reason_code, title, file_path FROM security_candidates"
     )
     rows = await cursor.fetchall()
     assert len(rows) == 1
-    return {"id": rows[0][0], "status": rows[0][1], "reason_code": rows[0][2]}
+    return {
+        "id": rows[0][0], "status": rows[0][1], "reason_code": rows[0][2],
+        "title": rows[0][3], "file_path": rows[0][4],
+    }
 
 
 def _finding(candidate_id):
@@ -146,9 +149,14 @@ async def _assert_handoff(memory, tmp_path, before, after):
     candidate = await _only_candidate(memory)
     assert candidate["status"] == "NEEDS_MANUAL_REVIEW"
     assert candidate["reason_code"] == "SEMANTIC_PROOF_PENDING"
+    guard_finding = Finding(
+        type=ContributionType.SECURITY_FIX, severity=Severity.HIGH,
+        title=candidate["title"], description="fixture", file_path=candidate["file_path"],
+        metadata={"security_candidate_id": candidate["id"], "security_target_commit": COMMIT},
+    )
     with pytest.raises(SecurityGateError):
         await require_confirmed_security_finding(
-            memory, _finding(candidate["id"]), "owner/repo", channel="public_pr",
+            memory, guard_finding, "owner/repo", channel="public_pr",
         )
     store = ArtifactStore(tmp_path / "oracles")
     artifact = store.save(_spec(OracleKind.IDOR, before, after))
@@ -159,7 +167,7 @@ async def _assert_handoff(memory, tmp_path, before, after):
     promoted = await memory.get_security_candidate(candidate["id"])
     assert promoted["status"] == "CONFIRMED"
     await require_confirmed_security_finding(
-        memory, _finding(candidate["id"]), "owner/repo", channel="public_pr",
+        memory, guard_finding, "owner/repo", channel="public_pr",
     )
 
 

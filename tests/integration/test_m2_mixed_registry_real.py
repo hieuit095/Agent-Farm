@@ -170,7 +170,10 @@ async def test_live_forbidden_program_blocks_live_proof_at_real_sha(tmp_path):
         assert candidate_commit == pinned_sha
         assert status == CandidateStatus.OPEN_PROOF_GAP
         assert reason_code != "TARGET_COMMIT_CHANGED"  # real HEAD matched the pin
-        cursor = await reopened._db.execute("SELECT COUNT(*) FROM security_evidence")
+        cursor = await reopened._db.execute(
+            "SELECT COUNT(*) FROM security_evidence "
+            "WHERE kind IN ('SEMANTIC_PROOF', 'POC_TRIGGERED')"
+        )
         assert (await cursor.fetchone())[0] == 0
         assert not await reopened.security_candidate_has_semantic_proof(candidate_id)
 

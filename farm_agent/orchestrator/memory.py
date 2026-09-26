@@ -102,6 +102,7 @@ CREATE TABLE IF NOT EXISTS security_candidates (
     closing_evidence_id TEXT,
     root_cause_fingerprint TEXT,
     defer_reason   TEXT,
+    investigation_json TEXT,
     created_at     TEXT NOT NULL,
     updated_at     TEXT NOT NULL
 );
@@ -311,6 +312,7 @@ class Memory:
         for table, col in (
             ("security_candidates", "root_cause_fingerprint TEXT"),
             ("security_candidates", "defer_reason TEXT"),
+            ("security_candidates", "investigation_json TEXT"),
             ("security_evidence", "origin TEXT NOT NULL DEFAULT 'unknown'"),
         ):
             try:
@@ -583,10 +585,15 @@ class Memory:
     async def create_security_candidate(
         self, *, scan_id: str, repo: str, target_commit: str,
         file_path: str, title: str, root_cause_fingerprint: str | None = None,
+        investigation_input: dict | None = None,
     ) -> str:
         """Admit one candidate. Idempotent when a root-cause fingerprint is given."""
         candidate_id = uuid.uuid4().hex
         now = datetime.now(UTC).isoformat()
+        investigation_json = (
+            json.dumps(investigation_input, sort_keys=True, separators=(",", ":"), default=str)
+            if investigation_input else None
+        )
         if root_cause_fingerprint:
             async with self._security_lock:
                 await self._db.execute("BEGIN IMMEDIATE")
@@ -604,10 +611,11 @@ class Memory:
                     await self._db.execute(
                         """INSERT INTO security_candidates
                            (id, scan_id, repo, target_commit, file_path, title, status,
-                            root_cause_fingerprint, created_at, updated_at)
-                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                            root_cause_fingerprint, investigation_json, created_at, updated_at)
+                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                         (candidate_id, scan_id, repo, target_commit, file_path, title,
-                         CandidateStatus.DISCOVERED, root_cause_fingerprint, now, now),
+                         CandidateStatus.DISCOVERED, root_cause_fingerprint,
+                         investigation_json, now, now),
                     )
                     await self._db.commit()
                     return candidate_id
@@ -617,10 +625,10 @@ class Memory:
         await self._db.execute(
             """INSERT INTO security_candidates
                (id, scan_id, repo, target_commit, file_path, title, status,
-                created_at, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                investigation_json, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (candidate_id, scan_id, repo, target_commit, file_path, title,
-             CandidateStatus.DISCOVERED, now, now),
+             CandidateStatus.DISCOVERED, investigation_json, now, now),
         )
         await self._db.commit()
         return candidate_id
@@ -663,7 +671,7 @@ class Memory:
         """Durable, resumable queue of admitted-but-uninvestigated candidates."""
         cursor = await self._db.execute(
             """SELECT id, scan_id, file_path, title, status, root_cause_fingerprint,
-                      defer_reason
+                      defer_reason, investigation_json
                FROM security_candidates
                WHERE repo = ? AND target_commit = ?
                  AND status IN ('DISCOVERED', 'DEFERRED')

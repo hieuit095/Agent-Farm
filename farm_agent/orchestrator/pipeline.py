@@ -140,6 +140,17 @@ SKIP_EXTENSIONS = {
 }
 
 
+def _json_safe(value):
+    """Coerce arbitrary finding metadata into a JSON-serializable value."""
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, dict):
+        return {str(key): _json_safe(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [_json_safe(item) for item in value]
+    return str(value)
+
+
 def _titles_similar(title_a: str, title_b: str) -> bool:
     """Check if two finding/PR titles address the EXACT same technical issue.
 
@@ -1080,12 +1091,70 @@ class FarmAgentPipeline:
 
     # ── Internal ───────────────────────────────────────────────────────────
 
+    @staticmethod
+    def _investigation_input(finding: Finding) -> dict:
+        """The minimum input needed to re-investigate this finding exactly."""
+        metadata = finding.metadata if isinstance(finding.metadata, dict) else {}
+        safe_metadata = {str(key): _json_safe(value) for key, value in metadata.items()}
+        return {
+            "type": finding.type.value,
+            "severity": finding.severity.value,
+            "title": finding.title,
+            "description": finding.description,
+            "file_path": finding.file_path,
+            "line_start": finding.line_start,
+            "metadata": safe_metadata,
+            "sensor": str(safe_metadata.get("sensor", "primary-analyzer")),
+        }
+
+    @staticmethod
+    def _finding_from_investigation_input(payload: dict) -> Finding:
+        return Finding(
+            type=ContributionType(payload["type"]),
+            severity=Severity(payload["severity"]),
+            title=payload["title"],
+            description=payload.get("description", ""),
+            file_path=payload.get("file_path", ""),
+            line_start=payload.get("line_start"),
+            metadata=payload.get("metadata") or {},
+        )
+
+    async def _record_filtered_finding(
+        self, finding: Finding, *, scan_id: str, repo: Repository,
+        target_commit: str | None, stage: str, reason_code: str,
+    ) -> None:
+        """A filtered security finding becomes an explicit gap; never erased silently."""
+        if self._memory is None or finding.type != ContributionType.SECURITY_FIX:
+            return
+        try:
+            candidate_id = await self._memory.create_security_candidate(
+                scan_id=scan_id, repo=repo.full_name,
+                target_commit=target_commit or "unknown",
+                file_path=finding.file_path, title=finding.title,
+                root_cause_fingerprint=(
+                    root_cause_identity(finding, target_commit=target_commit)
+                    if target_commit else None
+                ),
+                investigation_input=self._investigation_input(finding),
+            )
+            await ClosureService(self._memory).close(
+                candidate_id, CandidateStatus.OPEN_PROOF_GAP, reason_code=reason_code,
+            )
+        except Exception:
+            logger.debug("Could not record filtered finding %s", finding.title)
+            return
+        await self._m0_event(
+            scan_id=scan_id, repo=repo.full_name, pipeline="standard", stage=stage,
+            outcome="proof_gap", reason_code=reason_code,
+        )
+
     async def _admission_queue(
         self, repo: Repository, target_commit: str | None,
         validated_findings: list[Finding], scan_id: str,
     ) -> list[dict]:
         """Resume durable pending candidates, then add this run's distinct findings."""
         queue: list[dict] = []
+        index: dict[str, dict] = {}
         seen: set[str] = set()
         if self._memory is not None and target_commit:
             # Never re-queue a root cause already admitted (including closed ones).
@@ -1095,29 +1164,43 @@ class FarmAgentPipeline:
             for row in await self._memory.list_pending_security_candidates(
                 repo.full_name, target_commit,
             ):
+                stored = row.get("investigation_json")
+                if not stored:
+                    # No exact input: never reconstruct from title/path. Record the gap.
+                    await self._memory.defer_security_candidate(
+                        row["id"], reason_code="INVESTIGATION_INPUT_MISSING",
+                    )
+                    continue
                 fingerprint = row["root_cause_fingerprint"] or f"row:{row['id']}"
                 seen.add(fingerprint)
-                queue.append({
-                    "finding": Finding(
-                        type=ContributionType.SECURITY_FIX, severity=Severity.MEDIUM,
-                        title=row["title"], description="", file_path=row["file_path"],
-                    ),
+                entry = {
+                    "finding": self._finding_from_investigation_input(json.loads(stored)),
                     "fingerprint": fingerprint,
                     "candidate_id": row["id"],
-                })
+                    "duplicates": [],
+                }
+                queue.append(entry)
+                index[fingerprint] = entry
         for finding in validated_findings:
             if not target_commit or not finding.file_path:
-                queue.append(
-                    {"finding": finding, "fingerprint": None, "candidate_id": None}
-                )
+                queue.append({
+                    "finding": finding, "fingerprint": None,
+                    "candidate_id": None, "duplicates": [],
+                })
                 continue
             fingerprint = root_cause_identity(finding, target_commit=target_commit)
             if fingerprint in seen:
+                existing = index.get(fingerprint)
+                if existing is not None and existing["finding"] is not finding:
+                    existing["duplicates"].append(finding)
                 continue
             seen.add(fingerprint)
-            queue.append(
-                {"finding": finding, "fingerprint": fingerprint, "candidate_id": None}
-            )
+            entry = {
+                "finding": finding, "fingerprint": fingerprint,
+                "candidate_id": None, "duplicates": [],
+            }
+            queue.append(entry)
+            index[fingerprint] = entry
         return queue
 
     async def _process_repo(
@@ -1422,6 +1505,14 @@ class FarmAgentPipeline:
 
             filtered.append(f)
 
+        for finding in [
+            f for f in analysis.findings if id(f) not in {id(x) for x in filtered}
+        ]:
+            await self._record_filtered_finding(
+                finding, scan_id=scan_id, repo=repo, target_commit=target_commit,
+                stage="pre_filter", reason_code="FILTERED_NON_CODE_TARGET",
+            )
+
         if len(filtered) < pre_filter_count:
             logger.info(
                 "🔍 Pre-filter: %d → %d findings (removed %d non-code targets)",
@@ -1615,6 +1706,14 @@ class FarmAgentPipeline:
                 len(high_impact_findings),
                 pre_farming_count - len(high_impact_findings),
             )
+        for finding in [
+            f for f in analysis.findings
+            if id(f) not in {id(x) for x in high_impact_findings}
+        ]:
+            await self._record_filtered_finding(
+                finding, scan_id=scan_id, repo=repo, target_commit=target_commit,
+                stage="impact_filter", reason_code="FILTERED_LOW_IMPACT",
+            )
         analysis.findings = high_impact_findings
         await self._m0_event(
             scan_id=scan_id, repo=repo.full_name, pipeline="standard",
@@ -1763,6 +1862,10 @@ class FarmAgentPipeline:
                         "⏭️ Skipping duplicate finding: %s (similar PR exists)",
                         finding.title,
                     )
+                    await self._record_filtered_finding(
+                        finding, scan_id=scan_id, repo=repo, target_commit=target_commit,
+                        stage="dedupe", reason_code="DUPLICATE_PUBLISHED_TITLE",
+                    )
                     continue
                 filtered_findings.append(finding)
 
@@ -1790,6 +1893,14 @@ class FarmAgentPipeline:
 
         # Validate findings against full file content to filter false positives
         validated_findings = await self._validate_findings(filtered_findings, relevant_files)
+        for finding in [
+            f for f in filtered_findings
+            if id(f) not in {id(x) for x in validated_findings}
+        ]:
+            await self._record_filtered_finding(
+                finding, scan_id=scan_id, repo=repo, target_commit=target_commit,
+                stage="validation", reason_code="VALIDATION_REJECTED",
+            )
         await self._m0_event(
             scan_id=scan_id, repo=repo.full_name, pipeline="standard",
             stage="validation", outcome="survived", count=len(validated_findings),
@@ -1802,6 +1913,7 @@ class FarmAgentPipeline:
         )
 
         # Filter findings via Layer 1 Appraiser before generating contributions
+        pre_appraisal = list(validated_findings)
         surviving_findings = []
         for finding in validated_findings:
             file_content = relevant_files.get(finding.file_path, "")
@@ -1813,6 +1925,14 @@ class FarmAgentPipeline:
                     await self._memory.add_filter_lesson(repo.full_name, 1, file_content, critique)
                 logger.info("Recorded Layer 1 lesson for %s: %s...", repo.full_name, critique[:50])
         validated_findings = surviving_findings
+        for finding in [
+            f for f in pre_appraisal
+            if id(f) not in {id(x) for x in surviving_findings}
+        ]:
+            await self._record_filtered_finding(
+                finding, scan_id=scan_id, repo=repo, target_commit=target_commit,
+                stage="appraisal", reason_code="APPRAISAL_REJECTED",
+            )
         await self._m0_event(
             scan_id=scan_id, repo=repo.full_name, pipeline="standard",
             stage="appraisal", outcome="survived", count=len(surviving_findings),
@@ -1835,6 +1955,7 @@ class FarmAgentPipeline:
                         target_commit=target_commit or "unknown",
                         file_path=entry["finding"].file_path, title=entry["finding"].title,
                         root_cause_fingerprint=entry["fingerprint"],
+                        investigation_input=self._investigation_input(entry["finding"]),
                     )
                 except Exception:
                     logger.exception("Could not admit deferred candidate")
@@ -1872,12 +1993,30 @@ class FarmAgentPipeline:
                             target_commit=target_commit or "unknown",
                             file_path=finding.file_path, title=finding.title,
                             root_cause_fingerprint=entry["fingerprint"],
+                            investigation_input=self._investigation_input(finding),
                         )
                     else:
                         await self._memory.mark_candidate_investigating(security_candidate_id)
                 except Exception:
                     logger.exception("Could not register security candidate; skipping fix")
                     continue
+                # Preserve every contributing sensor's observation on the one
+                # candidate for this root cause (no duplicate candidates).
+                for observed in [finding, *entry["duplicates"]]:
+                    observation = self._investigation_input(observed)
+                    try:
+                        await self._memory.add_security_evidence(
+                            candidate_id=security_candidate_id,
+                            kind=EvidenceKind.SENSOR_OBSERVATION,
+                            content_hash=evidence_hash(
+                                target_commit=target_commit or "unknown",
+                                observation=observation,
+                            ),
+                            target_commit=target_commit or "unknown",
+                            origin=observation["sensor"],
+                        )
+                    except Exception:
+                        logger.debug("Could not record sensor observation for %s", observed.title)
                 if not relevant_files.get(finding.file_path):
                     await ClosureService(self._memory).close(
                         security_candidate_id, CandidateStatus.OPEN_PROOF_GAP,

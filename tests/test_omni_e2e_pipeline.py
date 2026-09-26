@@ -388,8 +388,12 @@ async def test_omni_e2e_pipeline(tmp_path):
         patch.object(Memory, "record_analysis", new_callable=AsyncMock),
         patch.object(Memory, "record_scan_event", new_callable=AsyncMock),
         patch.object(Memory, "create_security_candidate", new_callable=AsyncMock, return_value="candidate-1"),
-        patch.object(Memory, "list_candidate_fingerprints", new_callable=AsyncMock, return_value=set()),
-        patch.object(Memory, "list_pending_security_candidates", new_callable=AsyncMock, return_value=[]),
+        patch.object(
+            Memory, "list_candidate_fingerprints", new_callable=AsyncMock, return_value=set(),
+        ),
+        patch.object(
+            Memory, "list_pending_security_candidates", new_callable=AsyncMock, return_value=[],
+        ),
         patch.object(Memory, "defer_security_candidate", new_callable=AsyncMock),
         patch.object(Memory, "mark_candidate_investigating", new_callable=AsyncMock),
         patch.object(Memory, "add_security_evidence", new_callable=AsyncMock, return_value="evidence-1"),
